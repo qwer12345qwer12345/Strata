@@ -3787,6 +3787,7 @@ class WebApp(unittest.TestCase):
                 code, _, body = self.get("/slots")
                 self.assertEqual(code, 200)
                 self.assertEqual(json.loads(body), [{"id": 0, "n_ctx": CTX, "is_processing": busy,
+                                                     "l2_commits": [], "l2_writer_pending": 0,
                                                      "n_prompt_tokens": 0}])
         finally:
             with self.svc.status_lock:
