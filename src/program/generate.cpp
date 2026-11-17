@@ -13018,6 +13018,9 @@ int main(int argc, char** argv) {
         strata::core::ConversationCache conversations(
             o.prompt_cache > 0 ? (size_t) o.conversation_cache_mib * 1024 * 1024 : 0,
             (size_t) o.conversation_cache_slots, o.conversation_cache_min_tokens);
+        if (strata::core::ConversationBufferBacking::disk_on())
+            serve_log("strata serve: conversation cache: park snapshots are file-backed (STRATA_CONV_DISK_DIR=%s)\n",
+                      strata::core::ConversationBufferBacking::dir_label());
         // The park pools (park_pool_policy.hpp): memory held idle between parks so a park does not pay the first touch of fresh pages.
         //   * the segment pool: one arena for the K/V buffers of parked conversations (STRATA_PARK_SEGPOOL_MIB=N sets its size, 0 turns it
         //     off; unset: min(2 GiB, a quarter of the cache); Linux only, the OS layer of Windows and macOS is not written yet: inert there);
@@ -13060,7 +13063,7 @@ int main(int argc, char** argv) {
         {
             const long long env_mib = park_segpool_env_mib();   // -1 unset
             const size_t want_mib = env_mib >= 0 ? (size_t) env_mib : park_plan.segpool_mib;
-            if (want_mib > 0 && conversations.enabled()) {
+            if (want_mib > 0 && conversations.enabled() && !strata::core::ConversationBufferBacking::requested()) {
                 const size_t budget = (size_t) o.conversation_cache_mib * 1024 * 1024;
                 const size_t bytes = std::min(want_mib * 1024 * 1024, budget / 4);   // never more than a quarter of the cache
                 segpool = new strata::core::SegmentPool(strata::core::segment_pool_os(), bytes);
@@ -13342,8 +13345,18 @@ int main(int argc, char** argv) {
             const auto t0 = Clock::now();
             try {
                 const uint64_t floor = (uint64_t) o.conversation_cache_min_free_mib * 1024 * 1024;
+                // STRATA_CONV_DISK (local patch): the parked bytes leave RAM right after the park, so
+                // the floor guards only the capture's transient dirty pages, not a resident snapshot.
+                const uint64_t floor_eff = strata::core::ConversationBufferBacking::disk_on()
+                                               ? std::min<uint64_t>(floor, (uint64_t) 512 * 1024 * 1024)
+                                               : floor;
                 const size_t retained = reuse.bytes() + stage_retained;
-                const size_t additional = estimate > retained ? estimate - retained : 0;
+                const size_t payload = estimate > retained ? estimate - retained : 0;
+                // STRATA_CONV_DISK (local patch): file-backed snapshots hand their pages back right
+                // after the park (written back, then MADV_DONTNEED), so the resident cost of a park
+                // is the copy's staging, not the payload.  Admit on a staging margin instead.
+                const size_t additional = strata::core::ConversationBufferBacking::disk_on()
+                                              ? (size_t) 96 << 20 : payload;
                 // The physical-RAM gate: the incoming snapshot has to fit beside the floor.  make_room()
                 // above only balanced the cache's own budget, so a full cache leaves this one short even
                 // though every parked conversation could give its RAM back - and refusing here throws
@@ -13360,7 +13373,7 @@ int main(int argc, char** argv) {
                 auto admit = [&] {
                     mem = strata::core::sample_host_memory();
                     return strata::core::conversation_memory_admit(
-                        mem ? std::optional<uint64_t>(mem->available) : std::nullopt, additional, floor);
+                        mem ? std::optional<uint64_t>(mem->available) : std::nullopt, additional, floor_eff);
                 };
                 // STRATA_PARK_SEGPOOL_MIB: the pool's idle bytes are the first RAM to go back (before the heap and before any
                 // parked conversation), so the pool never makes this check fail where it would pass without it
@@ -13376,14 +13389,14 @@ int main(int argc, char** argv) {
                     serve_log("strata serve: conversation cache: skip parking (physical RAM admission; %zu tokens fp %08x; need %zu MiB plus %lld MiB floor, %s; evicted %zu, %zu still parked)\n",
                                  view.ids.size(),
                                  (unsigned) (view.ids.empty() ? 0 : strata::core::session_hash64(view.ids.data(), view.ids.size() * sizeof(int32_t), 0) & 0xffffffffu),
-                                 additional >> 20, (long long) o.conversation_cache_min_free_mib, ram_note(mem).c_str(),
+                                 additional >> 20, (long long) (floor_eff >> 20), ram_note(mem).c_str(),
                                  evicted, conversations.size());
                     return true;
                 }
                 if (evicted)
                     serve_log("strata serve: conversation cache: evicted %zu parked conversation%s to admit this snapshot (%zu MiB plus %lld MiB floor)\n",
                                  evicted, evicted == 1 ? "" : "s", additional >> 20,
-                                 (long long) o.conversation_cache_min_free_mib);
+                                 (long long) (floor_eff >> 20));
                 strata::core::SavedConversation image;
                 size_t reused_bytes = 0;
                 // STRATA_CKPT_POOL: the running state and the checkpoint copies go into dropped checkpoints' vectors
@@ -13426,18 +13439,19 @@ int main(int argc, char** argv) {
                 auto mem_after = strata::core::sample_host_memory();
                 // (the park pools' idle memory is the first RAM to go back here too: a park the check refuses with the pools held would pass without them)
                 if (!strata::core::conversation_memory_admit(
-                        mem_after ? std::optional<uint64_t>(mem_after->available) : std::nullopt, 0, floor) && pools_budget.idle_bytes() > 0) {
+                        mem_after ? std::optional<uint64_t>(mem_after->available) : std::nullopt, 0, floor_eff) && pools_budget.idle_bytes() > 0) {
                     pools_budget.shrink((size_t) -1);
                     mem_after = strata::core::sample_host_memory();
                 }
                 if (!strata::core::conversation_memory_admit(
-                        mem_after ? std::optional<uint64_t>(mem_after->available) : std::nullopt, 0, floor)) {
+                        mem_after ? std::optional<uint64_t>(mem_after->available) : std::nullopt, 0, floor_eff)) {
                     serve_log("strata serve: conversation cache: skip parking (RAM floor after capture: %lld MiB needed, %s)\n",
-                                 (long long) o.conversation_cache_min_free_mib, ram_note(mem_after).c_str());
+                                 (long long) (floor_eff >> 20), ram_note(mem_after).c_str());
                     return true;
                 }
                 const size_t snapshot_bytes = image.bytes();
                 const bool stored = conversations.put(std::move(image), held);
+                if (stored) conversations.drop_resident();
                 serve_log("strata serve: conversation cache: %s %zu tokens%s in %.1f ms; parked=%zu bytes=%zu evictions=%zu snapshot_bytes=%zu reused_kv_bytes=%zu\n",
                              stored ? "parked" : "skipped", src.ids.size(), src.what.c_str(),
                              std::chrono::duration<double, std::milli>(Clock::now() - t0).count(),
@@ -18320,6 +18334,7 @@ int main(int argc, char** argv) {
                     std::vector<std::vector<strata::core::ConversationKv>> stage_kv;   // every stage's, for its next park
                     for (auto& si : incoming->stage_images) stage_kv.push_back(std::move(si.kv));
                     conversations.retain(std::move(incoming->kv), int64_t(live.size()), std::move(stage_kv), live);
+                    conversations.drop_resident();   // STRATA_CONV_DISK (local patch): the retained K/V waits on disk
                 }
                 incoming.reset(); // Running-state/checkpoint copies are no longer needed.
                 lent_slot = -1;   // (the main session holds the parked conversation now)

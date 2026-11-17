@@ -531,8 +531,79 @@ int bench(bool quick, const std::string& only) {
 
 }  // namespace
 
+// This reference uses Strata's own scalar decoder, so it also runs with a
+// stock ggml build. It exercises the native TQ entry points used by Gyro-S.
+static int local_gyro_s() {
+    const int hidden = 2560, ff = 640, experts = 48;
+    const int tokens = kTqMaxTokens;
+    const size_t gu_row = tq_block_bytes(145) * (hidden / 128);
+    const size_t down_row = tq_block_bytes(146) * (ff / 128);
+    const size_t gu_bytes = gu_row * 2 * ff;
+    const size_t blob_bytes = gu_bytes + down_row * hidden;
+    std::mt19937 rng(701);
+    std::vector<uint8_t> blobs(blob_bytes * experts);
+    for (auto& x : blobs) x = (uint8_t) rng();
+    auto scales = [&](uint8_t* b, size_t bytes, size_t step) {
+        for (size_t i = 0; i < bytes; i += step) {
+            const uint16_t h = f2h(0.002f + (rng() % 33) * 0.0003f);
+            std::memcpy(b + i, &h, sizeof(h));
+        }
+    };
+    for (int i = 0; i < experts; ++i) {
+        auto* b = blobs.data() + i * blob_bytes;
+        scales(b, gu_bytes, tq_block_bytes(145));
+        scales(b + gu_bytes, blob_bytes - gu_bytes, tq_block_bytes(146));
+    }
+    std::vector<uint8_t> input(tokens * hidden / 32 * 34), mid(tokens * ff / 32 * 34);
+    for (auto* buf : {&input, &mid}) {
+        for (auto& x : *buf) x = (uint8_t) ((int) (rng() % 255) - 127);
+        scales(buf->data(), buf->size(), 34);
+    }
+    const void* x[tokens];
+    const void* h[tokens];
+    for (int i = 0; i < tokens; ++i) {
+        x[i] = input.data() + i * hidden / 32 * 34;
+        h[i] = mid.data() + i * ff / 32 * 34;
+    }
+    std::vector<float> ref(tokens * (hidden + ff)), got(ref.size());
+    auto eval = [&](TqIsa isa, int expert, int nt, std::vector<float>& result) {
+        float* a[tokens];
+        float* b[tokens];
+        for (int i = 0; i < nt; ++i) {
+            a[i] = result.data() + i * ff;
+            b[i] = result.data() + tokens * ff + i * hidden;
+        }
+        const uint8_t* w = blobs.data() + expert * blob_bytes;
+        tq_gu_rows(isa, 145, w, gu_row, gu_row * ff, hidden, x, nt, a, 0, ff);
+        tq_rows(isa, 146, w + gu_bytes, down_row, ff, h, nt, b, 0, hidden);
+    };
+    if (tq_isa() != TqIsa::avx2) return 77;
+    for (int nt = 1; nt <= tokens; ++nt) {
+        eval(TqIsa::scalar, 0, nt, ref);
+        eval(TqIsa::avx2, 0, nt, got);
+        if (std::memcmp(ref.data(), got.data(), ref.size() * sizeof(float)) != 0 ||
+            !std::all_of(got.begin(), got.end(), [](float v) { return std::isfinite(v); })) {
+            std::fprintf(stderr, "Gyro-S native/scalar parity failed with nt=%d\n", nt);
+            return 1;
+        }
+    }
+    std::printf("Gyro-S native/scalar parity: bitwise, all 8 token counts\n");
+    for (int nt : {1, 2, 4, 8}) {
+        std::vector<double> us;
+        for (int rep = 0; rep < 9; ++rep) {
+            const auto t0 = std::chrono::steady_clock::now();
+            for (int i = 0; i < experts; ++i) eval(TqIsa::avx2, i, nt, got);
+            us.push_back(std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count() / experts);
+        }
+        std::sort(us.begin(), us.end());
+        std::printf("CPU nt=%d median_us=%.3f min_us=%.3f max_us=%.3f\n", nt, us[4], us.front(), us.back());
+    }
+    return 0;
+}
+
 int main(int argc, char** argv) {
     ggml_cpu_init();
+    if (argc >= 2 && std::strcmp(argv[1], "--vnni-local") == 0) return local_gyro_s();
     if (GGML_TYPE_COUNT <= 146) {
         std::fprintf(stderr, "this ggml has no trellis types (build with STRATA_GGML_DIR = the agention llama.cpp fork): skipped\n");
         return 77;   // ctest SKIP_RETURN_CODE: a plain ggml is not a failure (#3358)

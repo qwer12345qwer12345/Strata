@@ -5044,6 +5044,10 @@ class Service:
         self.images = None                                # serve/images.py's ImageGen when the config has "images"
         self.restore_after_load = None                    # a session file an image job saved before it unloaded
         self.stop_ids = end_token_ids(tokenizer)
+        self.chatml_tool_guard = False
+        role_marker = '<|im_start|>'
+        role_ids = tokenizer.encode(role_marker, parse_special=True) if role_marker in getattr(tokenizer, 'control_tokens', ()) else ()
+        self.chatml_role_id = role_ids[0] if len(role_ids) == 1 else None
         self.family = None                              # the model family: set_family() below (None: the Qwen form)
         self.parser_cls = parser_for_template(getattr(template, "source", None))   # reads the model's output (reasoning, content, tool calls): by the template's tool-call form
         # #567: a prompt re-encodes only what follows the last special token it shares with a recent prompt (the
@@ -6404,6 +6408,8 @@ class Service:
         parser = self.parser_cls(thinking=thinking, tools=with_history_tools(tools, sampling), stream_tools=True,
                                  recover=self.tool_call_recovery, declared_only=declared_only,
                                  deferred=deferred or self.undeclared_tool_calls == "call")   # #4622: opt-in, as for a deferred tool
+        guard_role_id = self.chatml_role_id if self.chatml_tool_guard and tools and self.family != 'deepseek41' else None
+        boundary_events = None
         detok, n, finish = Detokenizer(self.tok), 0, "length"
         run_tok, run_len, repeated = None, 0, False     # #606: the current run of one repeated token
         thinking_n = 0                                  # tokens written while thinking (Responses' reasoning_tokens)
@@ -6595,6 +6601,15 @@ class Service:
                                 if trace is not None and trace["first_token_s"] is None:
                                     with self.status_lock:
                                         trace["first_token_s"] = round(time.perf_counter() - trace["_clock"], 3)
+                                if t == guard_role_id:
+                                    was_in_call = parser.state in ('call', 'rcall', 'json')
+                                    # A complete closing tag may still be held for lookahead. Finalize
+                                    # it without sending the control token through the text parser.
+                                    boundary_events = parser.finish('stop')
+                                    incomplete = was_in_call and not any(e.kind == 'tool_call' for e in boundary_events)
+                                    finish = 'length' if incomplete else 'stop'
+                                    print(f'[strata] stopped on a generated ChatML role token (tool incomplete={incomplete})', flush=True)
+                                    break
                                 if t in self.stop_ids:
                                     if force and parser.state == "reasoning" and parser.buf == THINK_END:
                                         opens = True    # #537: the held </think> was the end: the call opens there
@@ -6727,6 +6742,7 @@ class Service:
                                   "instruction (reasoning_loop_recovery)", flush=True)
                             continue
                         if (self.reasoning_close_retry and thinking and finish == "stop" and not close_retried
+                                and boundary_events is None
                                 and not answered and not wrap and not opens and parser.state == "reasoning"
                                 and parser.buf != THINK_END         # #537: not after a held </think>, the end
                                 and (stops is None or stops.hit is None) and not cancel.is_set()):
@@ -6927,7 +6943,7 @@ class Service:
                 self._terminal_event_locked(request_id, event, finish)
             if emb:
                 Path(emb).unlink(missing_ok=True)
-        for ev in cut(parser.finish(finish)):
+        for ev in cut(parser.finish(finish) if boundary_events is None else boundary_events):
             yield "event", ev
         if parser.rescued or parser.refused:
             self.totals["tool_calls_from_reasoning"] = self.totals.get("tool_calls_from_reasoning", 0) + parser.rescued
@@ -7368,6 +7384,7 @@ def openai_chunks(svc: Service, req: dict, ids, thinking, tools, max_new, cancel
             c["choices"][0]["logprobs"] = {key: got}
         return c
     calls = 0
+    guarded_pending = set()
     streamed = {}                                  # tool call id -> index, for calls sent piece by piece
     finished = set()                               # ... and the ones whose final tool_call came (#211)
     answered_done = False                          # the run's own end (its "done" event) arrived
@@ -7390,21 +7407,29 @@ def openai_chunks(svc: Service, req: dict, ids, thinking, tools, max_new, cancel
             elif ev.kind == "content" and ev.text:
                 yield with_lp(chunk({"content": ev.text}), "content")
             elif ev.kind == "tool_start":
+                if svc.chatml_tool_guard:
+                    guarded_pending.add(ev.call.id)
+                    continue
                 streamed[ev.call.id] = calls
                 calls += 1
                 yield chunk({"tool_calls": [{"index": streamed[ev.call.id], "id": ev.call.id, "type": "function",
                                              "function": {"name": ev.call.name, "arguments": ""}}]})
             elif ev.kind == "tool_args":
+                if svc.chatml_tool_guard:
+                    continue
                 yield chunk({"tool_calls": [{"index": streamed[ev.call.id], "function": {"arguments": ev.text}}]})
             elif ev.kind == "tool_call" and ev.call.id in streamed:
                 finished.add(ev.call.id)
             elif ev.kind == "tool_call":
+                guarded_pending.discard(ev.call.id)
                 yield chunk({"tool_calls": [{"index": calls, "id": ev.call.id, "type": "function",
                                              "function": {"name": ev.call.name,
                                                           "arguments": json.dumps(ev.call.arguments, ensure_ascii=False)}}]})
                 calls += 1
         else:
             answered_done = True
+            if guarded_pending:
+                print(f'[strata] held back {len(guarded_pending)} incomplete tool call(s) at finish={x["finish"]}', flush=True)
             # a streamed call without its final tool_call is one the output ended inside: not "tool_calls" (#211)
             whole = calls and streamed.keys() <= finished
             finish = "tool_calls" if whole and x["finish"] == "stop" else {"cancel": "stop"}.get(x["finish"], x["finish"])
@@ -10658,6 +10683,9 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
     svc.anthropic_think_unasked = mode == "model"
     svc.tool_call_recovery = tool_call_recovery_setting(cfg)
     svc.undeclared_tool_calls = undeclared_tool_calls_setting(cfg)
+    svc.chatml_tool_guard = cfg.get('chatml_tool_guard', False)
+    if not isinstance(svc.chatml_tool_guard, bool):
+        raise SystemExit('[strata] config chatml_tool_guard must be true or false')
     etu = cfg.get("env_to_user", False)                # opt-in: see frontend._env_to_user
     if not isinstance(etu, bool):
         raise SystemExit(f"[strata] config \"env_to_user\" must be true or false, not {etu!r}")

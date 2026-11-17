@@ -179,9 +179,9 @@ struct Grouped {
         cudaFree(dptr); cudaFree(dstart); cudaFree(dn); cudaFree(ddst); cudaFree(dtok);
         cudaFree(dx); cudaFree(dxq); cudaFree(dscr); cudaFree(dout);
     }
-    void run(bool old, cudaStream_t s) {
+    void run(bool old, cudaStream_t s, bool quantize = true) {
         k::iq_set_old_kernels(old);
-        k::quantize_q8_1_rows(dx, n_tok, L.n_embd, dxq, s);
+        if (quantize) k::quantize_q8_1_rows(dx, n_tok, L.n_embd, dxq, s);
         k::native_expert_grouped(L, dptr, dstart, dn, ddst, dtok, cap_groups, cap_ent, dxq, dscr, dout, s);
         k::iq_set_old_kernels(false);
     }
@@ -196,8 +196,9 @@ struct Grouped {
     }
 };
 
-void check_grouped(int gu, int dt, int64_t H, int64_t FF, cudaStream_t s, std::mt19937& rng) {
-    Grouped G(gu, dt, H, FF, {1, 3, 4, 5, 0, 8, 2, 11, 1}, 8, rng);
+void check_grouped(int gu, int dt, int64_t H, int64_t FF, cudaStream_t s, std::mt19937& rng,
+                   const std::vector<int>& counts = {1, 3, 4, 5, 0, 8, 2, 11, 1}) {
+    Grouped G(gu, dt, H, FF, counts, 8, rng);
     const auto a = G.result(true, s), b = G.result(false, s);
     size_t diff = 0;
     bool finite = true;
@@ -402,6 +403,64 @@ void bench(cudaStream_t s, std::mt19937& rng) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    if (argc > 1 && std::string(argv[1]) == "--ampere-gu") {
+        cudaStream_t s;
+        ck(cudaStreamCreate(&s), "stream");
+        std::mt19937 rng(18);
+        std::vector<int> mixed(32);
+        for (int i = 0; i < 32; ++i) mixed[i] = i % 5;
+        for (int gu : {144, 145}) {
+            check_grouped(gu, 146, 2560, 640, s, rng);
+            check_grouped(gu, 146, 2560, 640, s, rng, mixed);
+        }
+        for (int groups : {8, 16, 24, 48}) for (int entries : {1, 2, 4, 8, 0}) {
+            std::vector<int> counts(groups, entries);
+            if (entries == 0) for (int i = 0; i < groups; ++i) counts[i] = mixed[i % mixed.size()];
+            Grouped fixture(145, 146, 2560, 640, counts, 8, rng);
+            fixture.run(false, s);  // allocate/upload and quantize outside timing
+            k::native_expert_set_mode(-1, 3);
+            cudaGraph_t graph;
+            cudaGraphExec_t work;
+            ck(cudaStreamBeginCapture(s, cudaStreamCaptureModeGlobal), "begin graph");
+            for (int j = 0; j < 64; ++j) fixture.run(false, s, false);
+            ck(cudaStreamEndCapture(s, &graph), "end graph");
+            ck(cudaGraphInstantiate(&work, graph, 0), "instantiate");
+            std::vector<float> times;
+            for (int rep = 0; rep < 7; ++rep)
+                times.push_back(1e3f / 64 * time_ms(s, 8, [&] { ck(cudaGraphLaunch(work, s), "launch"); }));
+            std::sort(times.begin(), times.end());
+            std::printf("GU groups=%d entries=%d median_us=%.3f min_us=%.3f max_us=%.3f\n",
+                        groups, entries, times[3], times.front(), times.back());
+            cudaGraphExecDestroy(work);
+            cudaGraphDestroy(graph);
+            k::native_expert_set_mode(-1, 0);
+        }
+        cudaStreamDestroy(s);
+        return g_fail ? 1 : 0;
+    }
+    if (argc > 1 && std::string(argv[1]) == "--ampere") {
+        cudaStream_t s;
+        ck(cudaStreamCreate(&s), "stream");
+        std::mt19937 rng(18);
+        // Include zero-entry groups, >4 entries, fallback geometries.
+        for (int gu : {144, 145}) {
+            check_grouped(gu, 146, 2560, 640, s, rng);
+            check_grouped(gu, 144, 2560, 512, s, rng);
+            check_grouped(gu, 146, 5120, 640, s, rng);
+        }
+        for (int groups : {8, 24, 48}) for (int m : {1, 2, 4, 8}) {
+            Grouped G(145, 146, 2560, 640, std::vector<int>(groups, m), 8, rng);
+            std::vector<float> times;
+            for (int rep = 0; rep < 7; ++rep)
+                times.push_back(1e3f * time_ms(s, 150, [&] { G.run(false, s); }));
+            std::sort(times.begin(), times.end());
+            std::printf("AMPERE groups=%d entries=%d median_us=%.3f min_us=%.3f max_us=%.3f\n",
+                        groups, m, times[3], times.front(), times.back());
+        }
+        std::printf("tq_pascal_bench: %d failures\n", g_fail);
+        cudaStreamDestroy(s);
+        return g_fail ? 1 : 0;
+    }
     const bool do_bench = argc > 1 && std::string(argv[1]) == "--bench";
     cudaStream_t s;
     ck(cudaStreamCreate(&s), "stream");

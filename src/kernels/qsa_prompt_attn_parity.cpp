@@ -40,7 +40,9 @@ template <typename T> T* up(const std::vector<T>& h) {
 float h2f(uint16_t b) { __half h; *reinterpret_cast<uint16_t*>(&h) = b; return __half2float(h); }
 uint16_t f2h(float f) { __half h = __float2half(f); return *reinterpret_cast<uint16_t*>(&h); }
 
-int run(int fmt, int64_t ctx, int64_t nq, int reps) {   // fmt 1 int8, 0 fp16, 2 q4_0
+int run(int fmt, int64_t ctx, int64_t nq, int reps) {   // fmt 1 int8, 0 fp16, 2 q4_0, 3 K8V4
+    const bool hybrid = fmt == 3;
+    const bool check_imma = fmt == 1 || hybrid;
 #if !defined(__HIPCC__) && !defined(STRATA_USE_HIP)
     if (fmt == 2) {   // mode 4 (Q4_0 KV) runs on sm_80 and newer only: below that the dispatcher keeps the old kernel
         int dev = 0, major = 0;
@@ -65,7 +67,7 @@ int run(int fmt, int64_t ctx, int64_t nq, int reps) {   // fmt 1 int8, 0 fp16, 2
     std::vector<uint16_t> ks, vs, kh, vh;
     std::vector<uint8_t> k4, v4;   // q4_0: 8 blocks of {fp16 d, 16 code bytes} per row (kv_q4.hpp)
     constexpr int64_t B4 = 18, ROW4 = 8 * B4;
-    if (fmt == 2) {
+    if (fmt == 2 || hybrid) {
         std::uniform_int_distribution<int> byte(0, 255);
         // the scales as a q4_0 pool holds them: signed (ggml's d = max / -8) and spread over two decades, so a chunk's
         // cells mix signs and magnitudes (a positive-only bound on them overflowed FP16 on real K/V)
@@ -88,6 +90,12 @@ int run(int fmt, int64_t ctx, int64_t nq, int reps) {   // fmt 1 int8, 0 fp16, 2
         kh.resize(rows * HD); vh.resize(rows * HD);
         for (auto& x : kh) x = f2h(nd(rng) * 1.5f);
         for (auto& x : vh) x = f2h(nd(rng));
+    }
+    if (hybrid) {
+        kq.resize(rows * HD);
+        ks.resize(rows * 4);
+        for (auto& x : kq) x = (int8_t) code(rng);
+        for (auto& x : ks) x = f2h(sc(rng));
     }
     std::vector<int32_t> table(pages);
     for (int64_t i = 0; i < pages; ++i) table[i] = (int32_t) i;
@@ -182,7 +190,8 @@ int run(int fmt, int64_t ctx, int64_t nq, int reps) {   // fmt 1 int8, 0 fp16, 2
         }
     }
     k::QsaAttnPools pl;
-    if (fmt == 2) { pl.k_q4 = up(k4); pl.v_q4 = up(v4); }
+    if (hybrid) { pl.k_q = up(kq); pl.k_scale = up(ks); pl.v_q4 = up(v4); }
+    else if (fmt == 2) { pl.k_q4 = up(k4); pl.v_q4 = up(v4); }
     else if (fmt == 1) { pl.k_q = up(kq); pl.v_q = up(vq); pl.k_scale = up(ks); pl.v_scale = up(vs); }
     else { pl.k_pool = up(kh); pl.v_pool = up(vh); }
     // a q4_0 value: block d / 32 of the row, element j = d % 32 in the low nibble of byte j (j < 16), else the high
@@ -211,6 +220,7 @@ int run(int fmt, int64_t ctx, int64_t nq, int reps) {   // fmt 1 int8, 0 fp16, 2
     };
     // int8 KV: v2 here, and the opt-in INT8-MMA kernel (STRATA_PROMPT_ATTN_IMMA) checked and timed below beside it
     if (fmt == 1) k::qsa_prompt_attn_set_imma(0);
+    if (hybrid) k::qsa_prompt_attn_set_hybrid_imma(0);
     auto new_run = [&]() {
         if (!k::qsa_prompt_attn_batch(d_q, pl, d_ids, d_steps, cap, s, d_new, nq, nullptr)) {
             std::fprintf(stderr, "qsa_prompt_attn_batch refused the pools\n");
@@ -220,17 +230,19 @@ int run(int fmt, int64_t ctx, int64_t nq, int reps) {   // fmt 1 int8, 0 fp16, 2
     float* d_im = nullptr;
     ck(cudaMalloc(&d_im, nq * NH * HD * 4), "malloc");
     auto imma_run = [&]() {
-        k::qsa_prompt_attn_set_imma(1);
+        if (hybrid) k::qsa_prompt_attn_set_hybrid_imma(1);
+        else k::qsa_prompt_attn_set_imma(1);
         const bool ok = k::qsa_prompt_attn_batch(d_q, pl, d_ids, d_steps, cap, s, d_im, nq, nullptr);
-        k::qsa_prompt_attn_set_imma(0);
+        if (hybrid) k::qsa_prompt_attn_set_hybrid_imma(0);
+        else k::qsa_prompt_attn_set_imma(0);
         if (!ok) { std::fprintf(stderr, "qsa_prompt_attn_batch refused the pools (imma)\n"); std::exit(2); }
     };
     old_run();
     new_run();
-    if (fmt == 1) imma_run();
+    if (check_imma) imma_run();
     ck(cudaDeviceSynchronize(), "run");
-    std::vector<float> o((size_t) (nq * NH * HD)), nw(o.size()), im(fmt == 1 ? o.size() : 0);
-    if (fmt == 1) ck(cudaMemcpy(im.data(), d_im, im.size() * 4, cudaMemcpyDeviceToHost), "down");
+    std::vector<float> o((size_t) (nq * NH * HD)), nw(o.size()), im(check_imma ? o.size() : 0);
+    if (check_imma) ck(cudaMemcpy(im.data(), d_im, im.size() * 4, cudaMemcpyDeviceToHost), "down");
     ck(cudaMemcpy(o.data(), d_old, o.size() * 4, cudaMemcpyDeviceToHost), "down");
     ck(cudaMemcpy(nw.data(), d_new, nw.size() * 4, cudaMemcpyDeviceToHost), "down");
     {   // a hash of the new kernel's output bits (bitwise A/B of two builds / switches)
@@ -252,7 +264,7 @@ int run(int fmt, int64_t ctx, int64_t nq, int reps) {   // fmt 1 int8, 0 fp16, 2
                 double a = 0;
                 for (int64_t d = 0; d < HD; ++d) {
                     const double kv = fmt == 2 ? q4v(k4, row, d)
-                                      : fmt == 1 ? (double) kq[row * HD + d] * h2f(ks[row * 4 + d / 64]) : h2f(kh[row * HD + d]);
+                                      : (fmt == 1 || hybrid) ? (double) kq[row * HD + d] * h2f(ks[row * 4 + d / 64]) : h2f(kh[row * HD + d]);
                     a += (double) q[(i * NH + h) * HD + d] * kv;
                 }
                 sco[c] = a / 16.0;
@@ -261,19 +273,23 @@ int run(int fmt, int64_t ctx, int64_t nq, int reps) {   // fmt 1 int8, 0 fp16, 2
             double l = 0;
             for (auto& x : sco) { x = std::exp(x - mx); l += x; }
             for (int64_t d = 0; d < HD; ++d) {
-                double a = 0;
+                double a = 0, staged = 0;
                 for (int64_t c = 0; c < w; ++c) {
                     const int64_t cell = sel[c], row = ((int64_t) table[cell / PS] * NKV + kvh) * PS + cell % PS;
-                    const double vv = fmt == 2 ? q4v(v4, row, d)
+                    const double vv = (fmt == 2 || hybrid) ? q4v(v4, row, d)
                                       : fmt == 1 ? (double) vq[row * HD + d] * h2f(vs[row * 4 + d / 64]) : h2f(vh[row * HD + d]);
                     a += sco[c] * vv;
+                    // K8V4's established tensor path rounds each dequantized V
+                    // to fp16 at gather. Both tensor score paths see those same V values.
+                    if (hybrid) staged += sco[c] * h2f(f2h((float) vv));
                 }
                 const double r = a / l;
                 const size_t at = (size_t) ((i * NH + h) * HD + d);
                 ref_scale = std::max(ref_scale, std::fabs(r));
                 err_old = std::max(err_old, std::fabs(o[at] - r));
-                err_new = std::max(err_new, std::fabs(nw[at] - r));
-                if (fmt == 1) err_im = std::max(err_im, std::fabs(im[at] - r));
+                const double tensor_ref = hybrid ? staged / l : r;
+                err_new = std::max(err_new, std::fabs(nw[at] - tensor_ref));
+                if (check_imma) err_im = std::max(err_im, std::fabs(im[at] - tensor_ref));
             }
         }
     }
@@ -299,7 +315,7 @@ int run(int fmt, int64_t ctx, int64_t nq, int reps) {   // fmt 1 int8, 0 fp16, 2
     ck(cudaEventSynchronize(e1), "time");
     cudaEventElapsedTime(&ms_new, e0, e1);
     bool ok_im = true;
-    if (fmt == 1) {   // the INT8-MMA kernel: the same bounds as v2's, against FP64 and against v2
+    if (check_imma) {   // the INT8-MMA kernel: the same bounds as v2's, against FP64 and against v2
         double d_iv = 0;
         for (size_t i = 0; i < o.size(); ++i) d_iv = std::max(d_iv, (double) std::fabs(im[i] - nw[i]));
         float ms_im = 0, ms_v2 = 0;
@@ -315,15 +331,16 @@ int run(int fmt, int64_t ctx, int64_t nq, int reps) {   // fmt 1 int8, 0 fp16, 2
             ck(cudaEventSynchronize(e1), "time");
             cudaEventElapsedTime(&ms_im, e0, e1);
         }
-        ok_im = err_im <= std::max(4.0 * err_old, 1e-6 * ref_scale) && d_iv <= 1e-4 * scale;
-        std::printf("%s int8 IMMA ctx %lld, %lld queries: vs FP64 %.3g (v2 %.3g, FP32 %.3g); IMMA vs v2 %.3g (%.2g of scale); "
-                    "v2 %.3f -> IMMA %.3f ms per chunk (%.2fx)\n", ok_im ? "PASS" : "FAIL", (long long) ctx, (long long) nq,
+        ok_im = err_im <= std::max(4.0 * err_old, 1e-6 * ref_scale) && d_iv <= 1e-4 * scale && (!hybrid || d_iv > 0.0);
+        std::printf("%s %s IMMA ctx %lld, %lld queries: vs FP64 %.3g (v2 %.3g, FP32 %.3g); IMMA vs v2 %.3g (%.2g of scale); "
+                    "v2 %.3f -> IMMA %.3f ms per chunk (%.2fx)\n", ok_im ? "PASS" : "FAIL", hybrid ? "K8V4 QK" : "int8", (long long) ctx, (long long) nq,
                     err_im, err_new, err_old, d_iv, d_iv / scale, ms_v2 / reps, ms_im / reps, ms_v2 / ms_im);
     }
     k::qsa_prompt_attn_set_imma(-1);
+    if (hybrid) k::qsa_prompt_attn_set_hybrid_imma(-1);
     cudaFree(d_im);
     const bool ok1 = err_new <= std::max(4.0 * err_old, 1e-6 * ref_scale) && ok_im;
-    const bool ok2 = diff <= 1e-4 * scale;
+    const bool ok2 = hybrid ? err_old <= 1e-5 * ref_scale : diff <= 1e-4 * scale;
     uint64_t sum = 1469598103934665603ull;   // the new kernel's output bits: two builds of it compare by this
     for (float f : nw) {
         uint32_t b;
@@ -332,7 +349,7 @@ int run(int fmt, int64_t ctx, int64_t nq, int reps) {   // fmt 1 int8, 0 fp16, 2
     }
     std::printf("%s %s ctx %lld, %lld queries: vs FP64 old %.3g new %.3g (output scale %.3g); new vs old %.3g (%.2g of "
                 "scale); %.3f -> %.3f ms per chunk (%.2fx); new output checksum %016llx\n",
-                ok1 && ok2 ? "PASS" : "FAIL", fmt == 2 ? "q4_0" : fmt == 1 ? "int8" : "fp16", (long long) ctx, (long long) nq, err_old,
+                ok1 && ok2 ? "PASS" : "FAIL", hybrid ? "k8v4" : fmt == 2 ? "q4_0" : fmt == 1 ? "int8" : "fp16", (long long) ctx, (long long) nq, err_old,
                 err_new, ref_scale, diff, diff / scale, ms_old / reps, ms_new / reps, ms_old / ms_new, (unsigned long long) sum);
     cudaFree((void*) d_ids); cudaFree((void*) d_steps); cudaFree((void*) d_q); cudaFree(d_old); cudaFree(d_new);
     cudaFree(scratch);
@@ -364,6 +381,7 @@ int main(int argc, char** argv) {
     const int64_t ctx = argc > 1 ? std::atoll(argv[1]) : 32768;
     const int64_t nq = argc > 2 ? std::atoll(argv[2]) : 2048;
     const int reps = argc > 3 ? std::atoi(argv[3]) : 5;
+    if (argc > 4 && std::strcmp(argv[4], "--k8v4") == 0) return run(3, ctx, nq, reps);
     int fails = 0;
     fails += run(1, ctx, nq, reps);
 #if !defined(__HIP_PLATFORM_AMD__)

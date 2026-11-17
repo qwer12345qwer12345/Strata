@@ -91,6 +91,15 @@ struct ConversationKv {
     size_t bytes() const {
         return k.bytes() + v.bytes() + k_scale.bytes() + v_scale.bytes() + pooled.bytes();
     }
+    // STRATA_CONV_DISK (local patch): hand this layer's K/V pages back to the kernel (written back
+    // first).  No effect when the segments are anonymous (STRATA_CONV_DISK_DIR unset).
+    void drop_resident() {
+        k.drop_resident();
+        v.drop_resident();
+        k_scale.drop_resident();
+        v_scale.drop_resident();
+        pooled.drop_resident();
+    }
 };
 
 struct ConversationKvReuse {
@@ -210,6 +219,12 @@ struct SavedConversation {
     bool pinned() const {
         for (const auto& c : checkpoints) if (c.pinned) return true;
         return false;
+    }
+    // STRATA_CONV_DISK (local patch): see ConversationBuffer::drop_resident.  The running-state
+    // checkpoints are plain vectors - anonymous memory, left alone here.
+    void drop_resident() {
+        for (auto& k : kv) k.drop_resident();
+        for (auto& s : stage_images) s.drop_resident();
     }
 
     size_t bytes() const {
@@ -464,6 +479,15 @@ public:
         if (!drop_oldest()) return false;
         release_free_heap();
         return true;
+    }
+
+    // STRATA_CONV_DISK (local patch): hand every parked snapshot's (and the retained K/V's) resident
+    // pages back to the kernel.  --serve calls this after a park and after a restore.  No effect
+    // without STRATA_CONV_DISK_DIR; next to a park copy in flight it is simply less effective.
+    void drop_resident() {
+        for (auto& e : entries_) e.drop_resident();
+        for (auto& layer : reuse_.kv) layer.drop_resident();
+        for (auto& s : reuse_.stages) for (auto& layer : s.kv) layer.drop_resident();
     }
 
     // #879: every parked conversation (pinned ones too) and the retained K/V go - after non-finite logits any of them

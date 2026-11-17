@@ -1972,6 +1972,188 @@ __global__ void __launch_bounds__(256) native_gu_kernel(const unsigned long long
 // has halves of <= 4), so 4 takes such windows in one pass; 8 would take ~64-80 registers against ~48 (ptxas -v).
 constexpr int GRP_NC = 4;
 
+// Two independent trellis rows in flight: issue both weight decodes before
+// applying their common input. Each row retains the original four partial sums.
+template<int TG, int NC>
+__device__ __forceinline__ void tq_ampere_dot_pair(const uint8_t* ra, const uint8_t* rb,
+        const block_q8_1* x, const int (&off)[NC], int t, float (&a)[NC], float (&b)[NC], const uint32_t* grid) {
+    float pa[4][NC], pb[4][NC];
+#pragma unroll
+    for (int v = 0; v < 4; ++v)
+#pragma unroll
+        for (int c = 0; c < NC; ++c) pa[v][c] = pb[v][c] = 0.0f;
+#pragma unroll
+    for (int j = 0; j < 5; ++j)
+#pragma unroll
+        for (int v = 0; v < 4; ++v) {
+            const int kbx = v + 4 * j, iqs = 4 * t;
+            const auto wa = Split<TG>::template load<true>(ra, kbx, iqs, grid);
+            const auto wb = Split<TG>::template load<true>(rb, kbx, iqs, grid);
+#pragma unroll
+            for (int c = 0; c < NC; ++c) {
+                const auto* q = x + off[c] + kbx * 4;
+                pa[v][c] += Split<TG>::apply(wa, q, iqs);
+                pb[v][c] += Split<TG>::apply(wb, q, iqs);
+            }
+        }
+#pragma unroll
+    for (int c = 0; c < NC; ++c) {
+        a[c] = __fadd_rn(__fadd_rn(pa[0][c], pa[2][c]), __fadd_rn(pa[1][c], pa[3][c]));
+        b[c] = __fadd_rn(__fadd_rn(pb[0][c], pb[2][c]), __fadd_rn(pb[1][c], pb[3][c]));
+#pragma unroll
+        for (int o = 4; o > 0; o >>= 1) {
+            a[c] += __shfl_xor_sync(0xffffffffu, a[c], o);
+            b[c] += __shfl_xor_sync(0xffffffffu, b[c], o);
+        }
+    }
+}
+template<int TG, bool STAGE_GRID>
+__device__ __forceinline__ void tq_single_gu_group(unsigned long long group, int e0, int e1,
+        const int32_t* ent_tok, const block_q8_1* xq, NativeExpertLayout L,
+        float* gate, float* up, const uint32_t* s_grid) {
+    const int subwarp = threadIdx.x >> 3, t = threadIdx.x & 7;
+    const int row = blockIdx.x * 32 + subwarp;            // 0 .. 2*n_ff
+    if (row >= 2 * L.n_ff) return;
+    const bool is_up = row >= L.n_ff;
+    const int r = is_up ? row - (int) L.n_ff : row;
+    const size_t w_off = (is_up ? L.up_off : 0) + (size_t) r * L.gu_row;
+    float* dst = is_up ? up : gate;
+    const uint8_t* wr = (const uint8_t*) group + w_off;
+    const float sc = L.tail_off ? ((const float*) (group + L.tail_off))[is_up ? 1 : 0] : 1.0f;
+    for (int e = e0; e < e1; e += GRP_NC) {
+        const int n = min(GRP_NC, e1 - e);
+        if (n == 1) {
+            const int off1[1] = { ent_tok[e] * 80 };
+            float s1[1];
+            row_dot_160_sub8<TG, 1, true, STAGE_GRID>(wr, xq, off1, 1, t, s1, s_grid);
+            if (t == 0) dst[(size_t) e * L.n_ff + r] = s1[0] * sc;
+        } else if (n == 2) {
+            const int off2[2] = { ent_tok[e] * 80, ent_tok[e + 1] * 80 };
+            float s2[2];
+            row_dot_160_sub8<TG, 2, true, STAGE_GRID>(wr, xq, off2, 2, t, s2, s_grid);
+            if (t < 2) dst[(size_t) (e + t) * L.n_ff + r] = s2[t] * sc;
+        } else if (n == 3) {
+            const int off3[3] = { ent_tok[e] * 80, ent_tok[e + 1] * 80, ent_tok[e + 2] * 80 };
+            float s3[3];
+            row_dot_160_sub8<TG, 3, true, STAGE_GRID>(wr, xq, off3, 3, t, s3, s_grid);
+            if (t < 3) dst[(size_t) (e + t) * L.n_ff + r] = s3[t] * sc;
+        } else {
+            const int off4[4] = { ent_tok[e] * 80, ent_tok[e + 1] * 80, ent_tok[e + 2] * 80, ent_tok[e + 3] * 80 };
+            float s4[4];
+            row_dot_160_sub8<TG, 4, true, STAGE_GRID>(wr, xq, off4, 4, t, s4, s_grid);
+            if (t < 4) dst[(size_t) (e + t) * L.n_ff + r] = s4[t] * sc;
+        }
+    }
+}
+
+template<int TG, bool ADAPT = false>
+__global__ void __launch_bounds__(256) tq_ampere_pair_gu_kernel(
+        const unsigned long long* __restrict__ grp_ptr, const int32_t* __restrict__ grp_start,
+        const int32_t* __restrict__ n_groups, const int32_t* __restrict__ ent_tok,
+        const block_q8_1* __restrict__ xq, NativeExpertLayout L,
+        float* __restrict__ gate, float* __restrict__ up) {
+    const int ng = *n_groups;
+    if (blockIdx.y >= ng) return;
+    STRATA_SHARED_ALIGN16_U32(s_grid_buf, IqGridWords<TG, true>::value);
+    const uint32_t* grid = stage_iq_grid<TG, true>(s_grid_buf, threadIdx.x, 256);
+    const int t = threadIdx.x & 7, r = blockIdx.x * 32 + (threadIdx.x >> 3);
+    if constexpr (!ADAPT) { if (r >= L.n_ff) return; }
+    for (int g = blockIdx.y; g < ng; g += gridDim.y) {
+        if constexpr (ADAPT) {
+            // n_groups and entry counts are already on the GPU. Each block uses
+            // one path per group, with neither a host readback nor a sync.
+            if (ng < 24 || grp_start[g + 1] - grp_start[g] < 2) {
+                tq_single_gu_group<TG, true>(grp_ptr[g], grp_start[g], grp_start[g + 1],
+                                            ent_tok, xq, L, gate, up, grid);
+                continue;
+            }
+            if (r >= L.n_ff) continue;
+        }
+        const auto* ra = (const uint8_t*) grp_ptr[g] + (size_t) r * L.gu_row;
+        const auto* rb = ra + L.up_off;
+        const float ga = L.tail_off ? ((const float*) (grp_ptr[g] + L.tail_off))[0] : 1.0f;
+        const float gb = L.tail_off ? ((const float*) (grp_ptr[g] + L.tail_off))[1] : 1.0f;
+        const int e0 = grp_start[g], e1 = grp_start[g + 1];
+        for (int e = e0; e < e1; e += GRP_NC) {
+            const int n = min(GRP_NC, e1 - e);
+            if (n == 1) {
+                const int off[1] = {ent_tok[e] * 80}; float a[1], b[1];
+                tq_ampere_dot_pair<TG, 1>(ra, rb, xq, off, t, a, b, grid);
+                if (t == 0) { gate[(size_t) e * L.n_ff + r] = a[0] * ga; up[(size_t) e * L.n_ff + r] = b[0] * gb; }
+            } else if (n == 2) {
+                const int off[2] = {ent_tok[e] * 80, ent_tok[e+1] * 80}; float a[2], b[2];
+                tq_ampere_dot_pair<TG, 2>(ra, rb, xq, off, t, a, b, grid);
+                if (t < 2) { gate[(size_t) (e+t) * L.n_ff + r] = a[t] * ga; up[(size_t) (e+t) * L.n_ff + r] = b[t] * gb; }
+            } else if (n == 3) {
+                const int off[3] = {ent_tok[e] * 80, ent_tok[e+1] * 80, ent_tok[e+2] * 80}; float a[3], b[3];
+                tq_ampere_dot_pair<TG, 3>(ra, rb, xq, off, t, a, b, grid);
+                if (t < 3) { gate[(size_t) (e+t) * L.n_ff + r] = a[t] * ga; up[(size_t) (e+t) * L.n_ff + r] = b[t] * gb; }
+            } else {
+                const int off[4] = {ent_tok[e] * 80, ent_tok[e+1] * 80, ent_tok[e+2] * 80, ent_tok[e+3] * 80}; float a[4], b[4];
+                tq_ampere_dot_pair<TG, 4>(ra, rb, xq, off, t, a, b, grid);
+                if (t < 4) { gate[(size_t) (e+t) * L.n_ff + r] = a[t] * ga; up[(size_t) (e+t) * L.n_ff + r] = b[t] * gb; }
+            }
+        }
+    }
+}
+
+// Experimental SM86 gate/up: stage a group's q8_1 inputs once, reuse them across
+// row chunks. Keep row_dot_160_sub8's reduction tree and weight decoder unchanged.
+// All threads take the barriers, including those outside a final partial row chunk.
+template<int TG>
+__global__ void __launch_bounds__(256) tq_ampere_gu_kernel(
+        const unsigned long long* __restrict__ grp_ptr, const int32_t* __restrict__ grp_start,
+        const int32_t* __restrict__ n_groups, const int32_t* __restrict__ ent_tok,
+        const block_q8_1* __restrict__ xq, NativeExpertLayout L,
+        float* __restrict__ gate, float* __restrict__ up) {
+    const int ng = *n_groups;
+    if (blockIdx.y >= ng) return;
+    STRATA_SHARED_ALIGN16_U32(s_grid_buf, IqGridWords<TG, true>::value);
+    STRATA_SHARED_ALIGN16_U32(s_x_buf, GRP_NC * 80 * 9);
+    const uint32_t* s_grid = stage_iq_grid<TG, true>(s_grid_buf, threadIdx.x, 256);
+    const auto* sx = reinterpret_cast<const block_q8_1*>(s_x_buf);
+    const int t = threadIdx.x & 7, subwarp = threadIdx.x >> 3;
+    for (int g = blockIdx.y; g < ng; g += gridDim.y) {
+        const int e0 = grp_start[g], e1 = grp_start[g + 1];
+        for (int e = e0; e < e1; e += GRP_NC) {
+            const int n = min(GRP_NC, e1 - e);
+            __syncthreads();
+            for (int i = threadIdx.x; i < n * 80 * 9; i += 256) {
+                const int c = i / (80 * 9), j = i % (80 * 9);
+                s_x_buf[i] = reinterpret_cast<const uint32_t*>(xq + (size_t) ent_tok[e + c] * 80)[j];
+            }
+            __syncthreads();
+            for (int rc = blockIdx.x; rc * 32 < 2 * L.n_ff; rc += gridDim.x) {
+                const int row = rc * 32 + subwarp;
+                if (row >= 2 * L.n_ff) continue;
+                const bool is_up = row >= L.n_ff;
+                const int r = is_up ? row - (int) L.n_ff : row;
+                const size_t w_off = (is_up ? L.up_off : 0) + (size_t) r * L.gu_row;
+                const uint8_t* wr = (const uint8_t*) grp_ptr[g] + w_off;
+                const float sc = L.tail_off ? ((const float*) (grp_ptr[g] + L.tail_off))[is_up ? 1 : 0] : 1.0f;
+                float* dst = is_up ? up : gate;
+                if (n == 1) {
+                    const int off[1] = {0}; float v[1];
+                    row_dot_160_sub8<TG, 1, true, true>(wr, sx, off, 1, t, v, s_grid);
+                    if (t == 0) dst[(size_t) e * L.n_ff + r] = v[0] * sc;
+                } else if (n == 2) {
+                    const int off[2] = {0, 80}; float v[2];
+                    row_dot_160_sub8<TG, 2, true, true>(wr, sx, off, 2, t, v, s_grid);
+                    if (t < 2) dst[(size_t) (e + t) * L.n_ff + r] = v[t] * sc;
+                } else if (n == 3) {
+                    const int off[3] = {0, 80, 160}; float v[3];
+                    row_dot_160_sub8<TG, 3, true, true>(wr, sx, off, 3, t, v, s_grid);
+                    if (t < 3) dst[(size_t) (e + t) * L.n_ff + r] = v[t] * sc;
+                } else {
+                    const int off[4] = {0, 80, 160, 240}; float v[4];
+                    row_dot_160_sub8<TG, 4, true, true>(wr, sx, off, 4, t, v, s_grid);
+                    if (t < 4) dst[(size_t) (e + t) * L.n_ff + r] = v[t] * sc;
+                }
+            }
+        }
+    }
+}
+
 template<int TG, bool STAGE_GRID = kStageIqGrid<TG>, bool SUB16 = true>
 __global__ void __launch_bounds__(256) native_gu_multi_kernel(const unsigned long long* __restrict__ grp_ptr,
                                                               const int32_t* __restrict__ grp_start,
@@ -1986,42 +2168,9 @@ __global__ void __launch_bounds__(256) native_gu_multi_kernel(const unsigned lon
     const int nb = (int) (L.n_embd / Fmt<TG>::qk), xb = (int) (L.n_embd / 32);
     if constexpr (SUB16 && (TG == 144 || TG == 145)) {
         if (nb * Fmt<TG>::ipb == 160) {   // the trellis rows (tq_sub8_on): 160 dots at n_embd 2560, 8 lanes a row
-            const int subwarp = threadIdx.x >> 3, t = threadIdx.x & 7;
-            const int row = blockIdx.x * 32 + subwarp;            // 0 .. 2*n_ff
-            if (row >= 2 * L.n_ff) return;
-            const bool is_up = row >= L.n_ff;
-            const int r = is_up ? row - (int) L.n_ff : row;
-            const size_t w_off = (is_up ? L.up_off : 0) + (size_t) r * L.gu_row;
-            float* dst = is_up ? up : gate;
-            for (int g = blockIdx.y; g < ng; g += gridDim.y) {
-                const uint8_t* wr = (const uint8_t*) grp_ptr[g] + w_off;
-                const float sc = L.tail_off ? ((const float*) (grp_ptr[g] + L.tail_off))[is_up ? 1 : 0] : 1.0f;
-                const int e0 = grp_start[g], e1 = grp_start[g + 1];
-                for (int e = e0; e < e1; e += GRP_NC) {
-                    const int n = min(GRP_NC, e1 - e);
-                    if (n == 1) {
-                        const int off1[1] = { ent_tok[e] * 80 };
-                        float s1[1];
-                        row_dot_160_sub8<TG, 1, true, STAGE_GRID>(wr, xq, off1, 1, t, s1, s_grid);
-                        if (t == 0) dst[(size_t) e * L.n_ff + r] = s1[0] * sc;
-                    } else if (n == 2) {
-                        const int off2[2] = { ent_tok[e] * 80, ent_tok[e + 1] * 80 };
-                        float s2[2];
-                        row_dot_160_sub8<TG, 2, true, STAGE_GRID>(wr, xq, off2, 2, t, s2, s_grid);
-                        if (t < 2) dst[(size_t) (e + t) * L.n_ff + r] = s2[t] * sc;
-                    } else if (n == 3) {
-                        const int off3[3] = { ent_tok[e] * 80, ent_tok[e + 1] * 80, ent_tok[e + 2] * 80 };
-                        float s3[3];
-                        row_dot_160_sub8<TG, 3, true, STAGE_GRID>(wr, xq, off3, 3, t, s3, s_grid);
-                        if (t < 3) dst[(size_t) (e + t) * L.n_ff + r] = s3[t] * sc;
-                    } else {
-                        const int off4[4] = { ent_tok[e] * 80, ent_tok[e + 1] * 80, ent_tok[e + 2] * 80, ent_tok[e + 3] * 80 };
-                        float s4[4];
-                        row_dot_160_sub8<TG, 4, true, STAGE_GRID>(wr, xq, off4, 4, t, s4, s_grid);
-                        if (t < 4) dst[(size_t) (e + t) * L.n_ff + r] = s4[t] * sc;
-                    }
-                }
-            }
+            for (int g = blockIdx.y; g < ng; g += gridDim.y)
+                tq_single_gu_group<TG, STAGE_GRID>(grp_ptr[g], grp_start[g], grp_start[g + 1],
+                                                   ent_tok, xq, L, gate, up, s_grid);
             return;
         }
     } else if constexpr (SUB16) {
@@ -3498,6 +3647,52 @@ int tq_row_chunks() {
     return n;
 }
 
+// Opt-in only; RTX 30 (SM86). Unset/0 and other architectures retain the original path.
+bool tq_ampere_x_on() {
+#if defined(__HIPCC__)
+    return false;
+#else
+    static const bool requested = [] {
+        const char* v = std::getenv("STRATA_TQ_AMPERE_X");
+        return v != nullptr && std::strcmp(v, "1") == 0;
+    }();
+    if (!requested) return false;
+    int dev = 0, maj = 0, mnr = 0;
+    if (cudaGetDevice(&dev) != cudaSuccess ||
+        cudaDeviceGetAttribute(&maj, cudaDevAttrComputeCapabilityMajor, dev) != cudaSuccess ||
+        cudaDeviceGetAttribute(&mnr, cudaDevAttrComputeCapabilityMinor, dev) != cudaSuccess) {
+        cudaGetLastError(); return false;
+    }
+    return maj == 8 && mnr == 6;
+#endif
+}
+int tq_ampere_rows_mode() {
+#if defined(__HIPCC__)
+    return 0;
+#else
+    static const int requested = [] {
+        const char* v = std::getenv("STRATA_TQ_AMPERE_ROWS");
+        return v && std::strcmp(v, "auto") == 0 ? 3 : v && std::strcmp(v, "2") == 0 ? 2 : 0;
+    }();
+    if (!requested) return 0;
+    int dev = 0, maj = 0, mnr = 0;
+    if (cudaGetDevice(&dev) != cudaSuccess ||
+        cudaDeviceGetAttribute(&maj, cudaDevAttrComputeCapabilityMajor, dev) != cudaSuccess ||
+        cudaDeviceGetAttribute(&mnr, cudaDevAttrComputeCapabilityMinor, dev) != cudaSuccess) {
+        cudaGetLastError(); return 0;
+    }
+    return maj == 8 && mnr == 6 ? requested : 0;
+#endif
+}
+int tq_ampere_gu_chunks() {
+    static const int chunks = [] {
+        const char* v = std::getenv("STRATA_TQ_AMPERE_GU_CHUNKS");
+        const int n = v != nullptr ? std::atoi(v) : 1;
+        return n < 1 ? 1 : n > 8 ? 8 : n;
+    }();
+    return chunks;
+}
+
 template<int TY, bool STAGE_GRID = kStageIqGrid<TY>>
 void launch_mmvq_multi_nc(dim3 grid, dim3 block, cudaStream_t s, const uint8_t* W, size_t rb, const block_q8_1* X,
                           float* y, int n_in, int n_out, int ncols) {
@@ -4229,6 +4424,31 @@ void launch_gu(dim3 grid, cudaStream_t s, const unsigned long long* grp_ptr, con
             if (tq_sub8_on() && (L.n_embd / Fmt<TG>::qk) * Fmt<TG>::ipb == 160) {
                 dim3 g8 = grid;
                 g8.x = (unsigned) ((2 * L.n_ff + 31) / 32);
+#if !defined(__HIPCC__)
+                const int rows_mode = tq_ampere_rows_mode();
+                if (rows_mode == 3 && L.n_ff % 32 == 0) {
+                    tq_ampere_pair_gu_kernel<TG, true><<<g8, 256, 0, s>>>(
+                        grp_ptr, grp_start, n_groups, ent_tok, X, L, gate, up);
+                    return;
+                }
+                if (rows_mode == 2) {
+                    static bool noted = false;
+                    if (!noted) { std::fprintf(stderr, "TQ Ampere paired-row GU enabled\n"); noted = true; }
+                    g8.x = (unsigned) ((L.n_ff + 31) / 32);
+                    tq_ampere_pair_gu_kernel<TG><<<g8, 256, 0, s>>>(grp_ptr, grp_start, n_groups, ent_tok, X, L, gate, up);
+                    return;
+                }
+                if (tq_ampere_x_on()) {
+                    static bool noted = false;
+                    if (!noted) {
+                        std::fprintf(stderr, "TQ Ampere shared-input GU enabled (chunks=%d)\n", tq_ampere_gu_chunks());
+                        noted = true;
+                    }
+                    g8.x = (g8.x + tq_ampere_gu_chunks() - 1) / tq_ampere_gu_chunks();
+                    tq_ampere_gu_kernel<TG><<<g8, 256, 0, s>>>(grp_ptr, grp_start, n_groups, ent_tok, X, L, gate, up);
+                    return;
+                }
+#endif
                 native_gu_multi_kernel<TG, true, true><<<g8, 256, 0, s>>>(grp_ptr, grp_start, n_groups, ent_tok, X, L, gate, up);
                 return;
             }
