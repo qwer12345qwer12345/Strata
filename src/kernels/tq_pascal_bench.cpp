@@ -347,6 +347,45 @@ float time_ms(cudaStream_t s, int it, const auto& fn) {
     return ms / it;
 }
 
+// One CUDA event interval per invocation. Quantization, allocation, and uploads stay outside the sample.
+void ampere_latency(cudaStream_t s, std::mt19937& rng) {
+    constexpr int samples = 200;
+    std::vector<cudaEvent_t> events(samples + 1);
+    for (auto& event : events) ck(cudaEventCreate(&event), "create timing event");
+    for (int gu : {144, 145}) for (int groups : {8, 16, 24, 48}) for (int entries : {1, 2, 4, 8, 0}) {
+        std::vector<int> counts(groups, entries);
+        if (entries == 0) for (int i = 0; i < groups; ++i) counts[i] = i % 5;
+        Grouped fixture(gu, 146, 2560, 640, counts, 8, rng);
+        const auto output = fixture.result(false, s);
+        const size_t used = (size_t) fixture.n_ent * fixture.L.n_embd;
+        if (!std::all_of(output.begin(), output.begin() + used, [](float x) { return std::isfinite(x); })) {
+            std::fprintf(stderr, "non-finite grouped output\n");
+            ++g_fail;
+        }
+        const auto checksum = fnv(output.data(), used * sizeof(float));
+        for (int phase : {3, 0}) {
+            k::native_expert_set_mode(-1, phase);
+            for (int i = 0; i < 64; ++i) fixture.run(false, s, false);
+            ck(cudaEventRecord(events.front(), s), "record timing start");
+            for (int i = 0; i < samples; ++i) {
+                fixture.run(false, s, false);
+                ck(cudaEventRecord(events[i + 1], s), "record timing end");
+            }
+            ck(cudaEventSynchronize(events.back()), "wait for timing events");
+            std::printf("LATENCY %d %d %d %s %016llx", gu, groups, entries,
+                        phase == 3 ? "gate_up" : "expert", (unsigned long long) checksum);
+            for (int i = 0; i < samples; ++i) {
+                float ms = 0;
+                ck(cudaEventElapsedTime(&ms, events[i], events[i + 1]), "measure latency");
+                std::printf(" %.3f", 1e3f * ms);
+            }
+            std::printf("\n");
+        }
+    }
+    k::native_expert_set_mode(-1, 0);
+    for (auto event : events) ck(cudaEventDestroy(event), "destroy timing event");
+}
+
 void bench(cudaStream_t s, std::mt19937& rng) {
     std::printf("\n--bench: microseconds per call (idle GPU assumed)\n");
     const int n_in = 2560, n_out = 8192, it = 100;
@@ -403,6 +442,22 @@ void bench(cudaStream_t s, std::mt19937& rng) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "--ampere-latency") {
+        int device;
+        cudaDeviceProp prop;
+        ck(cudaGetDevice(&device), "current device");
+        ck(cudaGetDeviceProperties(&prop, device), "device properties");
+        if (prop.major != 8 || prop.minor != 6) {
+            std::fprintf(stderr, "--ampere-latency requires an SM86 CUDA device\n");
+            return 2;
+        }
+        cudaStream_t s;
+        ck(cudaStreamCreate(&s), "stream");
+        std::mt19937 rng(18);
+        ampere_latency(s, rng);
+        ck(cudaStreamDestroy(s), "destroy stream");
+        return g_fail ? 1 : 0;
+    }
     if (argc > 1 && std::string(argv[1]) == "--ampere-gu") {
         cudaStream_t s;
         ck(cudaStreamCreate(&s), "stream");

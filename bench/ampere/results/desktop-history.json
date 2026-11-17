@@ -1,0 +1,604 @@
+{
+  "config": {
+    "prior": 0.5,
+    "context_limit": 65536,
+    "gpu_expert_slots": 5200,
+    "prefill_chunk": 2048,
+    "kv_resident": 20480,
+    "draft": "DFlash2/6/conf0.8",
+    "compile_and_benchmark_serial": true
+  },
+  "kernel": [
+    {
+      "groups": 8,
+      "entries": 1,
+      "baseline_us": 108.71799999999999,
+      "pair_us": 49.268,
+      "time_reduction_pct": null,
+      "abba_median_us": [
+        172.237,
+        49.309,
+        49.227,
+        45.199
+      ]
+    },
+    {
+      "groups": 8,
+      "entries": 2,
+      "baseline_us": 52.0225,
+      "pair_us": 55.735,
+      "time_reduction_pct": -7.136335239559804,
+      "abba_median_us": [
+        51.717,
+        55.76,
+        55.71,
+        52.328
+      ]
+    },
+    {
+      "groups": 8,
+      "entries": 4,
+      "baseline_us": 67.693,
+      "pair_us": 69.556,
+      "time_reduction_pct": -2.752130944115344,
+      "abba_median_us": [
+        67.229,
+        69.625,
+        69.487,
+        68.157
+      ]
+    },
+    {
+      "groups": 8,
+      "entries": 8,
+      "baseline_us": 117.975,
+      "pair_us": 117.985,
+      "time_reduction_pct": -0.008476372112740086,
+      "abba_median_us": [
+        117.514,
+        117.985,
+        117.985,
+        118.436
+      ]
+    },
+    {
+      "groups": 24,
+      "entries": 1,
+      "baseline_us": 104.8135,
+      "pair_us": 104.3895,
+      "time_reduction_pct": 0.40452804266626585,
+      "abba_median_us": [
+        104.933,
+        105.008,
+        103.771,
+        104.694
+      ]
+    },
+    {
+      "groups": 24,
+      "entries": 2,
+      "baseline_us": 124.4325,
+      "pair_us": 117.99199999999999,
+      "time_reduction_pct": 5.175898579551173,
+      "abba_median_us": [
+        123.971,
+        118.067,
+        117.917,
+        124.894
+      ]
+    },
+    {
+      "groups": 24,
+      "entries": 4,
+      "baseline_us": 163.2215,
+      "pair_us": 151.9275,
+      "time_reduction_pct": 6.919431569983111,
+      "abba_median_us": [
+        162.487,
+        152.037,
+        151.818,
+        163.956
+      ]
+    },
+    {
+      "groups": 24,
+      "entries": 8,
+      "baseline_us": 302.865,
+      "pair_us": 267.93949999999995,
+      "time_reduction_pct": 11.53170554537502,
+      "abba_median_us": [
+        301.575,
+        268.001,
+        267.878,
+        304.155
+      ]
+    },
+    {
+      "groups": 48,
+      "entries": 1,
+      "baseline_us": 198.3385,
+      "pair_us": 195.959,
+      "time_reduction_pct": 1.1997166460369555,
+      "abba_median_us": [
+        198.451,
+        195.897,
+        196.021,
+        198.226
+      ]
+    },
+    {
+      "groups": 48,
+      "entries": 2,
+      "baseline_us": 237.974,
+      "pair_us": 222.26549999999997,
+      "time_reduction_pct": 6.600931194164075,
+      "abba_median_us": [
+        237.582,
+        221.545,
+        222.986,
+        238.366
+      ]
+    },
+    {
+      "groups": 48,
+      "entries": 4,
+      "baseline_us": 312.552,
+      "pair_us": 278.2,
+      "time_reduction_pct": 10.99081112902814,
+      "abba_median_us": [
+        312.538,
+        278.801,
+        277.599,
+        312.566
+      ]
+    },
+    {
+      "groups": 48,
+      "entries": 8,
+      "baseline_us": 585.8705,
+      "pair_us": 514.4024999999999,
+      "time_reduction_pct": 12.198600202604513,
+      "abba_median_us": [
+        585.74,
+        515.31,
+        513.495,
+        586.001
+      ]
+    }
+  ],
+  "api": [
+    {
+      "arm": "tq0",
+      "ok": true,
+      "memory": {
+        "max_rss": 24924327936,
+        "max_process_swap": 799072256,
+        "min_available": 2794688512
+      },
+      "cases": [
+        {
+          "tag": "warmup",
+          "first_content_s": 0.5880972980003207,
+          "engine": {
+            "prompt_tokens": 24.0,
+            "reused": 0.0,
+            "read": 24.0,
+            "prompt_ms": 540.0,
+            "prompt_tps": 44.4,
+            "generated": 96.0,
+            "decode_ms": 1508.0,
+            "decode_tps": 63.6,
+            "accepted": 47.0,
+            "offered": 53.0,
+            "cache_hit_pct": 34.7,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "code",
+          "first_content_s": 0.31272365499989974,
+          "engine": {
+            "prompt_tokens": 31.0,
+            "reused": 0.0,
+            "read": 31.0,
+            "prompt_ms": 291.0,
+            "prompt_tps": 106.6,
+            "generated": 256.0,
+            "decode_ms": 2787.0,
+            "decode_tps": 91.9,
+            "accepted": 178.0,
+            "offered": 189.0,
+            "cache_hit_pct": 39.5,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "science",
+          "first_content_s": 0.34115226399990206,
+          "engine": {
+            "prompt_tokens": 31.0,
+            "reused": 0.0,
+            "read": 31.0,
+            "prompt_ms": 307.0,
+            "prompt_tps": 100.9,
+            "generated": 256.0,
+            "decode_ms": 3381.0,
+            "decode_tps": 75.7,
+            "accepted": 120.0,
+            "offered": 146.0,
+            "cache_hit_pct": 43.4,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "long",
+          "first_content_s": 22.03857494299973,
+          "engine": {
+            "prompt_tokens": 43528.0,
+            "reused": 0.0,
+            "read": 43528.0,
+            "prompt_ms": 21994.0,
+            "prompt_tps": 1979.0,
+            "generated": 97.0,
+            "decode_ms": 1221.0,
+            "decode_tps": 79.4,
+            "accepted": 55.0,
+            "offered": 72.0,
+            "cache_hit_pct": 42.5,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "code-repeat",
+          "first_content_s": 0.3036689959999421,
+          "engine": {
+            "prompt_tokens": 31.0,
+            "reused": 0.0,
+            "read": 31.0,
+            "prompt_ms": 284.0,
+            "prompt_tps": 109.0,
+            "generated": 256.0,
+            "decode_ms": 2431.0,
+            "decode_tps": 105.3,
+            "accepted": 191.0,
+            "offered": 213.0,
+            "cache_hit_pct": 40.8,
+            "resident_full": true
+          }
+        }
+      ]
+    },
+    {
+      "arm": "pair",
+      "ok": true,
+      "memory": {
+        "max_rss": 24417058816,
+        "max_process_swap": 866840576,
+        "min_available": 2812297216
+      },
+      "cases": [
+        {
+          "tag": "warmup",
+          "first_content_s": 0.609802638000474,
+          "engine": {
+            "prompt_tokens": 24.0,
+            "reused": 0.0,
+            "read": 24.0,
+            "prompt_ms": 580.0,
+            "prompt_tps": 41.4,
+            "generated": 96.0,
+            "decode_ms": 1459.0,
+            "decode_tps": 65.8,
+            "accepted": 47.0,
+            "offered": 53.0,
+            "cache_hit_pct": 34.7,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "code",
+          "first_content_s": 0.3124818039996171,
+          "engine": {
+            "prompt_tokens": 31.0,
+            "reused": 0.0,
+            "read": 31.0,
+            "prompt_ms": 288.0,
+            "prompt_tps": 107.6,
+            "generated": 256.0,
+            "decode_ms": 2660.0,
+            "decode_tps": 96.3,
+            "accepted": 178.0,
+            "offered": 189.0,
+            "cache_hit_pct": 39.5,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "science",
+          "first_content_s": 0.31600775600054476,
+          "engine": {
+            "prompt_tokens": 31.0,
+            "reused": 0.0,
+            "read": 31.0,
+            "prompt_ms": 291.0,
+            "prompt_tps": 106.4,
+            "generated": 256.0,
+            "decode_ms": 3288.0,
+            "decode_tps": 77.9,
+            "accepted": 121.0,
+            "offered": 148.0,
+            "cache_hit_pct": 42.8,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "long",
+          "first_content_s": 22.071786225000324,
+          "engine": {
+            "prompt_tokens": 43528.0,
+            "reused": 0.0,
+            "read": 43528.0,
+            "prompt_ms": 22029.0,
+            "prompt_tps": 1976.0,
+            "generated": 99.0,
+            "decode_ms": 1324.0,
+            "decode_tps": 74.8,
+            "accepted": 55.0,
+            "offered": 76.0,
+            "cache_hit_pct": 40.2,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "code-repeat",
+          "first_content_s": 0.2972636299991791,
+          "engine": {
+            "prompt_tokens": 31.0,
+            "reused": 0.0,
+            "read": 31.0,
+            "prompt_ms": 280.0,
+            "prompt_tps": 110.7,
+            "generated": 256.0,
+            "decode_ms": 2505.0,
+            "decode_tps": 102.2,
+            "accepted": 176.0,
+            "offered": 188.0,
+            "cache_hit_pct": 39.7,
+            "resident_full": true
+          }
+        }
+      ]
+    },
+    {
+      "arm": "pair",
+      "ok": true,
+      "memory": {
+        "max_rss": 25643040768,
+        "max_process_swap": 730886144,
+        "min_available": 2457686016
+      },
+      "cases": [
+        {
+          "tag": "warmup",
+          "first_content_s": 0.5213184399999591,
+          "engine": {
+            "prompt_tokens": 24.0,
+            "reused": 0.0,
+            "read": 24.0,
+            "prompt_ms": 498.0,
+            "prompt_tps": 48.2,
+            "generated": 96.0,
+            "decode_ms": 1428.0,
+            "decode_tps": 67.2,
+            "accepted": 50.0,
+            "offered": 56.0,
+            "cache_hit_pct": 33.8,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "code",
+          "first_content_s": 0.34967379699992307,
+          "engine": {
+            "prompt_tokens": 31.0,
+            "reused": 0.0,
+            "read": 31.0,
+            "prompt_ms": 328.0,
+            "prompt_tps": 94.4,
+            "generated": 256.0,
+            "decode_ms": 2612.0,
+            "decode_tps": 98.0,
+            "accepted": 178.0,
+            "offered": 195.0,
+            "cache_hit_pct": 39.4,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "science",
+          "first_content_s": 0.31286057099987374,
+          "engine": {
+            "prompt_tokens": 31.0,
+            "reused": 0.0,
+            "read": 31.0,
+            "prompt_ms": 291.0,
+            "prompt_tps": 106.6,
+            "generated": 256.0,
+            "decode_ms": 3324.0,
+            "decode_tps": 77.0,
+            "accepted": 122.0,
+            "offered": 152.0,
+            "cache_hit_pct": 42.9,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "long",
+          "first_content_s": 22.317362585999945,
+          "engine": {
+            "prompt_tokens": 43528.0,
+            "reused": 0.0,
+            "read": 43528.0,
+            "prompt_ms": 22275.0,
+            "prompt_tps": 1954.2,
+            "generated": 97.0,
+            "decode_ms": 1230.0,
+            "decode_tps": 78.9,
+            "accepted": 57.0,
+            "offered": 69.0,
+            "cache_hit_pct": 40.7,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "code-repeat",
+          "first_content_s": 0.3137195999997857,
+          "engine": {
+            "prompt_tokens": 31.0,
+            "reused": 0.0,
+            "read": 31.0,
+            "prompt_ms": 291.0,
+            "prompt_tps": 106.5,
+            "generated": 256.0,
+            "decode_ms": 2438.0,
+            "decode_tps": 105.0,
+            "accepted": 190.0,
+            "offered": 199.0,
+            "cache_hit_pct": 39.5,
+            "resident_full": true
+          }
+        }
+      ]
+    },
+    {
+      "arm": "tq0",
+      "ok": true,
+      "memory": {
+        "max_rss": 24094208000,
+        "max_process_swap": 856354816,
+        "min_available": 2808193024
+      },
+      "cases": [
+        {
+          "tag": "warmup",
+          "first_content_s": 0.5926814089998516,
+          "engine": {
+            "prompt_tokens": 24.0,
+            "reused": 0.0,
+            "read": 24.0,
+            "prompt_ms": 564.0,
+            "prompt_tps": 42.5,
+            "generated": 96.0,
+            "decode_ms": 1509.0,
+            "decode_tps": 63.6,
+            "accepted": 47.0,
+            "offered": 53.0,
+            "cache_hit_pct": 34.6,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "code",
+          "first_content_s": 0.3092595150001216,
+          "engine": {
+            "prompt_tokens": 31.0,
+            "reused": 0.0,
+            "read": 31.0,
+            "prompt_ms": 286.0,
+            "prompt_tps": 108.5,
+            "generated": 256.0,
+            "decode_ms": 2638.0,
+            "decode_tps": 97.1,
+            "accepted": 178.0,
+            "offered": 189.0,
+            "cache_hit_pct": 39.5,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "science",
+          "first_content_s": 0.3037798169998496,
+          "engine": {
+            "prompt_tokens": 31.0,
+            "reused": 0.0,
+            "read": 31.0,
+            "prompt_ms": 282.0,
+            "prompt_tps": 109.9,
+            "generated": 256.0,
+            "decode_ms": 3249.0,
+            "decode_tps": 78.8,
+            "accepted": 119.0,
+            "offered": 143.0,
+            "cache_hit_pct": 43.2,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "long",
+          "first_content_s": 22.155928840999877,
+          "engine": {
+            "prompt_tokens": 43528.0,
+            "reused": 0.0,
+            "read": 43528.0,
+            "prompt_ms": 22114.0,
+            "prompt_tps": 1968.4,
+            "generated": 98.0,
+            "decode_ms": 1271.0,
+            "decode_tps": 77.1,
+            "accepted": 54.0,
+            "offered": 71.0,
+            "cache_hit_pct": 40.6,
+            "resident_full": true
+          }
+        },
+        {
+          "tag": "code-repeat",
+          "first_content_s": 0.30658112699984486,
+          "engine": {
+            "prompt_tokens": 31.0,
+            "reused": 0.0,
+            "read": 31.0,
+            "prompt_ms": 284.0,
+            "prompt_tps": 109.0,
+            "generated": 256.0,
+            "decode_ms": 2445.0,
+            "decode_tps": 104.7,
+            "accepted": 179.0,
+            "offered": 183.0,
+            "cache_hit_pct": 39.5,
+            "resident_full": true
+          }
+        }
+      ]
+    }
+  ],
+  "quality": [
+    {
+      "arm": "tq0",
+      "score": 9,
+      "total": 11,
+      "failed_tags": [
+        "expr",
+        "precedence"
+      ]
+    },
+    {
+      "arm": "pair",
+      "score": 9,
+      "total": 11,
+      "failed_tags": [
+        "expr",
+        "precedence"
+      ]
+    },
+    {
+      "arm": "combo_df",
+      "score": 9,
+      "total": 11,
+      "failed_tags": [
+        "expr",
+        "precedence"
+      ]
+    }
+  ]
+}
