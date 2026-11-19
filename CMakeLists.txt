@@ -378,6 +378,10 @@ if(STRATA_BUILD_TESTS)
   add_executable(resident_ram_copy_test tests/core/resident_ram_copy_test.cpp)
   target_include_directories(resident_ram_copy_test PRIVATE include)
   add_test(NAME resident_ram_copy_test COMMAND resident_ram_copy_test)
+  # Live Memory protocol and budget arithmetic (header-only; no GPU).
+  add_executable(live_memory_policy_test tests/core/live_memory_policy_test.cpp)
+  target_include_directories(live_memory_policy_test PRIVATE include)
+  add_test(NAME live_memory_policy_test COMMAND live_memory_policy_test)
   # the auto layer split's minimum stage size (#1616): header-only rule, no GPU
   add_executable(split_rules_test tests/program/split_rules_test.cpp)
   target_include_directories(split_rules_test PRIVATE include)
