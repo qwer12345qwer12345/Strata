@@ -13,7 +13,7 @@ static void parse_requests() {
     assert(request.id == 1 && request.resident_mib == 8192 && request.vram_reserve_mib == 1536);
 
     const LiveMemoryRequest before = request;
-    for (const std::string& bad : {
+    for (const char* bad : {
              "VRAM 1", "MEMORY", "MEMORY 0 1 1", "MEMORY -1 1 1",
              "MEMORY 1 -1 1", "MEMORY 1 1 -1", "MEMORY 1 1 1 extra",
              "MEMORY 18446744073709551616 1 1", "MEMORY 1 1048577 1",
