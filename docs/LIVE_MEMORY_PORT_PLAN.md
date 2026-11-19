@@ -1,6 +1,6 @@
 # Live Memory port plan (Linux, single NVIDIA GPU)
 
-Status: research/design note. No engine or server behavior has changed yet.
+Status: research/design note. The pure C++ request/budget helpers and their CPU-only unit test are now committed; no engine or server runtime behavior has changed yet.
 
 Target branch: `feature/live-memory-cuda`, created from this repository's `main` at `c77572806996349b49995e4f98d41b5294d36a21` (Strata 0.2.15 / engine 0.1.60).
 
