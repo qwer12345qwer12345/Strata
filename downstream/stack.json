@@ -6,12 +6,11 @@
     "branch": "main"
   },
   "base_commit": "6e38f588a646c0ee6948a74afbe670eb75896106",
-  "patched_tree": "424bde3201fbe911be0adb1a664a2f76fb0cdcaf",
+  "patched_tree": "ecae54ab6dee2a6f02866a645f8955cd4ecfd9e5",
   "feature_order": [
     "tq-cpu",
     "tq-ampere",
     "qsa-imma",
-    "l2-session",
     "live-memory"
   ],
   "features": [
@@ -26,10 +25,6 @@
     {
       "id": "qsa-imma",
       "path": "features/qsa-imma/feature.json"
-    },
-    {
-      "id": "l2-session",
-      "path": "features/l2-session/feature.json"
     },
     {
       "id": "live-memory",

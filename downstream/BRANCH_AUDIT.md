@@ -19,10 +19,9 @@
 | 分支 | 已迁移内容 | 归档位置 |
 |---|---|---|
 | `feature/ampere-gyro-reimplementation` | TQ CPU AVX-VNNI、Ampere TQ 配对 Kernel、K8V4 Q*K IMMA、相关构建接线和 QSA parity test | `features/tq-cpu`、`features/tq-ampere`、`features/qsa-imma`；`design/AMPERE_GYRO_REIMPLEMENTATION.md` |
-| `feature/l2-session-v3-reimplementation` | 当前上游 API 上的 Persistent Conversation Spill 实现和回归测试 | `features/l2-session`；`features/l2-session/design/L2_SESSION_V3_PORT.md` |
 | `feature/live-memory-reimplementation` | 初始 VMM commit、策略 helper、Settings 接线和 CPU/CUDA/Settings 测试 | `features/live-memory`；`features/live-memory/design/PORT_PLAN.md` |
 
-特别说明：`feature/l2-session-v3-reimplementation` 的当前实现是使用新上游 session-file API 的持久化 spill 基础，并没有实现旧 L2 分支的 immutable base/delta V3 archive、SAVEINC/RESTOREPP 或增量 K/V 写入。旧的 L2 V2/V3 代码仍在必须保留的 `ampere-gyro-latency` 参考分支中。
+L2 工作已重新拆分：旧的 features/l2-session 功能包已从活动功能栈移除，不再声称当前上游 API 上的 Persistent Conversation Spill 已迁移完成。后续分别规划为 runtime-kv-storage（改造官方运行时 Spill，减少完整 KV 重复写入）和 shutdown-persistent-cache（正常关闭时持久化 RAM 会话）两个独立补丁，文档与不可应用的占位文件位于 downstream/patch-plans/，目前均未实现、未加入 stack.json。旧 L2 V2/V3 代码仍在必须保留的 ampere-gyro-latency 参考分支中。
 
 ## 冗余备份候选
 

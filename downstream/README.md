@@ -44,7 +44,6 @@ downstream/features/<feature-id>/
 | `tq-cpu` | TQ CPU AVX-VNNI pair-dot | 关闭，环境变量 opt-in |
 | `tq-ampere` | Ampere TQ Gate/Up 配对 CUDA Kernel | 关闭，环境变量 opt-in |
 | `qsa-imma` | K8V4 Q*K split-INT8 IMMA | 关闭，环境变量 opt-in |
-| `l2-session` | ConversationSpill 跨进程持久化 | 关闭，环境变量 opt-in |
 | `live-memory` | ExpertCache 初始 VMM commit 与策略 helper | 默认不改变原分配行为 |
 
 ### 1.3 Patch 只保存生产改动
@@ -138,7 +137,6 @@ python downstream/scripts/prepare.py --features tq-cpu,tq-ampere,qsa-imma
 指定工作区位置：
 
 ```bash
-python downstream/scripts/prepare.py --feature l2-session --target ../Strata-l2-prepared
 ```
 
 默认目标是仓库同级的 `Strata-prepared`。如果目标目录已经存在，脚本会停止；不会自动删除、重置或覆盖用户目录。准备前会先验证完整补丁栈，再创建固定上游 commit 的 detached worktree、应用 patch，并按需重新生成 Settings 文件。
@@ -160,9 +158,6 @@ python downstream/scripts/test.py --feature tq-ampere \
 python downstream/scripts/test.py --feature qsa-imma \
   --source ../Strata-prepared --build ../Strata-build-qsa-imma
 
-# Persistent L2
-python downstream/scripts/test.py --feature l2-session \
-  --source ../Strata-prepared --build ../Strata-build-l2
 
 # Live Memory CPU policy + Settings
 python downstream/scripts/test.py --feature live-memory \
@@ -258,4 +253,4 @@ python downstream/scripts/test.py --feature example \
 
 ## 6. 当前验证边界
 
-本次迁移保存了 PR #1～#3 中的生产实现和相关测试源代码。CI 当前验证的是维护脚本语法、补丁哈希和 Git tree 指纹；并未在 CI 中编译全部 C++/CUDA 目标，也没有替代真实 SM86、AVX-VNNI 或 CUDA VMM 硬件验收。每项功能的具体待测项见对应的 `validation/README.md`。
+本次迁移保存了 PR #1～#3 中仍在功能栈内的生产实现和相关测试源代码。L2 相关的旧功能包已从活动功能栈移除；后续工作拆成两个尚未实现的补丁计划，见 patch-plans/README.md。占位补丁不是可应用的 unified diff，也不参与 stack.json。CI 当前验证的是维护脚本语法、补丁哈希和 Git tree 指纹；并未在 CI 中编译全部 C++/CUDA 目标，也没有替代真实 SM86、AVX-VNNI 或 CUDA VMM 硬件验收。每项活动功能的具体待测项见对应的 validation/README.md。
