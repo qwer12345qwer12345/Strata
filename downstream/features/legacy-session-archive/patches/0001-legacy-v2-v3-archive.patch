@@ -8919,10 +8919,10 @@ index 000000000..486a4c4b8
 +if __name__=='__main__':main()
 diff --git a/terminal/l2/runtime_config.py b/terminal/l2/runtime_config.py
 new file mode 100644
-index 000000000..23d02135a
+index 000000000..5a75f4397
 --- /dev/null
 +++ b/terminal/l2/runtime_config.py
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,58 @@
 +"""Apply the one user-owned runtime selection. Reading it never runs a benchmark."""
 +import copy
 +import hashlib
@@ -8966,8 +8966,10 @@ index 000000000..23d02135a
 +            raise ValueError('Selected BF16 PLE table is missing')
 +        overrides['--ple-gguf'] = data['ple_gguf']
 +    result['args'] = set_options(args, overrides)
-+    if isinstance(result.get('user_args'), list):
-+        result['user_args'] = set_options(result['user_args'], overrides)
++    # The official drafting layer only preserves explicit user_args. Legacy
++    # profiles may have neither user_args nor args_written, so changing args
++    # alone lets drafting.apply replace our selected --spec with its default.
++    result['user_args'] = set_options(result.get('user_args', []), overrides)
 +    rows = data.get('ampere_rows', '2')
 +    if rows not in ('0', '2'):
 +        raise ValueError('Ampere expert rows must be 0 or 2')
@@ -9252,10 +9254,10 @@ index 000000000..912f54794
 +   self.assertIn(b'504',data.split(b'\r\n')[0])
 diff --git a/terminal/l2/test_runtime_config.py b/terminal/l2/test_runtime_config.py
 new file mode 100644
-index 000000000..b06815fbe
+index 000000000..dfa6e967d
 --- /dev/null
 +++ b/terminal/l2/test_runtime_config.py
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,53 @@
 +import contextlib
 +import copy
 +import hashlib
@@ -9299,6 +9301,15 @@ index 000000000..b06815fbe
 +   self.assertEqual(cfg['configuration_status'],'NOT TESTED')
 +   self.assertTrue(cfg['vision']['expert_lease']);self.assertTrue(cfg['vram_elastic'])
 +   self.assertEqual(profile,before)
++ def test_legacy_profile_pins_selection_for_official_drafting(self):
++  from strata_control import user_args
++  with tempfile.TemporaryDirectory() as t:
++   root=Path(t);profile,_,state=self.fixture(root)
++   profile.pop('user_args')
++   _,cfg=runtime.select(root,profile,state)
++   mine=user_args.capture(cfg)
++   self.assertEqual(mine[mine.index('--spec')+1],'4')
++   self.assertEqual(mine[mine.index('--lookup-max-t')+1],'16')
 +if __name__=='__main__':unittest.main()
 diff --git a/terminal/l2/test_startup_benchmark.py b/terminal/l2/test_startup_benchmark.py
 new file mode 100644

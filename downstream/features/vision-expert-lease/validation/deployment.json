@@ -1,6 +1,6 @@
 {
   "engine_sha256": "fd8f764182951680382da78ad8ae71b5ef5f8abd2e90dce68f2ec6940ca28ab1",
-  "stack_tree": "ea1fd12a23759daf0bb09f978e9abf763e3b5f74",
+  "stack_tree": "9084c50b21a6f6549c309b254a620e83d79ab9d0",
   "runtime_source_files_match": 61,
   "live_controller_modules_match": 3,
   "vision_enabled_for_next_headless_start": true,
@@ -12,5 +12,6 @@
   "desktop_service": "active; not changed",
   "strata_service": "inactive; not started automatically",
   "model_test_scope": "desktop bounded 2GiB expert RAM, 8K context API lifecycle checks",
-  "combined_daily_headless_performance": "NOT TESTED"
+  "combined_daily_headless_performance": "NOT TESTED",
+  "configuration_followup": "spec4 override now pinned in user_args; previously official drafting rewrote it to spec6. Python control tests and final command dry-run checked; no new model benchmark."
 }

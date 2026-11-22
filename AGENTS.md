@@ -109,3 +109,10 @@ follow it whether a person or an agent writes the text. The short version:
 - Keep `STRATA_ROUTE_PRIOR=0.5`. Clearly label theoretical combinations and unmeasured quality/performance; do not describe unknown quality impact as proven small.
 - Model benchmarks run only through the explicit manual headless command. Normal service startup must not send benchmark prompts or consume test queues.
 - Respect backend and mode compatibility; acceptance of rounding differences does not authorize known memory corruption or incompatible settings.
+
+## Numerical policy for performance work
+
+- Cross-hardware numerical identity and byte-identical generated text are not deployment requirements. Do not discard a candidate solely for a different reduction order, CPU/GPU execution choice, or rounding path.
+- Treat numerical divergence as evidence to characterize, not proof of worse quality. Compare task success, tool-call validity, long-output behavior, acceptance/work and measured latency/throughput. Report untested quality honestly.
+- Distinguish valid alternative arithmetic from races, missing weights, invalid cache state, NaN/overflow, and protocol failures. Keep checks for the latter; do not use token hashes as a universal correctness gate.
+- Apply this review to official Strata defaults and opt-ins as well as downstream patches. Follow the actual patched call path: an upstream format restriction can be a reason to extend our existing K8V4 kernels, not to discard the optimization idea.

@@ -1,0 +1,27 @@
+{
+  "date": "2026-11-23",
+  "upstream_main": "c6f6427d9de9016fd92d13e29740f65625261df7",
+  "stack_tree": "9084c50b21a6f6549c309b254a620e83d79ab9d0",
+  "verified_runtime_files": 61,
+  "selected_control_tests_passed": 22,
+  "control_modules": [
+    "l2.test_controller",
+    "l2.test_startup_benchmark",
+    "l2.test_runtime_config",
+    "l2.test_manual_compare",
+    "l2.test_vision_check"
+  ],
+  "final_engine_command_dry_run": {
+    "--spec": "4",
+    "--draft-conf": "0.8",
+    "--lookup-max-t": "16",
+    "--prefill": "auto",
+    "--kv-resident": "20480"
+  },
+  "engine_started": false,
+  "model_benchmark_run": false,
+  "new_candidate_optins_enabled": false,
+  "binary_recompiled": false,
+  "binary_sha256": "fd8f764182951680382da78ad8ae71b5ef5f8abd2e90dce68f2ec6940ca28ab1",
+  "fix": "Legacy configuration selection now pins explicit overrides in user_args, preventing official drafting from replacing spec4 with default6."
+}

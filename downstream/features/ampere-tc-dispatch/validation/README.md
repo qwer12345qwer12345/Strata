@@ -29,6 +29,8 @@
 
 [只改drafter的补充记录](model-split.json)与[来源拆分](acceptance-split.json)：scalar-only 与 scalar+QKV TC 两组的48-token热身、1024-token代码输出散列均与参考一致。代码神经草稿89/102→89/101（87.25%→88.12%），lookup729/734→699/700（99.32%→99.86%）。lookup窗口分布随成本策略改变，仍不能用单次整段速度给kernel定胜负。
 
+以下两段为当时部署的历史记录；当前已开启Dense形状表、关闭短窗QKV TC，且取消开机测试。以[日常配置](../../../DAILY_CONFIGURATION.md)为准；完整组合仍未测。
+
 本机采用 BF16 compact、独立复制流、DFlash2 Ampere scalar形状表与QKV限定TC。新增的主模型Dense短窗口分派代码保留为候选，本机 `STRATA_DENSE_I8_AMPERE_SHAPES=0`。它在独立GPU上有收益并实际命中，但同时改变主模型舍入和后续lookup使用，当前样本不足以作为日常默认。全局9行门槛未降低。
 
 服务仍在下次用户选择无头模式时启动，先跑既有开机基准；没有停止桌面或变更网络。引擎SHA256为 `926250931e754820796112e3b5627342b6aba2c99974414d92fbd27a421549a2`。正式256K驻留配置的吞吐与内存峰值仍待无头验收。

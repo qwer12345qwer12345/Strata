@@ -76,3 +76,5 @@ sudo ~/.local/bin/strata-headless-compare --vision-check
 ```
 
 该检查保留日常完整驻留预算，执行冷图、缓存图和恢复后的3072-token文本。桌面active时退出；无开机自动测试。实现、测试边界见 [功能说明](features/vision-expert-lease/README.md)。
+
+2026-11-23接线复查：此前旧profile缺少`user_args`，官方drafting层会将选择器写入的spec4改回6。已修正为显式用户参数，最终命令干跑确认spec4/confidence0.8/lookup16；没有重新跑完整组合。详见 [数值与性能审计](NUMERICAL_PERFORMANCE_AUDIT.md)。

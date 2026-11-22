@@ -28,4 +28,6 @@ See [tests/README.md](tests/README.md). The K8V4 IMMA test skips with code 77 un
 
 ## Compatibility
 
-Extracted from PR #1 against `c6f6427d9de9016fd92d13e29740f65625261df7`. Hardware parity and latency qualification remain outstanding.
+Extracted from PR #1 against `c6f6427d9de9016fd92d13e29740f65625261df7`. The 2026-11-23 migration ran the SM86 numerical CTest successfully (see ../../validation/2026-11-23-review.md); isolated latency qualification remains outstanding.
+
+This package extends prompt attention only. The official decode `QSA_SPLIT_ATTN` entry still requires INT8 K/V; a K8V4 decode extension can reuse this package's query IMMA and Q4 V loading, but has not been implemented. The `split-INT8` name describes query representation, not multiple CTAs splitting the KV sequence. See [the numerical/performance audit](../../NUMERICAL_PERFORMANCE_AUDIT.md).
