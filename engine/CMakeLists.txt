@@ -662,14 +662,16 @@ if(STRATA_NATIVE_EXPERTS)
   endif()
   add_test(NAME nvfp4_cpu_parity COMMAND nvfp4_avx512_parity)   # random blocks; the AVX2 rows bit-equal to ggml's
   set_tests_properties(nvfp4_cpu_parity PROPERTIES TIMEOUT 120)
-  # TQK6/TQK7 and TQ2_T CPU rows: run the same parity suite with the opt-in VEX AVX-VNNI path enabled.
-  # On CPUs without AVX-VNNI the dispatcher safely retains the AVX2 implementation.
-  add_executable(tq_cpu_parity src/kernels/cpu/tq_cpu_parity.cpp)
-  target_link_libraries(tq_cpu_parity PRIVATE strata_kernels_cpu ggml-cpu ggml-base)
-  add_test(NAME tq_cpu_parity COMMAND tq_cpu_parity)
-  add_test(NAME tq_cpu_parity_avxvnni COMMAND tq_cpu_parity)
-  set_tests_properties(tq_cpu_parity tq_cpu_parity_avxvnni PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
-  set_tests_properties(tq_cpu_parity_avxvnni PROPERTIES ENVIRONMENT "STRATA_TQ_AVXVNNI=1")
+  if(STRATA_CPU_X86)
+    # TQK6/TQK7 and TQ2_T CPU rows: run the same parity suite with the opt-in VEX AVX-VNNI path enabled.
+    # On CPUs without AVX-VNNI the dispatcher safely retains the AVX2 implementation.
+    add_executable(tq_cpu_parity src/kernels/cpu/tq_cpu_parity.cpp)
+    target_link_libraries(tq_cpu_parity PRIVATE strata_kernels_cpu ggml-cpu ggml-base)
+    add_test(NAME tq_cpu_parity COMMAND tq_cpu_parity)
+    add_test(NAME tq_cpu_parity_avxvnni COMMAND tq_cpu_parity)
+    set_tests_properties(tq_cpu_parity tq_cpu_parity_avxvnni PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+    set_tests_properties(tq_cpu_parity_avxvnni PROPERTIES ENVIRONMENT "STRATA_TQ_AVXVNNI=1")
+  endif()
   if(STRATA_ENABLE_CUDA)   # the NVFP4 decode kernels vs ggml's reference
     add_executable(nvfp4_expert_gpu_parity src/kernels/nvfp4_expert_gpu_parity.cpp)
     target_link_libraries(nvfp4_expert_gpu_parity PRIVATE strata_kernels ggml-base CUDA::cudart)
