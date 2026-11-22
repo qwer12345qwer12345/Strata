@@ -711,6 +711,11 @@ if(STRATA_NATIVE_EXPERTS)
     target_include_directories(expdec_bench PRIVATE ${_strata_gpu_include_directories})
     target_link_libraries(expdec_bench PRIVATE strata_kernels ${_strata_gpu_runtime_target})
     if(STRATA_BUILD_TESTS AND STRATA_ENABLE_CUDA)
+      # Live Memory's partially committed ExpertCache VMM prefix (SM86+ with driver VMM; skip otherwise).
+      add_executable(expert_cache_segmented_test tests/core/expert_cache_segmented_test.cpp)
+      target_link_libraries(expert_cache_segmented_test PRIVATE strata_engine ${_strata_gpu_runtime_target})
+      add_test(NAME expert_cache_segmented_test COMMAND expert_cache_segmented_test)
+      set_tests_properties(expert_cache_segmented_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
       # Unsloth UD-Q4_K_XL's three expert pairs (and Q8_0 alone, its embedding) on synthetic ggml-quantized weights
       # at 2560/640: GPU and CPU experts against the float reference, GPU dequantizers against to_float.
       # q4_K/q5_0 and q5_0/q8_0: a plain llama-quantize "_M" tier GGUF (not Unsloth's dynamic method) commonly
