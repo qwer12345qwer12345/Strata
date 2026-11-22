@@ -3801,6 +3801,83 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_CPU_IQ_ALL_EXACT1",
+   "backends": [
+    "cpu"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cpu/native_expert.cpp",
+     "line": 588,
+     "backend": "cpu",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [
+    {
+     "file": "engine/src/core/nv_defaults.cpp",
+     "line": 49,
+     "value": "1",
+     "arch": "sm_86"
+    }
+   ],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/DETAILS.md:1192",
+    "docs/DETAILS.md:1407",
+    "docs/DETAILS.md:1549"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "default",
+   "owner": "kernels/cpu",
+   "note": "[auto] on by default for some GPU architectures only (sm_86 src/core/nv_defaults.cpp:33=1); opt-in elsewhere; the variable overrides it",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_CPU_YMM",
+   "backends": [
+    "cpu"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cpu/expert.cpp",
+     "line": 152,
+     "backend": "cpu",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "on",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "default",
+   "owner": "kernels/cpu",
+   "note": "[auto] on unless set to 0 (src/kernels/cpu/expert.cpp:152)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_CPUEXP_ACT",
    "backends": [
     "cuda-hip"
@@ -4165,83 +4242,6 @@
    "status": "research",
    "owner": "",
    "note": "",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_CPU_IQ_ALL_EXACT1",
-   "backends": [
-    "cpu"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cpu/native_expert.cpp",
-     "line": 588,
-     "backend": "cpu",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [
-    {
-     "file": "engine/src/core/nv_defaults.cpp",
-     "line": 49,
-     "value": "1",
-     "arch": "sm_86"
-    }
-   ],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/DETAILS.md:1192",
-    "docs/DETAILS.md:1407",
-    "docs/DETAILS.md:1549"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "default",
-   "owner": "kernels/cpu",
-   "note": "[auto] on by default for some GPU architectures only (sm_86 src/core/nv_defaults.cpp:33=1); opt-in elsewhere; the variable overrides it",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_CPU_YMM",
-   "backends": [
-    "cpu"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cpu/expert.cpp",
-     "line": 152,
-     "backend": "cpu",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "on",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "default",
-   "owner": "kernels/cpu",
-   "note": "[auto] on unless set to 0 (src/kernels/cpu/expert.cpp:152)",
    "retire_after": "",
    "retired_in": ""
   },
@@ -4771,66 +4771,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_DECODE_TIMING",
-   "backends": [
-    "cuda-hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 20853,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/program/generate.cpp",
-     "line": 11425,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/AMD_HIP.md:273",
-    "docs/DETAILS.md:364",
-    "docs/MULTI_GPU.md:252",
-    "docs/OLDER_GPUS.md:271",
-    "docs/QUANTS.md:106",
-    "docs/bench-results/2026-10-04-rdna2-helper-pcie-share/README.md:8",
-    "docs/bench-results/2026-10-04-rdna2-pre75-attention/README.md:96",
-    "docs/bench-results/2026-10-05-community-arc-b65/BUILD.md:95",
-    "docs/bench-results/2026-10-05-community-e5-2673v3-rtx-4060ti/README.md:54",
-    "docs/bench-results/2026-10-05-community-e5-2673v3-rtx-4060ti/README.md:96",
-    "docs/bench-results/2026-10-07-community-arc-b65-v01402/BUILD.md:92",
-    "docs/bench-results/2026-10-07-community-rtx-5090-laptop-ud-iq4xs/README.md:83",
-    "docs/bench-results/2026-10-07-v100-decode-kernels/README.md:59",
-    "docs/bench-results/2026-10-11-community-rtx3090-5600x-arena-async/README.md:28",
-    "docs/bench-results/2026-10-12-hc-persist-gfx1030/README.md:9",
-    "docs/bench-results/2026-10-12-hc-persist-gfx1030/README.md:80",
-    "docs/bench-results/2026-10-12-hc-persist-gfx1030/README.md:96",
-    "docs/bench-results/2026-10-12-hc-persist-gfx1030/README.md:153",
-    "docs/bench-results/2026-10-12-p40-sm61-kernels/README.md:44"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "program",
-   "note": "[reviewed] Counter/timing pass used for profiling. [cuda-profile.md:21]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_DEC_BATCH",
    "backends": [
     "cuda-hip",
@@ -4894,6 +4834,66 @@
    "status": "research",
    "owner": "core",
    "note": "[auto] not documented for users; code default not readable from the call",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_DECODE_TIMING",
+   "backends": [
+    "cuda-hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 20853,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/program/generate.cpp",
+     "line": 11425,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/AMD_HIP.md:273",
+    "docs/DETAILS.md:364",
+    "docs/MULTI_GPU.md:252",
+    "docs/OLDER_GPUS.md:271",
+    "docs/QUANTS.md:106",
+    "docs/bench-results/2026-10-04-rdna2-helper-pcie-share/README.md:8",
+    "docs/bench-results/2026-10-04-rdna2-pre75-attention/README.md:96",
+    "docs/bench-results/2026-10-05-community-arc-b65/BUILD.md:95",
+    "docs/bench-results/2026-10-05-community-e5-2673v3-rtx-4060ti/README.md:54",
+    "docs/bench-results/2026-10-05-community-e5-2673v3-rtx-4060ti/README.md:96",
+    "docs/bench-results/2026-10-07-community-arc-b65-v01402/BUILD.md:92",
+    "docs/bench-results/2026-10-07-community-rtx-5090-laptop-ud-iq4xs/README.md:83",
+    "docs/bench-results/2026-10-07-v100-decode-kernels/README.md:59",
+    "docs/bench-results/2026-10-11-community-rtx3090-5600x-arena-async/README.md:28",
+    "docs/bench-results/2026-10-12-hc-persist-gfx1030/README.md:9",
+    "docs/bench-results/2026-10-12-hc-persist-gfx1030/README.md:80",
+    "docs/bench-results/2026-10-12-hc-persist-gfx1030/README.md:96",
+    "docs/bench-results/2026-10-12-hc-persist-gfx1030/README.md:153",
+    "docs/bench-results/2026-10-12-p40-sm61-kernels/README.md:44"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "program",
+   "note": "[reviewed] Counter/timing pass used for profiling. [cuda-profile.md:21]",
    "retire_after": "",
    "retired_in": ""
   },
@@ -5203,6 +5203,164 @@
    "status": "rollback",
    "owner": "kernels/cuda",
    "note": "[reviewed] \"on by default for sm_80 (off: STRATA_DEQUANT_WIDE=0)\"; bitwise identical, shipped 0.2.7. [gh027/bodies/3712.md:1]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_DF_BRANCH",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/core/verify.cpp",
+     "line": 1339,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "core",
+   "note": "[auto] not documented for users; code default not readable from the call",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_DF_PDL",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/core/verify.cpp",
+     "line": 1498,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/core/verify.cpp",
+     "line": 1503,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/kernels/pdl_parity.cpp",
+     "line": 252,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/kernels/cuda/verify_kernels.cu",
+     "line": 1831,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/kernels/cuda/verify_kernels.cu",
+     "line": 1876,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": "off",
+   "code_default": "0",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/DGX_SPARK_LINUX.md:125"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "7b51c85cdc",
+   "last_date": "2026-11-19",
+   "status": "default",
+   "owner": "core",
+   "note": "[reviewed] \"Keep (owner rule: bit-exact gains are kept)\"; sm_90+ only, kept off elsewhere unmeasured. [blackwell/decisions/E21.md:14]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_DF_PLE",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/core/verify.cpp",
+     "line": 1705,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "core",
+   "note": "[auto] not documented for users; code default not readable from the call",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_DF_QB_Q4",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/core/verify.cpp",
+     "line": 1992,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "core",
+   "note": "[auto] not documented for users; code default not readable from the call",
    "retire_after": "",
    "retired_in": ""
   },
@@ -6333,164 +6491,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_DF_BRANCH",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/core/verify.cpp",
-     "line": 1339,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "core",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF_PDL",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/core/verify.cpp",
-     "line": 1498,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/core/verify.cpp",
-     "line": 1503,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/kernels/pdl_parity.cpp",
-     "line": 252,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/kernels/cuda/verify_kernels.cu",
-     "line": 1831,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/kernels/cuda/verify_kernels.cu",
-     "line": 1876,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": "off",
-   "code_default": "0",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/DGX_SPARK_LINUX.md:125"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "7b51c85cdc",
-   "last_date": "2026-11-19",
-   "status": "default",
-   "owner": "core",
-   "note": "[reviewed] \"Keep (owner rule: bit-exact gains are kept)\"; sm_90+ only, kept off elsewhere unmeasured. [blackwell/decisions/E21.md:14]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF_PLE",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/core/verify.cpp",
-     "line": 1705,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "core",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_DF_QB_Q4",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/core/verify.cpp",
-     "line": 1992,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "core",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_DIAG_POOL",
    "backends": [
     "cpu"
@@ -7270,41 +7270,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_EMBED_VRAM",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/core/native_head.cpp",
-     "line": 217,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/DETAILS.md:1745"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "core",
-   "note": "[auto] documented for users (docs/DETAILS.md:1638)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_EMB_REUSE_ACCOUNT",
    "backends": [
     "cuda-hip"
@@ -7337,6 +7302,41 @@
    "status": "unsure",
    "owner": "prefill",
    "note": "[reviewed] VRAM-planner accounting for embedding buffer reuse; evidence does not say if on or retired. [split145/v1/docs/DETAILS.md:2206]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_EMBED_VRAM",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/core/native_head.cpp",
+     "line": 217,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/DETAILS.md:1745"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "core",
+   "note": "[auto] documented for users (docs/DETAILS.md:1638)",
    "retire_after": "",
    "retired_in": ""
   },
@@ -7519,6 +7519,82 @@
    "status": "opt-in",
    "owner": "core",
    "note": "[reviewed] \"Documented opt-in\" (#2042) with known warnings. [review-perfprs.md:40]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_EXP_MODE",
+   "backends": [
+    "cuda-hip",
+    "hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/native_grouped_parity.cpp",
+     "line": 387,
+     "backend": "hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/kernels/cuda/iq_kernels.cu",
+     "line": 6190,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/kernels/cuda/iq_kernels.cu",
+     "line": 6236,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
+     "line": 7287,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": "-1",
+   "engine_sets": [
+    {
+     "file": "engine/src/kernels/native_grouped_parity.cpp",
+     "line": 390
+    },
+    {
+     "file": "engine/src/kernels/native_grouped_parity.cpp",
+     "line": 392
+    }
+   ],
+   "engine_defaults": [
+    {
+     "file": "engine/src/core/nv_defaults.cpp",
+     "line": 72,
+     "value": "8",
+     "arch": "gfx12"
+    }
+   ],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/AMD_HIP.md:596",
+    "docs/NVIDIA_V100.md:59",
+    "docs/OLDER_GPUS.md:228",
+    "docs/OLDER_GPUS.md:252",
+    "docs/bench-results/2026-10-07-v100-decode-kernels/README.md:9",
+    "docs/bench-results/2026-10-07-v100-decode-kernels/README.md:95"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "ca99e886f7",
+   "last_date": "2026-11-19",
+   "status": "opt-in",
+   "owner": "kernels/native_grouped_parity.cpp",
+   "note": "[reviewed] Users run STRATA_EXP_MODE=8 on sm_75; mode 4 measured slower; documented tuning mode. [_issues_dump/2197.md:564]",
    "retire_after": "",
    "retired_in": ""
   },
@@ -7853,41 +7929,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_EXPERTS_SEQ_READAHEAD",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/core/expert_source.cpp",
-     "line": 1070,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/DETAILS.md:324"
-   ],
-   "first_commit": "dc3ace6a0c",
-   "first_date": "2026-11-19",
-   "since": "v0.2.17",
-   "last_commit": "dc3ace6a0c",
-   "last_date": "2026-11-19",
-   "status": "research",
-   "owner": "program",
-   "note": "[reviewed] #5561, opt-in (Linux file tier, off by default): mark the mapped expert files MADV_SEQUENTIAL so each page fault reads the drive's read-ahead window; for experts much larger than the file cache. Author's numbers only (follow-up turns 65 to 24 s on one PC).",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_EXPERT_I8",
    "backends": [
     "cuda-hip"
@@ -8213,78 +8254,37 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_EXP_MODE",
+   "name": "STRATA_EXPERTS_SEQ_READAHEAD",
    "backends": [
-    "cuda-hip",
-    "hip",
-    "sycl"
+    "cuda-hip"
    ],
    "reads": [
     {
-     "file": "engine/src/kernels/native_grouped_parity.cpp",
-     "line": 387,
-     "backend": "hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/kernels/cuda/iq_kernels.cu",
-     "line": 6190,
+     "file": "engine/src/core/expert_source.cpp",
+     "line": 1070,
      "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/kernels/cuda/iq_kernels.cu",
-     "line": 6236,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
-     "line": 7287,
-     "backend": "sycl",
      "fn": "getenv"
     }
    ],
    "parse": "flag",
    "default_state": "off",
-   "code_default": "-1",
-   "engine_sets": [
-    {
-     "file": "engine/src/kernels/native_grouped_parity.cpp",
-     "line": 390
-    },
-    {
-     "file": "engine/src/kernels/native_grouped_parity.cpp",
-     "line": 392
-    }
-   ],
-   "engine_defaults": [
-    {
-     "file": "engine/src/core/nv_defaults.cpp",
-     "line": 72,
-     "value": "8",
-     "arch": "gfx12"
-    }
-   ],
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
    "launch_files": [],
    "launch_sets": [],
    "launch_reads": [],
    "doc_mentions": [
-    "docs/AMD_HIP.md:596",
-    "docs/NVIDIA_V100.md:59",
-    "docs/OLDER_GPUS.md:228",
-    "docs/OLDER_GPUS.md:252",
-    "docs/bench-results/2026-10-07-v100-decode-kernels/README.md:9",
-    "docs/bench-results/2026-10-07-v100-decode-kernels/README.md:95"
+    "docs/DETAILS.md:324"
    ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "ca99e886f7",
+   "first_commit": "dc3ace6a0c",
+   "first_date": "2026-11-19",
+   "since": "v0.2.17",
+   "last_commit": "dc3ace6a0c",
    "last_date": "2026-11-19",
-   "status": "opt-in",
-   "owner": "kernels/native_grouped_parity.cpp",
-   "note": "[reviewed] Users run STRATA_EXP_MODE=8 on sm_75; mode 4 measured slower; documented tuning mode. [_issues_dump/2197.md:564]",
+   "status": "research",
+   "owner": "program",
+   "note": "[reviewed] #5561, opt-in (Linux file tier, off by default): mark the mapped expert files MADV_SEQUENTIAL so each page fault reads the drive's read-ahead window; for experts much larger than the file cache. Author's numbers only (follow-up turns 65 to 24 s on one PC).",
    "retire_after": "",
    "retired_in": ""
   },
@@ -9134,46 +9134,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_FUSED_SWIGLU_Q81",
-   "backends": [
-    "cuda-hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/shared_expert.cu",
-     "line": 209,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/kernels/cuda/shared_expert.dp.cpp",
-     "line": 308,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "kernels/cuda",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_FUSE_CONVAB",
    "backends": [
     "hip"
@@ -9394,6 +9354,46 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_FUSED_SWIGLU_Q81",
+   "backends": [
+    "cuda-hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/shared_expert.cu",
+     "line": 209,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/kernels/cuda/shared_expert.dp.cpp",
+     "line": 308,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "kernels/cuda",
+   "note": "[auto] not documented for users; code default not readable from the call",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_GDN_CHUNK",
    "backends": [
     "cuda",
@@ -9439,6 +9439,39 @@
    "status": "opt-in",
    "owner": "prefill",
    "note": "[reviewed] \"The opt-in chunked recurrence on gfx11 and gfx12\"; user-visible opt-in. [src/prefill/kernels.cu:2131]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_GDN_CHUNK_PROF",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/prefill/gdn_chunk.cu",
+     "line": 586,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "prefill",
+   "note": "[auto] diagnostic / trace / measurement switch by name or by code, not documented for users",
    "retire_after": "",
    "retired_in": ""
   },
@@ -9560,39 +9593,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_GDN_CHUNK_PROF",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/prefill/gdn_chunk.cu",
-     "line": 586,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] diagnostic / trace / measurement switch by name or by code, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_GDN_COMMIT_SPLIT",
    "backends": [
     "cuda-hip",
@@ -9635,6 +9635,46 @@
    "status": "default",
    "owner": "kernels/cuda",
    "note": "[auto] on unless set to 0 (src/kernels/cuda/verify_kernels.cu:1182)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_GDN_CONV_SERIAL",
+   "backends": [
+    "cuda-hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/prefill/kernels.cu",
+     "line": 3001,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/prefill/kernels.dp.cpp",
+     "line": 2544,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "prefill",
+   "note": "[auto] off unless set, not documented for users",
    "retire_after": "",
    "retired_in": ""
   },
@@ -9711,46 +9751,6 @@
    "status": "default",
    "owner": "prefill",
    "note": "the engine's own default on Linux CUDA (arch_defaults.cpp gdn_default_env_cuda, applied in generate.cpp; owner yes 2026-11-07; QUAL-GDN KL mean 0.0019): TC=1, CONVL2=2; the engine still gates the scan at run time; NAME=0 turns it off; a value you set is kept",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_GDN_CONV_SERIAL",
-   "backends": [
-    "cuda-hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/prefill/kernels.cu",
-     "line": 3001,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/prefill/kernels.dp.cpp",
-     "line": 2544,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] off unless set, not documented for users",
    "retire_after": "",
    "retired_in": ""
   },
@@ -11021,233 +11021,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_GRAPH_PRIO",
-   "backends": [
-    "cuda"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/core/verify.cpp",
-     "line": 242,
-     "backend": "cuda",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/DETAILS.md:1729"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "core",
-   "note": "[reviewed] Documented in the DETAILS settings table as =1 graph node priority. [docs/DETAILS.md:1622]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_GROUPED_PAIR_MIN_HITS",
-   "backends": [
-    "cuda-hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/s2_expert_grouped.cu",
-     "line": 554,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/kernels/cuda/s2_expert_grouped.dp.cpp",
-     "line": 753,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "0",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "kernels/cuda",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_GROUPED_V1",
-   "backends": [
-    "cuda-hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/iq_kernels.cu",
-     "line": 6257,
-     "backend": "cuda-hip",
-     "fn": "env_on"
-    },
-    {
-     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
-     "line": 7303,
-     "backend": "sycl",
-     "fn": "env_on"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "kernels/cuda",
-   "note": "[auto] off unless set, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_GROUP_COPY",
-   "backends": [
-    "cuda-hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/prefill/prefill.cpp",
-     "line": 2556,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/prefill/prefill.cpp",
-     "line": 1405,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] off unless set, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_GRP_KEEP_GOING",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/gr_parity.cpp",
-     "line": 607,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "kernels/gr_parity.cpp",
-   "note": "[auto] off unless set, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_GRP_REPS",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/gr_parity.cpp",
-     "line": 606,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/kernels/gr_parity.cpp",
-     "line": 606,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "kernels/gr_parity.cpp",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_GR_DOWN_DIRECT",
    "backends": [
     "sycl"
@@ -11842,59 +11615,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_GR_UP75",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/fused_gr.cu",
-     "line": 1553,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "-1",
-   "engine_sets": [],
-   "engine_defaults": [
-    {
-     "file": "engine/src/core/nv_defaults.cpp",
-     "line": 52,
-     "value": "1",
-     "arch": "sm_86"
-    },
-    {
-     "file": "engine/src/core/nv_defaults.cpp",
-     "line": 89,
-     "value": "1",
-     "arch": "sm_60"
-    }
-   ],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/DETAILS.md:1262",
-    "docs/DETAILS.md:1407",
-    "docs/DETAILS.md:1408",
-    "docs/DETAILS.md:1409",
-    "docs/DGX_SPARK_LINUX.md:124",
-    "docs/OLDER_GPUS.md:151"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "7b51c85cdc",
-   "last_date": "2026-11-19",
-   "status": "default",
-   "owner": "kernels/cuda",
-   "note": "[auto] on by default for some GPU architectures only (sm_86 src/core/nv_defaults.cpp:36=1; sm_60 src/core/nv_defaults.cpp:51=1); opt-in elsewhere; the variable overrides it",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_GR_UP_COLS",
    "backends": [
     "sycl"
@@ -11992,6 +11712,59 @@
    "status": "research",
    "owner": "kernels/cuda",
    "note": "[auto] not documented for users; code default not readable from the call",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_GR_UP75",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/fused_gr.cu",
+     "line": 1553,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "-1",
+   "engine_sets": [],
+   "engine_defaults": [
+    {
+     "file": "engine/src/core/nv_defaults.cpp",
+     "line": 52,
+     "value": "1",
+     "arch": "sm_86"
+    },
+    {
+     "file": "engine/src/core/nv_defaults.cpp",
+     "line": 89,
+     "value": "1",
+     "arch": "sm_60"
+    }
+   ],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/DETAILS.md:1262",
+    "docs/DETAILS.md:1407",
+    "docs/DETAILS.md:1408",
+    "docs/DETAILS.md:1409",
+    "docs/DGX_SPARK_LINUX.md:124",
+    "docs/OLDER_GPUS.md:151"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "7b51c85cdc",
+   "last_date": "2026-11-19",
+   "status": "default",
+   "owner": "kernels/cuda",
+   "note": "[auto] on by default for some GPU architectures only (sm_86 src/core/nv_defaults.cpp:36=1; sm_60 src/core/nv_defaults.cpp:51=1); opt-in elsewhere; the variable overrides it",
    "retire_after": "",
    "retired_in": ""
   },
@@ -12130,6 +11903,233 @@
    "status": "research",
    "owner": "kernels/cuda",
    "note": "[auto] off unless set, not documented for users",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_GRAPH_PRIO",
+   "backends": [
+    "cuda"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/core/verify.cpp",
+     "line": 242,
+     "backend": "cuda",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/DETAILS.md:1729"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "core",
+   "note": "[reviewed] Documented in the DETAILS settings table as =1 graph node priority. [docs/DETAILS.md:1622]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_GROUP_COPY",
+   "backends": [
+    "cuda-hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/prefill/prefill.cpp",
+     "line": 2556,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/prefill/prefill.cpp",
+     "line": 1405,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "prefill",
+   "note": "[auto] off unless set, not documented for users",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_GROUPED_PAIR_MIN_HITS",
+   "backends": [
+    "cuda-hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/s2_expert_grouped.cu",
+     "line": 554,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/kernels/cuda/s2_expert_grouped.dp.cpp",
+     "line": 753,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "0",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "kernels/cuda",
+   "note": "[auto] not documented for users; code default not readable from the call",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_GROUPED_V1",
+   "backends": [
+    "cuda-hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/iq_kernels.cu",
+     "line": 6257,
+     "backend": "cuda-hip",
+     "fn": "env_on"
+    },
+    {
+     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
+     "line": 7303,
+     "backend": "sycl",
+     "fn": "env_on"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "kernels/cuda",
+   "note": "[auto] off unless set, not documented for users",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_GRP_KEEP_GOING",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/gr_parity.cpp",
+     "line": 607,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "kernels/gr_parity.cpp",
+   "note": "[auto] off unless set, not documented for users",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_GRP_REPS",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/gr_parity.cpp",
+     "line": 606,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/kernels/gr_parity.cpp",
+     "line": 606,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "kernels/gr_parity.cpp",
+   "note": "[auto] not documented for users; code default not readable from the call",
    "retire_after": "",
    "retired_in": ""
   },
@@ -12275,60 +12275,6 @@
    "status": "research",
    "owner": "prefill",
    "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_HCD_EXACT",
-   "backends": [
-    "cuda-hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/prefill/prefill.cpp",
-     "line": 1000,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/prefill/prefill.cpp",
-     "line": 382,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [
-    {
-     "file": "engine/src/core/arch_defaults.cpp",
-     "line": 74,
-     "value": "1",
-     "arch": "gfx1151"
-    }
-   ],
-   "launch_files": [
-    "terminal/setup.py"
-   ],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/RADEON_780M.md:73",
-    "docs/STRIX_HALO.md:112",
-    "docs/bench-results/2026-10-07-community-gfx1150/README.md:7",
-    "docs/bench-results/2026-10-07-community-gfx1150/README.md:87"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "default",
-   "owner": "prefill",
-   "note": "[auto] on by default for some GPU architectures only (gfx1151 src/core/arch_defaults.cpp:74=1); opt-in elsewhere; the variable overrides it",
    "retire_after": "",
    "retired_in": ""
   },
@@ -12825,6 +12771,60 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_HCD_EXACT",
+   "backends": [
+    "cuda-hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/prefill/prefill.cpp",
+     "line": 1000,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/prefill/prefill.cpp",
+     "line": 382,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [
+    {
+     "file": "engine/src/core/arch_defaults.cpp",
+     "line": 74,
+     "value": "1",
+     "arch": "gfx1151"
+    }
+   ],
+   "launch_files": [
+    "terminal/setup.py"
+   ],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/RADEON_780M.md:73",
+    "docs/STRIX_HALO.md:112",
+    "docs/bench-results/2026-10-07-community-gfx1150/README.md:7",
+    "docs/bench-results/2026-10-07-community-gfx1150/README.md:87"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "default",
+   "owner": "prefill",
+   "note": "[auto] on by default for some GPU architectures only (gfx1151 src/core/arch_defaults.cpp:74=1); opt-in elsewhere; the variable overrides it",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_HEAD_ALIAS_TEST_MOVE",
    "backends": [
     "cuda-hip"
@@ -13027,182 +13027,6 @@
    "status": "research",
    "owner": "core",
    "note": "[reviewed] Part of PR off-switch set measured on AMD; no explicit verdict for this switch. [phaseA-tests/pr-priorities/RESULTS-AMD.md:57]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_HIPBLASLT_TABLE",
-   "backends": [
-    "hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/prefill/gemm.cu",
-     "line": 281,
-     "backend": "hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [
-    "terminal/setup.py"
-   ],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/AMD_HIP.md:88",
-    "docs/AMD_HIP.md:89",
-    "docs/release-notes-0.2.1.md:42"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "default",
-   "owner": "prefill",
-   "note": "the engine finds tuning/<arch>-hipblaslt-<version>.txt beside its executable by itself on gfx1151 (owner 2026-10-19); on another card only with =on; =off never uses it; STRATA_HIPBLASLT_TUNING=<file> names a table and always wins",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_HIPBLASLT_TUNING",
-   "backends": [
-    "hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/prefill/gemm.cu",
-     "line": 278,
-     "backend": "hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/prefill/gemm.dp.cpp",
-     "line": 196,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [
-    "terminal/setup.py"
-   ],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/AMD_HIP.md:90",
-    "docs/AMD_HIP.md:203",
-    "docs/AMD_HIP.md:559",
-    "docs/AMD_HIP.md:636",
-    "docs/AMD_HIP.md:653",
-    "docs/AMD_HIP_PERFORMANCE.md:20",
-    "docs/RADEON_780M.md:56",
-    "docs/STRIX_HALO.md:94",
-    "docs/bench-results/2026-10-03-community-r9700-windows/README.md:127",
-    "docs/bench-results/2026-10-04-community-rx-7900-gre/README.md:54",
-    "docs/bench-results/2026-10-04-community-rx7900xtx-hipblaslt-100500/README.md:35",
-    "docs/bench-results/2026-10-04-community-rx7900xtx-hipblaslt-100500/README.md:45",
-    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:102",
-    "docs/bench-results/2026-10-06-community-rx-7900-xtx/README.md:25",
-    "docs/bench-results/2026-10-06-community-rx-7900-xtx/README.md:59",
-    "docs/bench-results/2026-10-07-community-gfx1150/README.md:49",
-    "docs/bench-results/2026-10-07-community-gfx1150/README.md:121",
-    "docs/bench-results/2026-10-08-community-r9700-linux/README.md:71",
-    "docs/bench-results/2026-10-09-community-4x-rx-7900-xt/README.md:48",
-    "docs/bench-results/2026-10-09-community-gfx1151-ud-iq4xs-0.1.41/REPRODUCE.md:59",
-    "docs/bench-results/2026-10-09-community-strix-halo-laptop-70w/README.md:30",
-    "docs/bench-results/2026-10-10-community-rx-9070/README.md:62"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[auto] documented for users (docs/AMD_HIP.md:93), 7 more",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_HIPBLASLT_VERBOSE",
-   "backends": [
-    "hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/prefill/gemm.cu",
-     "line": 213,
-     "backend": "hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/prefill/gemm.cu",
-     "line": 351,
-     "backend": "hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/prefill/gemm.cu",
-     "line": 431,
-     "backend": "hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/prefill/gemm.dp.cpp",
-     "line": 151,
-     "backend": "sycl",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/prefill/gemm.dp.cpp",
-     "line": 242,
-     "backend": "sycl",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/prefill/gemm.dp.cpp",
-     "line": 322,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "string",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/AMD_HIP.md:638",
-    "docs/bench-results/2026-10-03-community-r9700-windows/METHOD-AND-DISCLOSURES.md:150",
-    "docs/bench-results/2026-10-03-community-r9700-windows/METHOD-AND-DISCLOSURES.md:218",
-    "docs/bench-results/2026-10-03-community-r9700-windows/README.md:67",
-    "docs/bench-results/2026-10-03-community-r9700-windows/README.md:74",
-    "docs/bench-results/2026-10-07-community-gfx1150/README.md:33",
-    "docs/bench-results/2026-10-07-community-gfx1150/README.md:48"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[auto] documented for users (docs/AMD_HIP.md:625)",
    "retire_after": "",
    "retired_in": ""
   },
@@ -13681,6 +13505,182 @@
    "status": "opt-in",
    "owner": "kernels/cuda",
    "note": "[auto] documented for users (docs/AMD_HIP.md:302)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_HIPBLASLT_TABLE",
+   "backends": [
+    "hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/prefill/gemm.cu",
+     "line": 281,
+     "backend": "hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [
+    "terminal/setup.py"
+   ],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/AMD_HIP.md:88",
+    "docs/AMD_HIP.md:89",
+    "docs/release-notes-0.2.1.md:42"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "default",
+   "owner": "prefill",
+   "note": "the engine finds tuning/<arch>-hipblaslt-<version>.txt beside its executable by itself on gfx1151 (owner 2026-10-19); on another card only with =on; =off never uses it; STRATA_HIPBLASLT_TUNING=<file> names a table and always wins",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_HIPBLASLT_TUNING",
+   "backends": [
+    "hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/prefill/gemm.cu",
+     "line": 278,
+     "backend": "hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/prefill/gemm.dp.cpp",
+     "line": 196,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [
+    "terminal/setup.py"
+   ],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/AMD_HIP.md:90",
+    "docs/AMD_HIP.md:203",
+    "docs/AMD_HIP.md:559",
+    "docs/AMD_HIP.md:636",
+    "docs/AMD_HIP.md:653",
+    "docs/AMD_HIP_PERFORMANCE.md:20",
+    "docs/RADEON_780M.md:56",
+    "docs/STRIX_HALO.md:94",
+    "docs/bench-results/2026-10-03-community-r9700-windows/README.md:127",
+    "docs/bench-results/2026-10-04-community-rx-7900-gre/README.md:54",
+    "docs/bench-results/2026-10-04-community-rx7900xtx-hipblaslt-100500/README.md:35",
+    "docs/bench-results/2026-10-04-community-rx7900xtx-hipblaslt-100500/README.md:45",
+    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:102",
+    "docs/bench-results/2026-10-06-community-rx-7900-xtx/README.md:25",
+    "docs/bench-results/2026-10-06-community-rx-7900-xtx/README.md:59",
+    "docs/bench-results/2026-10-07-community-gfx1150/README.md:49",
+    "docs/bench-results/2026-10-07-community-gfx1150/README.md:121",
+    "docs/bench-results/2026-10-08-community-r9700-linux/README.md:71",
+    "docs/bench-results/2026-10-09-community-4x-rx-7900-xt/README.md:48",
+    "docs/bench-results/2026-10-09-community-gfx1151-ud-iq4xs-0.1.41/REPRODUCE.md:59",
+    "docs/bench-results/2026-10-09-community-strix-halo-laptop-70w/README.md:30",
+    "docs/bench-results/2026-10-10-community-rx-9070/README.md:62"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[auto] documented for users (docs/AMD_HIP.md:93), 7 more",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_HIPBLASLT_VERBOSE",
+   "backends": [
+    "hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/prefill/gemm.cu",
+     "line": 213,
+     "backend": "hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/prefill/gemm.cu",
+     "line": 351,
+     "backend": "hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/prefill/gemm.cu",
+     "line": 431,
+     "backend": "hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/prefill/gemm.dp.cpp",
+     "line": 151,
+     "backend": "sycl",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/prefill/gemm.dp.cpp",
+     "line": 242,
+     "backend": "sycl",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/prefill/gemm.dp.cpp",
+     "line": 322,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "string",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/AMD_HIP.md:638",
+    "docs/bench-results/2026-10-03-community-r9700-windows/METHOD-AND-DISCLOSURES.md:150",
+    "docs/bench-results/2026-10-03-community-r9700-windows/METHOD-AND-DISCLOSURES.md:218",
+    "docs/bench-results/2026-10-03-community-r9700-windows/README.md:67",
+    "docs/bench-results/2026-10-03-community-r9700-windows/README.md:74",
+    "docs/bench-results/2026-10-07-community-gfx1150/README.md:33",
+    "docs/bench-results/2026-10-07-community-gfx1150/README.md:48"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[auto] documented for users (docs/AMD_HIP.md:625)",
    "retire_after": "",
    "retired_in": ""
   },
@@ -15128,251 +15128,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_IQ256_GATHER",
-   "backends": [
-    "cpu"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cpu/expert_layout.cpp",
-     "line": 312,
-     "backend": "cpu",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/kernels/cpu/iq_avx2_parity.cpp",
-     "line": 566,
-     "backend": "cpu",
-     "fn": "env"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "0",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/bench-results/2026-10-04-community-rx-6800-windows/README.md:108"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "kernels/cpu",
-   "note": "[auto] off unless set, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_IQ3S_MT1",
-   "backends": [
-    "cpu"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cpu/native_expert.cpp",
-     "line": 553,
-     "backend": "cpu",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/DETAILS.md:1202"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "kernels/cpu",
-   "note": "[reviewed] Listed among speed opt-in switches in 0.1.40 notes. [release-v0.1.40.md:64]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_IQ3S_WIDE",
-   "backends": [
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
-     "line": 6265,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/INTEL.md:402"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "sycl/kernels",
-   "note": "[auto] documented for users (docs/INTEL.md:399)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_IQ4XS512_MIN",
-   "backends": [
-    "cpu"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cpu/native_expert.cpp",
-     "line": 623,
-     "backend": "cpu",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "1",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "default",
-   "owner": "kernels/cpu",
-   "note": "[auto] tunable with a built-in default 1 (src/kernels/cpu/native_expert.cpp:519)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_IQ4_W4A8",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "src/prefill/moe_iq4_w4a8.cu",
-     "line": 442,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "0",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/DETAILS.md:1085"
-   ],
-   "first_commit": "7bf5ec4ebf",
-   "first_date": "2026-11-06",
-   "since": "v0.2.12",
-   "last_commit": "7bf5ec4ebf",
-   "last_date": "2026-11-06",
-   "status": "retired",
-   "owner": "prefill",
-   "note": "Retired in 0.2.16 (own-stack step 10): read only in llama.cpp's MMQ build path, which left the tree; the setting is no longer read. [reviewed] Documented =1/2 int8 kernel for IQ4 experts, \"each is off unless you set it\". [docs/DETAILS.md:1082]",
-   "retire_after": "",
-   "retired_in": "0.2.16"
-  },
-  {
-   "name": "STRATA_IQ512_FUSED_MAX",
-   "backends": [
-    "cpu"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cpu/native_expert.cpp",
-     "line": 632,
-     "backend": "cpu",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "0",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "kernels/cpu",
-   "note": "[reviewed] \"REJECT as a default; opt-in kept\"; code says OPT-IN (N). [round0216/RESULTS-CPU.md:106]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_IQ512_FUSED_TYPES",
-   "backends": [
-    "cpu"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cpu/native_expert.cpp",
-     "line": 636,
-     "backend": "cpu",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "kernels/cpu",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_IQ_GATHER",
    "backends": [
     "cpu"
@@ -15668,6 +15423,251 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_IQ256_GATHER",
+   "backends": [
+    "cpu"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cpu/expert_layout.cpp",
+     "line": 312,
+     "backend": "cpu",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/kernels/cpu/iq_avx2_parity.cpp",
+     "line": 566,
+     "backend": "cpu",
+     "fn": "env"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "0",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/bench-results/2026-10-04-community-rx-6800-windows/README.md:108"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "kernels/cpu",
+   "note": "[auto] off unless set, not documented for users",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_IQ3S_MT1",
+   "backends": [
+    "cpu"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cpu/native_expert.cpp",
+     "line": 553,
+     "backend": "cpu",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/DETAILS.md:1202"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "kernels/cpu",
+   "note": "[reviewed] Listed among speed opt-in switches in 0.1.40 notes. [release-v0.1.40.md:64]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_IQ3S_WIDE",
+   "backends": [
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
+     "line": 6265,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/INTEL.md:402"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "sycl/kernels",
+   "note": "[auto] documented for users (docs/INTEL.md:399)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_IQ4_W4A8",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "src/prefill/moe_iq4_w4a8.cu",
+     "line": 442,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "0",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/DETAILS.md:1085"
+   ],
+   "first_commit": "7bf5ec4ebf",
+   "first_date": "2026-11-06",
+   "since": "v0.2.12",
+   "last_commit": "7bf5ec4ebf",
+   "last_date": "2026-11-06",
+   "status": "retired",
+   "owner": "prefill",
+   "note": "Retired in 0.2.16 (own-stack step 10): read only in llama.cpp's MMQ build path, which left the tree; the setting is no longer read. [reviewed] Documented =1/2 int8 kernel for IQ4 experts, \"each is off unless you set it\". [docs/DETAILS.md:1082]",
+   "retire_after": "",
+   "retired_in": "0.2.16"
+  },
+  {
+   "name": "STRATA_IQ4XS512_MIN",
+   "backends": [
+    "cpu"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cpu/native_expert.cpp",
+     "line": 623,
+     "backend": "cpu",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "1",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "default",
+   "owner": "kernels/cpu",
+   "note": "[auto] tunable with a built-in default 1 (src/kernels/cpu/native_expert.cpp:519)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_IQ512_FUSED_MAX",
+   "backends": [
+    "cpu"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cpu/native_expert.cpp",
+     "line": 632,
+     "backend": "cpu",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "0",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "kernels/cpu",
+   "note": "[reviewed] \"REJECT as a default; opt-in kept\"; code says OPT-IN (N). [round0216/RESULTS-CPU.md:106]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_IQ512_FUSED_TYPES",
+   "backends": [
+    "cpu"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cpu/native_expert.cpp",
+     "line": 636,
+     "backend": "cpu",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "kernels/cpu",
+   "note": "[auto] not documented for users; code default not readable from the call",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_KEEP_IO_PRIORITY",
    "backends": [
     "cuda-hip"
@@ -15891,6 +15891,85 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_KQ_GU_LANES",
+   "backends": [
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
+     "line": 4280,
+     "backend": "sycl",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
+     "line": 4280,
+     "backend": "sycl",
+     "fn": "lanes_env"
+    }
+   ],
+   "parse": "string",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "sycl/kernels",
+   "note": "[reviewed] Opt-in lane split tuning for K-quant gate/up; reduction order differs. [src sycl comment]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KQ_SPLIT",
+   "backends": [
+    "cuda-hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/iq_kernels.cu",
+     "line": 916,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
+     "line": 5684,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "b4bc5f6f6a",
+   "last_date": "2026-11-19",
+   "status": "research",
+   "owner": "kernels/cuda",
+   "note": "[reviewed] Measured as KqSplit 0 vs 1 for a no-regression check; no verdict. [notes-intel-quants.md:131]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_KQ256",
    "backends": [
     "cpu"
@@ -15977,671 +16056,6 @@
    "status": "research",
    "owner": "core",
    "note": "token floor of the AVX-512 rows (default 8); floors 3 and 4 measured 1-6% slower decode on a Xeon 8352V (RESULTS-BW-E.md)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KQ_GU_LANES",
-   "backends": [
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
-     "line": 4280,
-     "backend": "sycl",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
-     "line": 4280,
-     "backend": "sycl",
-     "fn": "lanes_env"
-    }
-   ],
-   "parse": "string",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "sycl/kernels",
-   "note": "[reviewed] Opt-in lane split tuning for K-quant gate/up; reduction order differs. [src sycl comment]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KQ_SPLIT",
-   "backends": [
-    "cuda-hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/iq_kernels.cu",
-     "line": 916,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
-     "line": 5684,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "b4bc5f6f6a",
-   "last_date": "2026-11-19",
-   "status": "research",
-   "owner": "kernels/cuda",
-   "note": "[reviewed] Measured as KqSplit 0 vs 1 for a no-regression check; no verdict. [notes-intel-quants.md:131]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 152,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [
-    "app/host/server/native-settings.mjs",
-    "app/host/server/policy-generated.mjs"
-   ],
-   "launch_sets": [
-    {
-     "file": "app/host/server/policy-generated.mjs",
-     "line": 5,
-     "value": "\"1\""
-    }
-   ],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/KVA.md:10",
-    "docs/KVA.md:12",
-    "docs/KVA.md:30",
-    "docs/KVA.md:49",
-    "docs/KVA.md:56",
-    "docs/KVA.md:58",
-    "docs/KVA.md:67",
-    "docs/KVA.md:96",
-    "docs/KVA.md:102",
-    "docs/KVA.md:103",
-    "docs/KVA.md:110",
-    "docs/KVA.md:130",
-    "docs/release-notes-0.2.7.md:39"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[auto] offered as a user switch (strata_control/speed_switches.py:40)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_ANY_MODEL",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 162,
-     "backend": "cuda-hip",
-     "fn": "kva_env_flag"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/KVA.md:50",
-    "docs/KVA.md:111"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[auto] documented for users (docs/KVA.md:50), 1 more",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_CAPTURE",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 163,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/KVA.md:119",
-    "docs/KVA.md:161",
-    "docs/KVA.md:172"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[auto] documented for users (docs/KVA.md:119), 2 more",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_CAPTURE_FP32",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 166,
-     "backend": "cuda-hip",
-     "fn": "kva_env_flag"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/KVA.md:120",
-    "docs/KVA.md:172"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[auto] documented for users (docs/KVA.md:120), 1 more",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_DRAFT_FLOOR",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 161,
-     "backend": "cuda-hip",
-     "fn": "kva_env_flag"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/KVA.md:74",
-    "docs/KVA.md:115"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[reviewed] Code calls it \"The research option\". [include/strata/prefill/kva.hpp:29]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_GDN_NORM",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/prefill/prefill.cpp",
-     "line": 5114,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/KVA.md:122"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[auto] documented for users (docs/KVA.md:122)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_MIN_PROMPT",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 159,
-     "backend": "cuda-hip",
-     "fn": "kva_env_i64"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "4096",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/KVA.md:53",
-    "docs/KVA.md:114"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[auto] documented for users (docs/KVA.md:53), 1 more",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_MODE",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 177,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/KVA.md:118"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[auto] documented for users (docs/KVA.md:118)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_ONLY",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 183,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/KVA.md:117"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[auto] documented for users (docs/KVA.md:117)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_ORACLE",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 168,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/KVA.md:121",
-    "docs/KVA.md:161",
-    "docs/KVA.md:177"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[auto] documented for users (docs/KVA.md:121), 2 more",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_ORACLE_FP32",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 171,
-     "backend": "cuda-hip",
-     "fn": "kva_env_flag"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] diagnostic / trace / measurement switch by name or by code, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_PARITY",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 160,
-     "backend": "cuda-hip",
-     "fn": "kva_env_flag"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] off unless set, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_PROJECTOR",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 173,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_SKIP",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 182,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/KVA.md:116"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[reviewed] Documented moe mode of KV approximation, opt-in. [docs/KVA.md:116]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_SPLIT",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 157,
-     "backend": "cuda-hip",
-     "fn": "kva_env_i64"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "kKvaSplitDefault",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/KVA.md:14",
-    "docs/KVA.md:112"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "default",
-   "owner": "prefill",
-   "note": "[reviewed] Documented default 36; tunes first approximated layer. [docs/KVA.md:112]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_KVA_SUFFIX",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/prefill/kva.hpp",
-     "line": 158,
-     "backend": "cuda-hip",
-     "fn": "kva_env_i64"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "0",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/KVA.md:14",
-    "docs/KVA.md:62",
-    "docs/KVA.md:113"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[auto] documented for users (docs/KVA.md:14), 2 more",
    "retire_after": "",
    "retired_in": ""
   },
@@ -17267,6 +16681,592 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_KVA",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 152,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [
+    "app/host/server/native-settings.mjs",
+    "app/host/server/policy-generated.mjs"
+   ],
+   "launch_sets": [
+    {
+     "file": "app/host/server/policy-generated.mjs",
+     "line": 5,
+     "value": "\"1\""
+    }
+   ],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/KVA.md:10",
+    "docs/KVA.md:12",
+    "docs/KVA.md:30",
+    "docs/KVA.md:49",
+    "docs/KVA.md:56",
+    "docs/KVA.md:58",
+    "docs/KVA.md:67",
+    "docs/KVA.md:96",
+    "docs/KVA.md:102",
+    "docs/KVA.md:103",
+    "docs/KVA.md:110",
+    "docs/KVA.md:130",
+    "docs/release-notes-0.2.7.md:39"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[auto] offered as a user switch (strata_control/speed_switches.py:40)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_ANY_MODEL",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 162,
+     "backend": "cuda-hip",
+     "fn": "kva_env_flag"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/KVA.md:50",
+    "docs/KVA.md:111"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[auto] documented for users (docs/KVA.md:50), 1 more",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_CAPTURE",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 163,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/KVA.md:119",
+    "docs/KVA.md:161",
+    "docs/KVA.md:172"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[auto] documented for users (docs/KVA.md:119), 2 more",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_CAPTURE_FP32",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 166,
+     "backend": "cuda-hip",
+     "fn": "kva_env_flag"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/KVA.md:120",
+    "docs/KVA.md:172"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[auto] documented for users (docs/KVA.md:120), 1 more",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_DRAFT_FLOOR",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 161,
+     "backend": "cuda-hip",
+     "fn": "kva_env_flag"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/KVA.md:74",
+    "docs/KVA.md:115"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "prefill",
+   "note": "[reviewed] Code calls it \"The research option\". [include/strata/prefill/kva.hpp:29]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_GDN_NORM",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/prefill/prefill.cpp",
+     "line": 5114,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/KVA.md:122"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[auto] documented for users (docs/KVA.md:122)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_MIN_PROMPT",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 159,
+     "backend": "cuda-hip",
+     "fn": "kva_env_i64"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "4096",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/KVA.md:53",
+    "docs/KVA.md:114"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[auto] documented for users (docs/KVA.md:53), 1 more",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_MODE",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 177,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/KVA.md:118"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[auto] documented for users (docs/KVA.md:118)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_ONLY",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 183,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/KVA.md:117"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[auto] documented for users (docs/KVA.md:117)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_ORACLE",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 168,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/KVA.md:121",
+    "docs/KVA.md:161",
+    "docs/KVA.md:177"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[auto] documented for users (docs/KVA.md:121), 2 more",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_ORACLE_FP32",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 171,
+     "backend": "cuda-hip",
+     "fn": "kva_env_flag"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "prefill",
+   "note": "[auto] diagnostic / trace / measurement switch by name or by code, not documented for users",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_PARITY",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 160,
+     "backend": "cuda-hip",
+     "fn": "kva_env_flag"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "prefill",
+   "note": "[auto] off unless set, not documented for users",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_PROJECTOR",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 173,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "prefill",
+   "note": "[auto] not documented for users; code default not readable from the call",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_SKIP",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 182,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/KVA.md:116"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[reviewed] Documented moe mode of KV approximation, opt-in. [docs/KVA.md:116]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_SPLIT",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 157,
+     "backend": "cuda-hip",
+     "fn": "kva_env_i64"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "kKvaSplitDefault",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/KVA.md:14",
+    "docs/KVA.md:112"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "default",
+   "owner": "prefill",
+   "note": "[reviewed] Documented default 36; tunes first approximated layer. [docs/KVA.md:112]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_KVA_SUFFIX",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/prefill/kva.hpp",
+     "line": 158,
+     "backend": "cuda-hip",
+     "fn": "kva_env_i64"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "0",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/KVA.md:14",
+    "docs/KVA.md:62",
+    "docs/KVA.md:113"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[auto] documented for users (docs/KVA.md:14), 2 more",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_L2_PF",
    "backends": [
     "cuda-hip"
@@ -17682,6 +17682,42 @@
    "status": "default",
    "owner": "core",
    "note": "[auto] on unless set to 0 (src/core/verify.cpp:179)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_LIVE_MEMORY_INITIAL_MIB",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/core/expert_cache.cpp",
+     "line": 624,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/LIVE_MEMORY_PORT_PLAN.md:3",
+    "docs/LIVE_MEMORY_PORT_PLAN.md:26"
+   ],
+   "first_commit": null,
+   "first_date": null,
+   "since": null,
+   "last_commit": null,
+   "last_date": null,
+   "status": "opt-in",
+   "owner": "core",
+   "note": "positive MiB initial VMM commit; unset preserves the existing full-commit ExpertCache behavior",
    "retire_after": "",
    "retired_in": ""
   },
@@ -18201,41 +18237,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_MEMORY_LIMIT_MIB",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 4558,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/DETAILS.md:795"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "program",
-   "note": "[reviewed] User memory limit override. [phaseA-tests/_issues_dump/digest-4.md:175]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_MEM_CREDIT_INACTIVE",
    "backends": [
     "cuda-hip"
@@ -18271,6 +18272,41 @@
    "status": "rollback",
    "owner": "core",
    "note": "[reviewed] under a container memory limit the memory guard and the expert arena's RAM check credit active and inactive file cache minus the engine's own mapped pages; set to 1 brings back the old inactive-only credit. [src/core/conversation_memory.cpp:363]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_MEMORY_LIMIT_MIB",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 4558,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/DETAILS.md:795"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "program",
+   "note": "[reviewed] User memory limit override. [phaseA-tests/_issues_dump/digest-4.md:175]",
    "retire_after": "",
    "retired_in": ""
   },
@@ -18607,39 +18643,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_METAL_EXPERT_PROFILE",
-   "backends": [
-    "metal"
-   ],
-   "reads": [
-    {
-     "file": "engine/metal/src/engine/window.cpp",
-     "line": 1775,
-     "backend": "metal",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "string",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "metal/engine",
-   "note": "[auto] diagnostic / trace / measurement switch by name or by code, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_METAL_EXP_CACHE_GB",
    "backends": [
     "cuda-hip"
@@ -18669,6 +18672,39 @@
    "status": "opt-in",
    "owner": "hy4flash/metal",
    "note": "Override Metal LRU GPU expert cache budget (GB) when cold experts are enabled",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_METAL_EXPERT_PROFILE",
+   "backends": [
+    "metal"
+   ],
+   "reads": [
+    {
+     "file": "engine/metal/src/engine/window.cpp",
+     "line": 1775,
+     "backend": "metal",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "string",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "metal/engine",
+   "note": "[auto] diagnostic / trace / measurement switch by name or by code, not documented for users",
    "retire_after": "",
    "retired_in": ""
   },
@@ -19035,72 +19071,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_METAL_KEEPALIVE_MS",
-   "backends": [
-    "metal"
-   ],
-   "reads": [
-    {
-     "file": "engine/metal/src/mtl_rt.mm",
-     "line": 77,
-     "backend": "metal",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "float",
-   "default_state": null,
-   "code_default": "250.0",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "default",
-   "owner": "metal/engine",
-   "note": "The GPU keep-alive's interval in milliseconds (default 250; 0 turns the keep-alive off). While idle, a tiny GPU job every interval keeps the engine's GPU memory in place, so the first request after a pause does not wait (#6078). Read by metal/src/mtl_rt.mm.",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_METAL_KEEPALIVE_WINDOW_S",
-   "backends": [
-    "metal"
-   ],
-   "reads": [
-    {
-     "file": "engine/metal/src/mtl_rt.mm",
-     "line": 80,
-     "backend": "metal",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "float",
-   "default_state": null,
-   "code_default": "120.0",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "default",
-   "owner": "metal/engine",
-   "note": "How long the GPU keep-alive runs after the last request, in seconds (default 120). After that the GPU memory is given back; it also pauses while macOS reports memory pressure (#6078). Read by metal/src/mtl_rt.mm.",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_METAL_KEEP_FREE_GB",
    "backends": [
     "metal"
@@ -19173,6 +19143,72 @@
    "status": "opt-in",
    "owner": "metal/engine",
    "note": "[auto] documented for users (docs/MAC.md:270)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_METAL_KEEPALIVE_MS",
+   "backends": [
+    "metal"
+   ],
+   "reads": [
+    {
+     "file": "engine/metal/src/mtl_rt.mm",
+     "line": 77,
+     "backend": "metal",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "float",
+   "default_state": null,
+   "code_default": "250.0",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "default",
+   "owner": "metal/engine",
+   "note": "The GPU keep-alive's interval in milliseconds (default 250; 0 turns the keep-alive off). While idle, a tiny GPU job every interval keeps the engine's GPU memory in place, so the first request after a pause does not wait (#6078). Read by metal/src/mtl_rt.mm.",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_METAL_KEEPALIVE_WINDOW_S",
+   "backends": [
+    "metal"
+   ],
+   "reads": [
+    {
+     "file": "engine/metal/src/mtl_rt.mm",
+     "line": 80,
+     "backend": "metal",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "float",
+   "default_state": null,
+   "code_default": "120.0",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "default",
+   "owner": "metal/engine",
+   "note": "How long the GPU keep-alive runs after the last request, in seconds (default 120). After that the GPU memory is given back; it also pauses while macOS reports memory pressure (#6078). Read by metal/src/mtl_rt.mm.",
    "retire_after": "",
    "retired_in": ""
   },
@@ -19720,39 +19756,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_METAL_PREFETCH2",
-   "backends": [
-    "metal"
-   ],
-   "reads": [
-    {
-     "file": "engine/metal/src/engine/stream.cpp",
-     "line": 161,
-     "backend": "metal",
-     "fn": "env_int"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "0",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "metal/engine",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_METAL_PREFETCH_MRU",
    "backends": [
     "metal"
@@ -19782,6 +19785,39 @@
    "status": "default",
    "owner": "metal/engine",
    "note": "[auto] tunable with a built-in default big ? 0 : 1 (metal/src/engine/stream.cpp:162)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_METAL_PREFETCH2",
+   "backends": [
+    "metal"
+   ],
+   "reads": [
+    {
+     "file": "engine/metal/src/engine/stream.cpp",
+     "line": 161,
+     "backend": "metal",
+     "fn": "env_int"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "0",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "metal/engine",
+   "note": "[auto] not documented for users; code default not readable from the call",
    "retire_after": "",
    "retired_in": ""
   },
@@ -22992,46 +23028,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_NORM_ROPE",
-   "backends": [
-    "hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/native_rope.cu",
-     "line": 185,
-     "backend": "hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/kernels/cuda/native_rope.dp.cpp",
-     "line": 235,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "kernels/cuda",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_NO_ARENA_CACHE_DROP",
    "backends": [
     "cuda-hip"
@@ -24055,6 +24051,46 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_NORM_ROPE",
+   "backends": [
+    "hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/native_rope.cu",
+     "line": 185,
+     "backend": "hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/kernels/cuda/native_rope.dp.cpp",
+     "line": 235,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "kernels/cuda",
+   "note": "[auto] not documented for users; code default not readable from the call",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_NUMA_BALANCING",
    "backends": [
     "cuda-hip"
@@ -24309,51 +24345,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_NVFP4_PREFETCH",
-   "backends": [
-    "cpu"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cpu/nvfp4_avx2.cpp",
-     "line": 51,
-     "backend": "cpu",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/kernels/cpu/nvfp4_avx512.cpp",
-     "line": 52,
-     "backend": "cpu",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/kernels/cpu/nvfp4_avx512_parity.cpp",
-     "line": 253,
-     "backend": "cpu",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "2048",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "default",
-   "owner": "kernels/cpu",
-   "note": "[auto] tunable with a built-in default 2048 (src/kernels/cpu/nvfp4_avx2.cpp:51)",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_NV_CHUNK",
    "backends": [
     "cuda"
@@ -24426,6 +24417,51 @@
    "status": "research",
    "owner": "core",
    "note": "[auto] not documented for users; code default not readable from the call",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_NVFP4_PREFETCH",
+   "backends": [
+    "cpu"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cpu/nvfp4_avx2.cpp",
+     "line": 51,
+     "backend": "cpu",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/kernels/cpu/nvfp4_avx512.cpp",
+     "line": 52,
+     "backend": "cpu",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/kernels/cpu/nvfp4_avx512_parity.cpp",
+     "line": 253,
+     "backend": "cpu",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "2048",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "default",
+   "owner": "kernels/cpu",
+   "note": "[auto] tunable with a built-in default 2048 (src/kernels/cpu/nvfp4_avx2.cpp:51)",
    "retire_after": "",
    "retired_in": ""
   },
@@ -24825,6 +24861,239 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_PA_FAST",
+   "backends": [
+    "hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/qsa_prompt_attn.cu",
+     "line": 2348,
+     "backend": "hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/kernels/cuda/qsa_prompt_attn.dp.cpp",
+     "line": 1951,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [
+    {
+     "file": "engine/src/core/arch_defaults.cpp",
+     "line": 183,
+     "value": "1",
+     "arch": "?"
+    },
+    {
+     "file": "engine/src/core/arch_defaults.cpp",
+     "line": 194,
+     "value": "1",
+     "arch": "gfx1151 (Windows)"
+    }
+   ],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/AMD_HIP.md:451",
+    "docs/RADEON_780M.md:85",
+    "docs/RADEON_780M.md:103",
+    "docs/STRIX_HALO.md:135",
+    "docs/STRIX_HALO.md:142",
+    "docs/STRIX_HALO.md:147",
+    "docs/STRIX_HALO_WINDOWS.md:70",
+    "docs/bench-results/2026-10-07-community-gfx1150/README.md:106",
+    "docs/bench-results/2026-10-09-community-strix-halo-laptop-70w/README.md:31",
+    "docs/bench-results/2026-10-12-community-gfx1103/README.md:153"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "default",
+   "owner": "kernels/cuda",
+   "note": "[auto] on by default for some GPU architectures only (? src/core/arch_defaults.cpp:165=1; gfx1151 (Windows) src/core/arch_defaults.cpp:176=1); opt-in elsewhere; the variable overrides it",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_PA_RPF",
+   "backends": [
+    "hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/qsa_prompt_attn.cu",
+     "line": 2306,
+     "backend": "hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "kernels/cuda",
+   "note": "[reviewed] Attention-kernel variant tried in a strix prefill experiment. [notes-strix-pf.md:30]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_PA_TRIM",
+   "backends": [
+    "hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/qsa_prompt_attn.cu",
+     "line": 2305,
+     "backend": "hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "default",
+   "owner": "kernels/cuda",
+   "note": "[reviewed] Defaults in the code: trim 2 + rpf on; PA_TRIM=0|1|2 selects variants. [notes-strix-pf.md:30]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_PA_V1_PREFETCH",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/qsa_prompt_attn.cu",
+     "line": 2550,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "-1",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/DETAILS.md:1264"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "kernels/cuda",
+   "note": "[reviewed] Neutral prefill, decode slower on R9700; experiment, no shipped verdict. [phaseA-tests/r9700/notes-r9700.md:623]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_PA_V2T",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/qsa_prompt_attn.cu",
+     "line": 2545,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/DETAILS.md:1265"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "kernels/cuda",
+   "note": "[auto] documented for users (docs/DETAILS.md:1158)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_PAR_COUNTERS",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/include/strata/program/par_counters.hpp",
+     "line": 29,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "program",
+   "note": "[reviewed] Release notes call it a research switch for parallel work. [rel029/BODY-FINAL.md:62]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_PARITY_DUMP",
    "backends": [
     "cuda-hip"
@@ -25138,39 +25407,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_PAR_COUNTERS",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/include/strata/program/par_counters.hpp",
-     "line": 29,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "program",
-   "note": "[reviewed] Release notes call it a research switch for parallel work. [rel029/BODY-FINAL.md:62]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_PATTN_SM60",
    "backends": [
     "cuda-hip"
@@ -25203,206 +25439,6 @@
    "status": "opt-in",
    "owner": "kernels/cuda",
    "note": "[auto] documented for users (docs/OLDER_GPUS.md:175), 1 more",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PA_FAST",
-   "backends": [
-    "hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/qsa_prompt_attn.cu",
-     "line": 2348,
-     "backend": "hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/kernels/cuda/qsa_prompt_attn.dp.cpp",
-     "line": 1951,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [
-    {
-     "file": "engine/src/core/arch_defaults.cpp",
-     "line": 183,
-     "value": "1",
-     "arch": "?"
-    },
-    {
-     "file": "engine/src/core/arch_defaults.cpp",
-     "line": 194,
-     "value": "1",
-     "arch": "gfx1151 (Windows)"
-    }
-   ],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/AMD_HIP.md:451",
-    "docs/RADEON_780M.md:85",
-    "docs/RADEON_780M.md:103",
-    "docs/STRIX_HALO.md:135",
-    "docs/STRIX_HALO.md:142",
-    "docs/STRIX_HALO.md:147",
-    "docs/STRIX_HALO_WINDOWS.md:70",
-    "docs/bench-results/2026-10-07-community-gfx1150/README.md:106",
-    "docs/bench-results/2026-10-09-community-strix-halo-laptop-70w/README.md:31",
-    "docs/bench-results/2026-10-12-community-gfx1103/README.md:153"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "default",
-   "owner": "kernels/cuda",
-   "note": "[auto] on by default for some GPU architectures only (? src/core/arch_defaults.cpp:165=1; gfx1151 (Windows) src/core/arch_defaults.cpp:176=1); opt-in elsewhere; the variable overrides it",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PA_RPF",
-   "backends": [
-    "hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/qsa_prompt_attn.cu",
-     "line": 2306,
-     "backend": "hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "kernels/cuda",
-   "note": "[reviewed] Attention-kernel variant tried in a strix prefill experiment. [notes-strix-pf.md:30]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PA_TRIM",
-   "backends": [
-    "hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/qsa_prompt_attn.cu",
-     "line": 2305,
-     "backend": "hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "default",
-   "owner": "kernels/cuda",
-   "note": "[reviewed] Defaults in the code: trim 2 + rpf on; PA_TRIM=0|1|2 selects variants. [notes-strix-pf.md:30]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PA_V1_PREFETCH",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/qsa_prompt_attn.cu",
-     "line": 2550,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "-1",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/DETAILS.md:1264"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "kernels/cuda",
-   "note": "[reviewed] Neutral prefill, decode slower on R9700; experiment, no shipped verdict. [phaseA-tests/r9700/notes-r9700.md:623]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PA_V2T",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/qsa_prompt_attn.cu",
-     "line": 2545,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/DETAILS.md:1265"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "kernels/cuda",
-   "note": "[auto] documented for users (docs/DETAILS.md:1158)",
    "retire_after": "",
    "retired_in": ""
   },
@@ -27411,6 +27447,41 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_PF_HC_REGION",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/prefill/prefill.cpp",
+     "line": 2231,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/DETAILS.md:1199"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "prefill",
+   "note": "[reviewed] Listed as opt-in, checked as off unless set. [gh-sweep-1031/INT-TRIAL2.md:95]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_PF_HCDOWN",
    "backends": [
     "cuda-hip",
@@ -27447,41 +27518,6 @@
    "status": "research",
    "owner": "prefill",
    "note": "[auto] off unless set, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PF_HC_REGION",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/prefill/prefill.cpp",
-     "line": 2231,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/DETAILS.md:1199"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "prefill",
-   "note": "[reviewed] Listed as opt-in, checked as off unless set. [gh-sweep-1031/INT-TRIAL2.md:95]",
    "retire_after": "",
    "retired_in": ""
   },
@@ -29015,6 +29051,124 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_PIPE_ADAPT_EVERY",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 11336,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 17192,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 17193,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "string",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/BATCHING.md:410",
+    "docs/BATCHING.md:419",
+    "docs/BATCHING.md:645",
+    "docs/release-notes-0.2.7.md:53"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "program",
+   "note": "[reviewed] \"(opt-in; unset or 0: off, as before)\". [code comment (generate.cpp)]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_PIPE_BYIELD_NODRAIN",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 476,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/BATCHING.md:121"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "program",
+   "note": "[reviewed] Documented =1 batching behaviour switch, off by default. [docs/BATCHING.md:121]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_PIPE_HELPER_SIBLING",
+   "backends": [
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/sycl/src/core/verify.cpp",
+     "line": 203,
+     "backend": "sycl",
+     "fn": "env_on"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "sycl/core",
+   "note": "[auto] off unless set, not documented for users",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_PIPED_CONCURRENT",
    "backends": [
     "cuda-hip"
@@ -30066,124 +30220,6 @@
    "status": "research",
    "owner": "program",
    "note": "[auto] diagnostic / trace / measurement switch by name or by code, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PIPE_ADAPT_EVERY",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 11336,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 17192,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 17193,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "string",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/BATCHING.md:410",
-    "docs/BATCHING.md:419",
-    "docs/BATCHING.md:645",
-    "docs/release-notes-0.2.7.md:53"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "program",
-   "note": "[reviewed] \"(opt-in; unset or 0: off, as before)\". [code comment (generate.cpp)]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PIPE_BYIELD_NODRAIN",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 476,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/BATCHING.md:121"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "program",
-   "note": "[reviewed] Documented =1 batching behaviour switch, off by default. [docs/BATCHING.md:121]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_PIPE_HELPER_SIBLING",
-   "backends": [
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/sycl/src/core/verify.cpp",
-     "line": 203,
-     "backend": "sycl",
-     "fn": "env_on"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "sycl/core",
-   "note": "[auto] off unless set, not documented for users",
    "retire_after": "",
    "retired_in": ""
   },
@@ -31588,39 +31624,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_PREFILL_HELPER_SOURCE",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 11732,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "program",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_PREFILL_HELP_FRAC",
    "backends": [
     "cuda-hip",
@@ -31659,6 +31662,39 @@
    "status": "opt-in",
    "owner": "prefill",
    "note": "[auto] documented for users (docs/MULTI_GPU.md:148)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_PREFILL_HELPER_SOURCE",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 11732,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "program",
+   "note": "[auto] not documented for users; code default not readable from the call",
    "retire_after": "",
    "retired_in": ""
   },
@@ -33113,39 +33149,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_PRIVATE_GU_GRID64",
-   "backends": [
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
-     "line": 4816,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "sycl",
-   "note": "Private opt-in (=1), off by default: the 64-wide grid variant of the IQ gate/up kernel (grid64_enabled, sycl/src/kernels/cuda/iq_kernels.dp.cpp:4816). Read from the code only; the integration lane measured nothing on it.",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_PRIVATE_GU_GRID_S4",
    "backends": [
     "sycl"
@@ -33175,6 +33178,39 @@
    "status": "research",
    "owner": "sycl",
    "note": "Private opt-in (=1), off by default: the S4 grid table variant of the IQ gate/up kernel (grid_s4_enabled, sycl/src/kernels/cuda/iq_kernels.dp.cpp:4913). Read from the code only; the integration lane measured nothing on it.",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_PRIVATE_GU_GRID64",
+   "backends": [
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/sycl/src/kernels/cuda/iq_kernels.dp.cpp",
+     "line": 4816,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "sycl",
+   "note": "Private opt-in (=1), off by default: the 64-wide grid variant of the IQ gate/up kernel (grid64_enabled, sycl/src/kernels/cuda/iq_kernels.dp.cpp:4816). Read from the code only; the integration lane measured nothing on it.",
    "retire_after": "",
    "retired_in": ""
   },
@@ -34811,86 +34847,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_Q6P_GRID",
-   "backends": [
-    "cuda-hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/native_mmvq.cu",
-     "line": 2692,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/kernels/cuda/native_mmvq.dp.cpp",
-     "line": 2712,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "0",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "kernels/cuda",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_Q6P_SELFTEST",
-   "backends": [
-    "cuda-hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/native_mmvq.cu",
-     "line": 2997,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/kernels/cuda/native_mmvq.dp.cpp",
-     "line": 3254,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "kernels/cuda",
-   "note": "[auto] diagnostic / trace / measurement switch by name or by code, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_Q6_PACKED",
    "backends": [
     "cuda-hip",
@@ -34990,15 +34946,62 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_Q80_ROWS1",
+   "name": "STRATA_Q6P_GRID",
    "backends": [
-    "cuda-hip"
+    "cuda-hip",
+    "sycl"
    ],
    "reads": [
     {
      "file": "engine/src/kernels/cuda/native_mmvq.cu",
-     "line": 1384,
+     "line": 2692,
      "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/kernels/cuda/native_mmvq.dp.cpp",
+     "line": 2712,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "0",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "kernels/cuda",
+   "note": "[auto] not documented for users; code default not readable from the call",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_Q6P_SELFTEST",
+   "backends": [
+    "cuda-hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/native_mmvq.cu",
+     "line": 2997,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/kernels/cuda/native_mmvq.dp.cpp",
+     "line": 3254,
+     "backend": "sycl",
      "fn": "getenv"
     }
    ],
@@ -35006,26 +35009,19 @@
    "default_state": null,
    "code_default": null,
    "engine_sets": [],
-   "engine_defaults": [
-    {
-     "file": "engine/src/core/nv_defaults.cpp",
-     "line": 70,
-     "value": "1",
-     "arch": "gfx12"
-    }
-   ],
+   "engine_defaults": [],
    "launch_files": [],
    "launch_sets": [],
    "launch_reads": [],
    "doc_mentions": [],
-   "first_commit": "e6efa2b169",
-   "first_date": "2026-11-19",
-   "since": "v0.2.17",
-   "last_commit": "ca99e886f7",
-   "last_date": "2026-11-19",
-   "status": "default",
-   "owner": "core",
-   "note": "Q8_0 one-row kernel for decode; on for compute capability 12.0 cards, off elsewhere; bit-exact, decode +1.2% (RESULTS-BW-C.md); =0 is the way back",
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "kernels/cuda",
+   "note": "[auto] diagnostic / trace / measurement switch by name or by code, not documented for users",
    "retire_after": "",
    "retired_in": ""
   },
@@ -35225,6 +35221,46 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_Q80_ROWS1",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/native_mmvq.cu",
+     "line": 1384,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [
+    {
+     "file": "engine/src/core/nv_defaults.cpp",
+     "line": 70,
+     "value": "1",
+     "arch": "gfx12"
+    }
+   ],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "e6efa2b169",
+   "first_date": "2026-11-19",
+   "since": "v0.2.17",
+   "last_commit": "ca99e886f7",
+   "last_date": "2026-11-19",
+   "status": "default",
+   "owner": "core",
+   "note": "Q8_0 one-row kernel for decode; on for compute capability 12.0 cards, off elsewhere; bit-exact, decode +1.2% (RESULTS-BW-C.md); =0 is the way back",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_QFUSE",
    "backends": [
     "cuda-hip",
@@ -35407,6 +35443,39 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_QI_GFX12_ATTN",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/image/dit/qi21_kernels.cu",
+     "line": 591,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "image",
+   "note": "[DRAFT] Switch of Strata's own WMMA attention in the image DiT code (strata-dit-step, strata-image) on gfx1200 / gfx1201 (RDNA4): on by default there, 0 turns it off. Measured on an R9700 at 1024 x 1024, 8 steps: 6.93 s with it, 27.75 s without; the pictures are 54.1 dB (worst 35.2 dB) from the ones without it. The opt-in native DiT runner patch for sd-cli (tools/image/sdcpp_native) reads this name too and keeps its own default: there 1 turns it on.",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_QIL",
    "backends": [
     "cuda-hip"
@@ -35439,39 +35508,6 @@
    "status": "research",
    "owner": "core",
    "note": "[reviewed] Neutral prefill, decode slower on R9700; experiment without shipped verdict. [phaseA-tests/r9700/notes-r9700.md:624]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_QI_GFX12_ATTN",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/image/dit/qi21_kernels.cu",
-     "line": 591,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "image",
-   "note": "[DRAFT] Switch of Strata's own WMMA attention in the image DiT code (strata-dit-step, strata-image) on gfx1200 / gfx1201 (RDNA4): on by default there, 0 turns it off. Measured on an R9700 at 1024 x 1024, 8 steps: 6.93 s with it, 27.75 s without; the pictures are 54.1 dB (worst 35.2 dB) from the ones without it. The opt-in native DiT runner patch for sd-cli (tools/image/sdcpp_native) reads this name too and keeps its own default: there 1 turns it on.",
    "retire_after": "",
    "retired_in": ""
   },
@@ -36136,39 +36172,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_RAM_ADAPT2",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 11750,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "program",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_RAM_ADAPT_CACHED_W",
    "backends": [
     "cuda-hip"
@@ -36309,6 +36312,39 @@
     {
      "file": "engine/src/program/generate.cpp",
      "line": 11755,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "program",
+   "note": "[auto] not documented for users; code default not readable from the call",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_RAM_ADAPT2",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 11750,
      "backend": "cuda-hip",
      "fn": "getenv"
     }
@@ -37028,46 +37064,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_ROUTER_BLOCK",
-   "backends": [
-    "hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cuda/router_top10.cu",
-     "line": 462,
-     "backend": "hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/kernels/cuda/router_top10.dp.cpp",
-     "line": 872,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "string",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "kernels/cuda",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_ROUTE_DUMP",
    "backends": [
     "cuda-hip"
@@ -37509,6 +37505,46 @@
    "status": "research",
    "owner": "program",
    "note": "[reviewed] #3476: the verify window's routing for a router the native one does not take (256 experts) in one launch pair per layer (moe_route_window); on by default on gfx906 builds, opt-in (=1) on every other backend; bitwise equal to the per-token calls (route_window_parity).",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_ROUTER_BLOCK",
+   "backends": [
+    "hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cuda/router_top10.cu",
+     "line": 462,
+     "backend": "hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/kernels/cuda/router_top10.dp.cpp",
+     "line": 872,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "string",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "kernels/cuda",
+   "note": "[auto] not documented for users; code default not readable from the call",
    "retire_after": "",
    "retired_in": ""
   },
@@ -37965,6 +38001,46 @@
    "status": "opt-in",
    "owner": "kernels/cuda",
    "note": "[auto] documented for users (docs/AMD_HIP.md:354)",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_SEL_OVERLAP",
+   "backends": [
+    "cuda-hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/prefill/prefill.cpp",
+     "line": 5371,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/prefill/prefill.cpp",
+     "line": 3504,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "prefill",
+   "note": "[auto] off unless set, not documented for users",
    "retire_after": "",
    "retired_in": ""
   },
@@ -38501,46 +38577,6 @@
    "status": "default",
    "owner": "core",
    "note": "[auto] on by default for some GPU architectures only (? src/core/arch_defaults.cpp:166=1; gfx1151 (Windows) src/core/arch_defaults.cpp:179=1); opt-in elsewhere; the variable overrides it",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_SEL_OVERLAP",
-   "backends": [
-    "cuda-hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/prefill/prefill.cpp",
-     "line": 5371,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/prefill/prefill.cpp",
-     "line": 3504,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "prefill",
-   "note": "[auto] off unless set, not documented for users",
    "retire_after": "",
    "retired_in": ""
   },
@@ -40211,6 +40247,39 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_SPEC_T_CYCLE",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 23818,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "program",
+   "note": "[reviewed] Window cost measurement switch used with --spec-oracle. [mac-q/RESULTS-DF2METAL.md:22]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_SPEC_TRACE",
    "backends": [
     "cuda-hip"
@@ -40279,39 +40348,6 @@
    "status": "research",
    "owner": "program",
    "note": "[auto] diagnostic / trace / measurement switch by name or by code, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_SPEC_T_CYCLE",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 23818,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "program",
-   "note": "[reviewed] Window cost measurement switch used with --spec-oracle. [mac-q/RESULTS-DF2METAL.md:22]",
    "retire_after": "",
    "retired_in": ""
   },
@@ -41483,6 +41519,123 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_STAGE_PIN",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/core/expert_source.cpp",
+     "line": 2189,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": "0",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/DETAILS.md:1185",
+    "docs/DETAILS.md:1637"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "opt-in",
+   "owner": "core",
+   "note": "[reviewed] \"STRATA_STAGE_PIN=1, opt-in since 0.1.41\". [notes-145-pp-cache.md:31]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_STAGE_TRIM",
+   "backends": [
+    "cuda-hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 5614,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 5628,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 5628,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 5848,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 5848,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/program/generate.cpp",
+     "line": 3047,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/BATCHING.md:93",
+    "docs/MULTI_GPU.md:170",
+    "docs/MULTI_GPU.md:224",
+    "docs/MULTI_GPU.md:290",
+    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:17",
+    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:103",
+    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:155",
+    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:223",
+    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:224",
+    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:306",
+    "docs/bench-results/2026-10-08-community-2x-titan-rtx-0.1.40.3/README.md:6",
+    "docs/bench-results/2026-10-08-community-2x-titan-rtx-0.1.40.3/README.md:49",
+    "docs/bench-results/2026-10-08-community-2x-titan-rtx-0.1.40.3/README.md:106",
+    "docs/bench-results/2026-10-08-community-2x-titan-rtx-0.1.40.3/README.md:123",
+    "docs/bench-results/2026-10-09-community-4x-rx-7900-xt/README.md:51",
+    "docs/bench-results/2026-10-09-community-4x-rx-7900-xt/README.md:55"
+   ],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "program",
+   "note": "[reviewed] Experimental split-stack flag; no change in report. [_issues_dump/2239.md:67]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_STAGER_BATCH",
    "backends": [
     "cuda-hip"
@@ -41692,123 +41845,6 @@
    "status": "research",
    "owner": "prefill",
    "note": "[reviewed] 8/16 threads tried, -0.3%, nothing there; tuning knob, not a tested-and-dropped feature. [phaseA-tests/round0211/RESULTS-R9700ONE.md:80]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_STAGE_PIN",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/core/expert_source.cpp",
-     "line": 2189,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "int",
-   "default_state": null,
-   "code_default": "0",
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/DETAILS.md:1185",
-    "docs/DETAILS.md:1637"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "opt-in",
-   "owner": "core",
-   "note": "[reviewed] \"STRATA_STAGE_PIN=1, opt-in since 0.1.41\". [notes-145-pp-cache.md:31]",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_STAGE_TRIM",
-   "backends": [
-    "cuda-hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 5614,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 5628,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 5628,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 5848,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 5848,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/program/generate.cpp",
-     "line": 3047,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [
-    "docs/BATCHING.md:93",
-    "docs/MULTI_GPU.md:170",
-    "docs/MULTI_GPU.md:224",
-    "docs/MULTI_GPU.md:290",
-    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:17",
-    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:103",
-    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:155",
-    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:223",
-    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:224",
-    "docs/bench-results/2026-10-06-community-2x-rx-7900-gre/README.md:306",
-    "docs/bench-results/2026-10-08-community-2x-titan-rtx-0.1.40.3/README.md:6",
-    "docs/bench-results/2026-10-08-community-2x-titan-rtx-0.1.40.3/README.md:49",
-    "docs/bench-results/2026-10-08-community-2x-titan-rtx-0.1.40.3/README.md:106",
-    "docs/bench-results/2026-10-08-community-2x-titan-rtx-0.1.40.3/README.md:123",
-    "docs/bench-results/2026-10-09-community-4x-rx-7900-xt/README.md:51",
-    "docs/bench-results/2026-10-09-community-4x-rx-7900-xt/README.md:55"
-   ],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "program",
-   "note": "[reviewed] Experimental split-stack flag; no change in report. [_issues_dump/2239.md:67]",
    "retire_after": "",
    "retired_in": ""
   },
@@ -43632,39 +43668,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_TEST_PINNED_SHARE",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 10655,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "float",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "program",
-   "note": "[auto] not documented for users; code default not readable from the call",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_TEST_PIN_BUDGET_MIB",
    "backends": [
     "cuda-hip"
@@ -43726,6 +43729,39 @@
    "last_date": "2026-11-17",
    "status": "research",
    "owner": "core",
+   "note": "[auto] not documented for users; code default not readable from the call",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_TEST_PINNED_SHARE",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 10655,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "float",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "program",
    "note": "[auto] not documented for users; code default not readable from the call",
    "retire_after": "",
    "retired_in": ""
@@ -44346,39 +44382,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_TQP_AVX2_FAST",
-   "backends": [
-    "cpu"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/kernels/cpu/tq_avx2.cpp",
-     "line": 191,
-     "backend": "cpu",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "cb60135e78",
-   "first_date": "2026-11-19",
-   "since": "v0.2.17",
-   "last_commit": "cb60135e78",
-   "last_date": "2026-11-19",
-   "status": "research",
-   "owner": "program",
-   "note": "[reviewed] #5873, opt-in (CPU, off by default): the PR's faster AVX2 rows for the pair trellis (TQP5/6/7, Gyro-L), same bits (tqp_cpu_test); our paired A/B on a Ryzen 5 5600X showed no gain with GCC, so it stays off.",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_TQ_ISA",
    "backends": [
     "cpu"
@@ -44521,6 +44524,39 @@
    "status": "unsure",
    "owner": "kernels/cuda",
    "note": "[reviewed] Gated by tq_sub8_on(); no result verdict in evidence. [notes-022-pascaltq.md:65]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_TQP_AVX2_FAST",
+   "backends": [
+    "cpu"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/kernels/cpu/tq_avx2.cpp",
+     "line": 191,
+     "backend": "cpu",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "cb60135e78",
+   "first_date": "2026-11-19",
+   "since": "v0.2.17",
+   "last_commit": "cb60135e78",
+   "last_date": "2026-11-19",
+   "status": "research",
+   "owner": "program",
+   "note": "[reviewed] #5873, opt-in (CPU, off by default): the PR's faster AVX2 rows for the pair trellis (TQP5/6/7, Gyro-L), same bits (tqp_cpu_test); our paired A/B on a Ryzen 5 5600X showed no gain with GCC, so it stays off.",
    "retire_after": "",
    "retired_in": ""
   },
@@ -45817,72 +45853,6 @@
    "retired_in": ""
   },
   {
-   "name": "STRATA_VERIFY_NODES",
-   "backends": [
-    "cuda",
-    "cuda-hip",
-    "hip",
-    "sycl"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/core/mtp.cpp",
-     "line": 971,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/core/verify.cpp",
-     "line": 2982,
-     "backend": "hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/core/verify.cpp",
-     "line": 3010,
-     "backend": "hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/core/verify.cpp",
-     "line": 3021,
-     "backend": "cuda",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/core/verify.cpp",
-     "line": 2063,
-     "backend": "sycl",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/sycl/src/core/verify.cpp",
-     "line": 2110,
-     "backend": "sycl",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": "off",
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "4058aa782b",
-   "first_date": "2026-11-17",
-   "since": "v0.2.16",
-   "last_commit": "4058aa782b",
-   "last_date": "2026-11-17",
-   "status": "research",
-   "owner": "core",
-   "note": "[auto] off unless set, not documented for users",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
    "name": "STRATA_VERIFY_NO_HOST",
    "backends": [
     "sycl"
@@ -45973,6 +45943,72 @@
    "status": "opt-in",
    "owner": "sycl/core",
    "note": "[reviewed] SYCL setting with several release-note fixes; user-visible. [release-v0.1.43.1.md:28]",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
+   "name": "STRATA_VERIFY_NODES",
+   "backends": [
+    "cuda",
+    "cuda-hip",
+    "hip",
+    "sycl"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/core/mtp.cpp",
+     "line": 971,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/core/verify.cpp",
+     "line": 2982,
+     "backend": "hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/core/verify.cpp",
+     "line": 3010,
+     "backend": "hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/core/verify.cpp",
+     "line": 3021,
+     "backend": "cuda",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/core/verify.cpp",
+     "line": 2063,
+     "backend": "sycl",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/sycl/src/core/verify.cpp",
+     "line": 2110,
+     "backend": "sycl",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "off",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "4058aa782b",
+   "first_date": "2026-11-17",
+   "since": "v0.2.16",
+   "last_commit": "4058aa782b",
+   "last_date": "2026-11-17",
+   "status": "research",
+   "owner": "core",
+   "note": "[auto] off unless set, not documented for users",
    "retire_after": "",
    "retired_in": ""
   },
@@ -46538,6 +46574,45 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_WIN_HIP_RISKY",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 2225,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    },
+    {
+     "file": "engine/src/program/generate.cpp",
+     "line": 11282,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "15b55d5581",
+   "first_date": "2026-11-19",
+   "since": "v0.2.17",
+   "last_commit": "15b55d5581",
+   "last_date": "2026-11-19",
+   "status": "research",
+   "owner": "adaptive tier",
+   "note": "Windows with an AMD card (HIP) only: --adapt-async 1 and STRATA_ADAPT_OVERLAP=1 are refused (display-driver reset, GPU fault); =1 takes both as asked and warns. Not a user setting; for testing.",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_WINDOW_SYNC",
    "backends": [
     "sycl"
@@ -46600,45 +46675,6 @@
    "status": "research",
    "owner": "program",
    "note": "Research switch: =0 turns off the window warm-up (one dummy verify window per allowed width, once, before the first request is read, so a width the policy picks inside a long request does not pay its first-run graph or pipeline build there); default on, changes nothing a request can see.",
-   "retire_after": "",
-   "retired_in": ""
-  },
-  {
-   "name": "STRATA_WIN_HIP_RISKY",
-   "backends": [
-    "cuda-hip"
-   ],
-   "reads": [
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 2225,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    },
-    {
-     "file": "engine/src/program/generate.cpp",
-     "line": 11282,
-     "backend": "cuda-hip",
-     "fn": "getenv"
-    }
-   ],
-   "parse": "flag",
-   "default_state": null,
-   "code_default": null,
-   "engine_sets": [],
-   "engine_defaults": [],
-   "launch_files": [],
-   "launch_sets": [],
-   "launch_reads": [],
-   "doc_mentions": [],
-   "first_commit": "15b55d5581",
-   "first_date": "2026-11-19",
-   "since": "v0.2.17",
-   "last_commit": "15b55d5581",
-   "last_date": "2026-11-19",
-   "status": "research",
-   "owner": "adaptive tier",
-   "note": "Windows with an AMD card (HIP) only: --adapt-async 1 and STRATA_ADAPT_OVERLAP=1 are refused (display-driver reset, GPU fault); =1 takes both as asked and warns. Not a user setting; for testing.",
    "retire_after": "",
    "retired_in": ""
   },
