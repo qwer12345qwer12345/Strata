@@ -95,6 +95,27 @@ int main() {
         c.close();
         if (c.valid() || c.slots() != 0) return fail("close");
     }
+    // Live Memory: reserve the full virtual range but initially commit only a 30 MiB request
+    // (rounded up to four 8 MiB segments). Both uniform and sized slot layouts must expose only
+    // the committed prefix, then grow in place without moving the first slot.
+    for (int sized = 0; sized < 2; ++sized) {
+        strata::core::ExpertCache c;
+        c.set_segment_bytes(kSeg);
+        c.set_initial_segment_bytes(30ll << 20);
+        std::string err;
+        const bool ok = sized ? c.open_sized(std::vector<int64_t>(kSlots, kBlob), 4, 64, err)
+                              : c.open(kSlots, 4, 64, kBlob, err);
+        if (!ok) return fail("live initial open", err);
+        if (!c.segmented() || c.full_slots() != kSlots || c.slots() != 32 ||
+            c.mapped_bytes() != 32ll << 20) return fail("live initial prefix");
+        uint8_t* const first = c.device_slot(0);
+        if (!fill(c, 0, 32, kBlob) || !check(c, 32, kBlob)) return fail("live initial fill");
+        if (!c.grow(70ll << 20, err) || c.slots() != 64 || c.mapped_bytes() != 64ll << 20)
+            return fail("live initial grow", err);
+        if (c.device_slot(0) != first || !fill(c, 32, 64, kBlob) || !check(c, 64, kBlob))
+            return fail("live grown prefix");
+        c.close();
+    }
     // a shrink the driver refuses part way (strata/core/expert_cache_refuse.hpp): what was given back before the refusal
     // is gone, the rest keeps its bytes, the residency entries past it are taken (strata/core/residency_trim.hpp), and a
     // grow maps everything again.  12 segments of 8 MiB; a shrink to 30 MiB walks segments 11 down to 4.
