@@ -13498,12 +13498,31 @@ int main(int argc, char** argv) {
                 if (!ec && cap < (uint64_t(64) << 20)) { why = "the disk is full"; cap = 0; }
             }
             size_t cleaned = 0;
-            if (cap > 0 && !spill.open(root, cap, why, &cleaned)) cap = 0;
+            const char* l2_persistent_env = std::getenv("STRATA_L2_PERSISTENT");
+            const bool persistent_spill = l2_persistent_env != nullptr && std::strcmp(l2_persistent_env, "1") == 0;
             if (cap > 0) {
-                std::fprintf(stderr, "strata serve: conversation cache: SSD tier in %s, up to %llu MiB%s\n", spill.dir().string().c_str(),
-                             (unsigned long long) (cap >> 20),
-                             cleaned ? (", " + std::to_string(cleaned) + " folder" + (cleaned == 1 ? "" : "s") +
-                                        " of ended engines removed").c_str() : "");
+                if (persistent_spill) {
+                    strata::core::SessionFileIdentity id;
+                    std::string identity_error;
+                    if (!session_identity(id, identity_error, {})) {
+                        why = "the model identity cannot be fingerprinted for persistent L2 (" + identity_error + ")";
+                        cap = 0;
+                    } else {
+                        spill_id = id;
+                        if (!spill.open_persistent(root, cap, id, why, &cleaned)) cap = 0;
+                    }
+                } else if (!spill.open(root, cap, why, &cleaned)) {
+                    cap = 0;
+                }
+            }
+            if (cap > 0) {
+                const std::string cleaned_note = cleaned
+                    ? ", " + std::to_string(cleaned) + (persistent_spill ? " stale entries removed" :
+                                                                       " folders of ended engines removed")
+                    : std::string();
+                std::fprintf(stderr, "strata serve: conversation cache: %sSSD tier in %s, up to %llu MiB%s\n",
+                             persistent_spill ? "persistent " : "", spill.dir().string().c_str(),
+                             (unsigned long long) (cap >> 20), cleaned_note.c_str());
             } else {
                 std::fprintf(stderr, "strata serve: conversation cache: no SSD tier: %s\n", why.c_str());
             }
