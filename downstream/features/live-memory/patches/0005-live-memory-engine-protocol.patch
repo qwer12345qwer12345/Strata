@@ -1,0 +1,522 @@
+diff --git a/engine/include/strata/core/live_memory.hpp b/engine/include/strata/core/live_memory.hpp
+index ced325824..4362843c5 100644
+--- a/engine/include/strata/core/live_memory.hpp
++++ b/engine/include/strata/core/live_memory.hpp
+@@ -81,4 +81,73 @@ inline bool parse_live_memory_request(const std::string& line, LiveMemoryRequest
+     return true;
+ }
+ 
++// ---------------- PR4 Phase 3: the Engine's MEMORY handling, pure parts ----------------
++
++// A terminal ACK state.  Every MEMORY request ends in exactly one: OK (the target was reached), PARTIAL
++// (a limit or the floor stopped the step; the ACTUAL capacity is reported) or REFUSED (nothing applied).
++// There is no asynchronous state: the sender does not poll, the engine answers once.
++enum class LiveMemoryAck { Ok, Partial, Refused };
++
++// The ACK line, the VRAM command's key=value shape:
++//   ACK <id> <OK|PARTIAL|REFUSED> ram_resident_mib=<n> vram_committed_mib=<n> vram_reserve_mib=<n>[ note=<words>]
++// The numbers are the ACTUAL capacity after the request (not what was asked); `note` carries the reason a
++// PARTIAL or REFUSED stopped short, as words with '_' in place of spaces.
++inline std::string live_memory_ack_line(uint64_t id, LiveMemoryAck state, uint64_t ram_resident_mib,
++                                        uint64_t vram_committed_mib, uint64_t vram_reserve_mib,
++                                        const std::string& note) {
++    const char* name = state == LiveMemoryAck::Ok ? "OK" : state == LiveMemoryAck::Partial ? "PARTIAL" : "REFUSED";
++    std::ostringstream out;
++    out << "ACK " << id << ' ' << name << " ram_resident_mib=" << ram_resident_mib
++        << " vram_committed_mib=" << vram_committed_mib << " vram_reserve_mib=" << vram_reserve_mib;
++    if (!note.empty()) out << " note=" << note;
++    return out.str();
++}
++
++// The CAPACITY report: actual RAM resident in the Live Memory tiers, a FRESH cgroup-aware available-RAM
++// reading, the expert cache's committed bytes, the free VRAM and the reserve.  Emitted after every MEMORY
++// ACK and VRAM command, on a `CAPACITY` line, and periodically between requests while Live Memory is on.
++inline std::string live_memory_capacity_line(uint64_t ram_resident_mib, uint64_t ram_available_mib,
++                                             uint64_t vram_committed_mib, uint64_t vram_free_mib,
++                                             uint64_t vram_reserve_mib) {
++    std::ostringstream out;
++    out << "CAPACITY ram_resident_mib=" << ram_resident_mib << " ram_available_mib=" << ram_available_mib
++        << " vram_committed_mib=" << vram_committed_mib << " vram_free_mib=" << vram_free_mib
++        << " vram_reserve_mib=" << vram_reserve_mib;
++    return out.str();
++}
++
++// The one pending request slot.  A MEMORY line that arrives while the engine cannot apply changes (a
++// prompt's loan is out, batch slots are decoding) waits here and is applied at the next between-requests
++// boundary - instead of being refused, which would make every resize race the conversation it serves.  A
++// NEWER request replaces the pending one only when it releases capacity in both tiers
++// (live_memory_supersedes); anything else is refused at once, so the sender learns now rather than after
++// the old request's effects landed.
++struct LiveMemoryPending {
++    // True: the request is now pending (or replaced the pending one).  False: refused now; `why` says why.
++    bool push(const LiveMemoryRequest& next, uint64_t resident_bytes, std::string& why) {
++        if (request.id == 0) {
++            request = next;
++            why.clear();
++            return true;
++        }
++        if (live_memory_supersedes(next, request, resident_bytes)) {
++            request = next;
++            why.clear();
++            return true;
++        }
++        why = "a capacity change is already waiting (id " + std::to_string(request.id) + "); supersede it by "
++              "releasing capacity in both tiers, or wait for its ACK";
++        return false;
++    }
++    // The pending request, or false when none waits (id 0 after: it has been taken).
++    bool take(LiveMemoryRequest& out) {
++        if (request.id == 0) return false;
++        out = request;
++        request = LiveMemoryRequest{};
++        return true;
++    }
++    bool active() const { return request.id != 0; }
++    LiveMemoryRequest request;
++};
++
+ } // namespace strata::core
+diff --git a/engine/src/program/generate.cpp b/engine/src/program/generate.cpp
+index 40aa44885..81b0f44b2 100644
+--- a/engine/src/program/generate.cpp
++++ b/engine/src/program/generate.cpp
+@@ -44,6 +44,7 @@
+ #include "strata/core/remote_expert_opt.hpp"
+ #include "strata/core/expert_cache.hpp"
+ #include "strata/core/expert_nibble.hpp"
++#include "strata/core/live_memory.hpp"
+ #include "strata/core/conversation_snapshot.hpp"
+ #include "strata/core/lookup_default.hpp"
+ #include "strata/core/serve_stop_bound.hpp"
+@@ -15503,6 +15504,28 @@ int main(int argc, char** argv) {
+             if (!(o.batch > 0 && o.batch_groups > 1 && !stages.empty() && piped_mtp && ver.deferred_commit_on())) return false;
+             return (o.batch / o.batch_groups) * pm_slot_rows() <= batch_max_t();
+         }();
++        // Live Memory (PR4): the blocks tier is enabled before the first request (the MEMORY protocol turns blocks
++        // on and off at runtime; nothing is taken until one asks).  The env reads sit here so the INFO line can
++        // advertise live_memory=1; the ack/capacity machinery follows the VRAM command's declaration below.
++        const bool live_memory_on = [&] {
++            const char* e = std::getenv("STRATA_LIVE_MEMORY");
++            return e != nullptr && e[0] != '\0' && e[0] != '0';
++        }();
++        const bool live_memory_pin = [&] {
++            const char* e = std::getenv("STRATA_LIVE_MEMORY_PIN_RAM");
++            return e != nullptr && e[0] != '\0' && e[0] != '0';
++        }();
++        const uint64_t live_memory_max_block = [&] {
++            const char* e = std::getenv("STRATA_LIVE_MEMORY_MAX_BLOCK_MIB");
++            const uint64_t v = e != nullptr && *e != '\0' ? std::strtoull(e, nullptr, 10) : 512;
++            return v == 0 ? 512 : v;
++        }() << 20;
++        const double live_memory_capacity_s = [&] {
++            const char* e = std::getenv("STRATA_LIVE_MEMORY_CAPACITY_S");
++            const double v = e != nullptr && *e != '\0' ? std::atof(e) : 10.0;
++            return v > 0 ? v : 0.0;
++        }();
++        if (live_memory_on) src.set_live_ram(true, live_memory_pin, live_memory_max_block);
+         // what the server's Monitor tab shows (servers before 0.1.8 skip unknown lines until READY)
+         {
+             size_t free_b = 0, total_b = 0;
+@@ -15529,7 +15552,7 @@ int main(int argc, char** argv) {
+                         "mtp_max=%d lookup=%d vram_free_mib=%lld cvec=%s arena_mib=%lld pool_workers=%d pcie_frac=%.2f "
+                         "spec_min_p=%.2f conversation_cache_mib=%lld conversation_cache_slots=%d "
+                         "conversation_cache_min_free_mib=%lld conversation_cache_min_tokens=%lld "
+-                        "tail_role_token=%lld vram_elastic=%d "
++                        "tail_role_token=%lld vram_elastic=%d live_memory=%d "
+                         "prefill_cap=%lld prefill_stages=%d stream_all_min=%lld prefill_pipe=%g%s engine=" STRATA_VERSION "\n",
+                         (long long) o.max_context, o.kv.c_str(),
+                         (long long) (g.n_qsa_layers() > 0 && ss.qsa_states[ss.qsa_primary()].kv_mode == 1
+@@ -15542,7 +15565,7 @@ int main(int argc, char** argv) {
+                         pool.workers(), o.pcie_frac,
+                         o.spec_min_p, (long long) o.conversation_cache_mib, o.conversation_cache_slots,
+                         (long long) o.conversation_cache_min_free_mib, (long long) o.conversation_cache_min_tokens,
+-                        (long long) o.tail_role_token, xcache.segmented() ? 1 : 0,
++                        (long long) o.tail_role_token, xcache.segmented() ? 1 : 0, live_memory_on ? 1 : 0,
+                         // the prompt path: its chunk cap (the VRAM command's relend can lower it later), the stages a
+                         // prompt flows through, the chunk size from which a chunk streams every expert, --prefill-pipe
+                         (long long) o.prefill_chunk, sp.stage_count(),
+@@ -15883,6 +15906,42 @@ int main(int argc, char** argv) {
+             p.first = (int32_t) std::max<int64_t>(0, live - part_slots(p, c));
+             p.first_now = -1;   // laid out again at the next loan
+         };
++        // The experts a shrink turned into CPU misses ride `vram_evicted` (residency index, slot); a grow puts
++        // them back - or, when the adaptive tier already brought that expert back, the layer's most-routed miss.
++        // Shared by the VRAM command and Live Memory's MEMORY handler: both grow over the same evictions.
++        auto refill_evicted = [&](std::string& e) -> bool {
++            const int64_t live = xcache.slots();
++            std::string ferr;
++            std::vector<std::pair<int32_t, int32_t>> keep_out;
++            for (const auto& [i, slot] : vram_evicted) {
++                if (slot >= live) { keep_out.emplace_back(i, slot); continue; }
++                const int64_t layer = i / g.n_expert;
++                int64_t pick = i;
++                if (host_res[(size_t) i] >= 0) {   // back already (the adaptive tier): the layer's most-routed miss
++                    pick = -1;
++                    float best = -1.0f;
++                    for (int64_t ex = 0; ex < g.n_expert; ++ex) {
++                        const size_t j = (size_t) (layer * g.n_expert + ex);
++                        if (host_res[j] >= 0) continue;
++                        const float u = drive.d.usage.empty() ? 0.0f : drive.d.usage[j];
++                        if (u > best) { best = u; pick = (int64_t) j; }
++                    }
++                }
++                if (pick < 0) continue;
++                const uint8_t* b = srcp->blob_stable(layer, pick % g.n_expert);
++                if (b == nullptr || !xcache.fill_slot_queued(slot, b, ferr,
++                        (int64_t) strata::kernels::cpu::expert_layout().blob_bytes(layer))) {
++                    e = "refilling the cache failed: " + ferr;
++                    return false;
++                }
++                srcp->note_async_read(b, nullptr);   // #1237: the queued copy reads a stage buffer; it is not recycled under it
++                host_res[(size_t) pick] = slot;
++            }
++            vram_evicted.swap(keep_out);
++            if (!xcache.sync_queued(ferr)) { e = ferr; return false; }
++            res_upload();
++            return true;
++        };
+         auto vram_command = [&](const std::string& cmd, std::string& e) -> bool {
+             // `VRAM` alone: the reserve the engine started with (--vram-reserve-mib)
+             char* end = nullptr;
+@@ -15934,36 +15993,7 @@ int main(int argc, char** argv) {
+             } else if (mapped < xcache.full_bytes()) {
+                 std::string gerr;
+                 if (!xcache.grow(mapped + ((int64_t) free_b - want_free), gerr)) note = " (" + gerr + ")";
+-                const int64_t live = xcache.slots();
+-                std::string ferr;
+-                std::vector<std::pair<int32_t, int32_t>> keep_out;
+-                for (const auto& [i, slot] : vram_evicted) {
+-                    if (slot >= live) { keep_out.emplace_back(i, slot); continue; }
+-                    const int64_t layer = i / g.n_expert;
+-                    int64_t pick = i;
+-                    if (host_res[(size_t) i] >= 0) {   // back already (the adaptive tier): the layer's most-routed miss
+-                        pick = -1;
+-                        float best = -1.0f;
+-                        for (int64_t ex = 0; ex < g.n_expert; ++ex) {
+-                            const size_t j = (size_t) (layer * g.n_expert + ex);
+-                            if (host_res[j] >= 0) continue;
+-                            const float u = drive.d.usage.empty() ? 0.0f : drive.d.usage[j];
+-                            if (u > best) { best = u; pick = (int64_t) j; }
+-                        }
+-                    }
+-                    if (pick < 0) continue;
+-                    const uint8_t* b = srcp->blob_stable(layer, pick % g.n_expert);
+-                    if (b == nullptr || !xcache.fill_slot_queued(slot, b, ferr,
+-                            (int64_t) strata::kernels::cpu::expert_layout().blob_bytes(layer))) {
+-                        e = "VRAM: refilling the cache failed: " + ferr;
+-                        return false;
+-                    }
+-                    srcp->note_async_read(b, nullptr);   // #1237: the queued copy reads a stage buffer; it is not recycled under it
+-                    host_res[(size_t) pick] = slot;
+-                }
+-                vram_evicted.swap(keep_out);
+-                if (!xcache.sync_queued(ferr)) { e = "VRAM: " + ferr; return false; }
+-                res_upload();
++                if (!refill_evicted(e)) return false;
+             }
+             relend();
+             cudaMemGetInfo(&free_b, &total_b);
+@@ -15980,6 +16010,214 @@ int main(int argc, char** argv) {
+                         (long long) (free_b >> 20), (long long) o.prefill_chunk);
+             return true;
+         };
++        // ---- Live Memory (PR4): MEMORY <id> <resident_mib> <vram_reserve_mib>, the acknowledged capacity protocol.
++        // Opt-in with STRATA_LIVE_MEMORY=1: the FileExpertSource's releasable RAM blocks tier (the VRAM side rides the
++        // same segmented cache --vram-elastic already provides).  The engine is the FINAL admission authority: it
++        // refuses what its own floors refuse, and every request ends in exactly one terminal ACK (OK / PARTIAL /
++        // REFUSED) that reports the ACTUAL capacity, never a false success.  CAPACITY reports the actual tiers and a
++        // fresh cgroup-aware RAM reading: after every ACK, after every VRAM command, on a `CAPACITY` line, and
++        // periodically between requests (STRATA_LIVE_MEMORY_CAPACITY_S, default 10; 0: only on demand).
++        // A request that arrives while nothing can be applied (a prompt's loan is out, batch slots decode) waits in
++        // `live_pending` and is applied at the next between-requests boundary; a newer request supersedes it only
++        // when it releases capacity in both tiers (live_memory.hpp), anything else is refused at once.
++        strata::core::LiveMemoryPending live_pending;
++        uint64_t live_vram_reserve_mib = 0;   // the reserve the MEMORY/VRAM commands last agreed on (0: none asked)
++        Clock::time_point live_capacity_at = Clock::now() - std::chrono::hours(1);
++        // The safe-point sequence a resize shares with the VRAM command.  The structural checks refuse for
++        // good (they cannot change while the process runs): the caller answers ERR at once.  The transient
++        // ones (a loan out, a verify graph not drained) mean "not NOW": the request waits and is retried at
++        // the next between-requests boundary instead of being lost or answered with a false refusal.
++        auto live_resize_supported = [&](std::string& e) -> bool {
++            if (!xcache.segmented()) {
++                e = "MEMORY needs an engine started with --vram-elastic (one segmented expert cache)";
++                return false;
++            }
++            if (src.complement_ready()) {
++                e = "MEMORY: not with the resident low-RAM mode (its RAM copy is one startup-sized block)";
++                return false;
++            }
++            if (peer.valid()) { e = "MEMORY: not with --peer-device"; return false; }
++            return true;
++        };
++        auto live_resize_ready = [&](std::string& e) -> bool {
++            if (!live_resize_supported(e)) return false;
++            for (const PfPart& p : pf_parts)
++                if (!p.lent.empty()) { e = "a prompt's loan is still out; the request waits"; return false; }
++            if (!ver.wait_commit(e)) return false;
++            adapt_quiesce();
++            if (cudaDeviceSynchronize() != cudaSuccess) {
++                e = std::string("the device failed before the resize: ") + cudaGetErrorString(cudaGetLastError());
++                return false;
++            }
++            return true;
++        };
++        auto emit_capacity = [&] {
++            size_t free_b = 0, total_b = 0;
++            cudaMemGetInfo(&free_b, &total_b);
++            uint64_t ram_available = 0;
++            const std::optional<strata::core::HostMemoryReading> mem = strata::core::sample_host_memory();
++            if (mem) ram_available = mem->available;
++            const uint64_t ram_resident = (uint64_t) src.live_ram_bytes();
++            std::printf("%s\n", strata::core::live_memory_capacity_line(
++                                     ram_resident >> 20, ram_available >> 20,
++                                     (uint64_t) xcache.mapped_bytes() >> 20, (uint64_t) free_b >> 20,
++                                     live_vram_reserve_mib)
++                                     .c_str());
++            std::fflush(stdout);
++        };
++        // One MEMORY request, applied at a safe point: the RAM steps first (release whole blocks / grow bounded
++        // ones), then the VRAM steps - growth only when the request does not relieve pressure
++        // (live_memory_gpu_growth_allowed), budgeted by a fresh free-VRAM reading (live_memory_gpu_budget).
++        auto apply_memory = [&](const strata::core::LiveMemoryRequest& req) {
++            // The RAM growth's rank, fresh every request: the profile's pairs the GPU cache does NOT hold,
++            // hottest first; without a profile, every pair in layer-major order (a deterministic cold start).
++            std::vector<std::pair<int32_t, int32_t>> memory_rank;
++            memory_rank.reserve((size_t) (g.n_layers * g.n_expert));
++            if (!profile.empty()) {
++                for (const auto& [layer, expert] : profile)
++                    if (layer >= 0 && layer < g.n_layers && expert >= 0 && expert < g.n_expert &&
++                        host_res[(size_t) ((int64_t) layer * g.n_expert + expert)] < 0)
++                        memory_rank.emplace_back(layer, expert);
++            } else {
++                for (int64_t layer = 0; layer < g.n_layers; ++layer)
++                    for (int64_t expert = 0; expert < g.n_expert; ++expert)
++                        if (host_res[(size_t) (layer * g.n_expert + expert)] < 0)
++                            memory_rank.emplace_back((int32_t) layer, (int32_t) expert);
++            }
++            // The RAM tier's floor: the conversation cache's park floor is the engine's own guard
++            // (conversation_memory_admit is checked per grow step inside the source); the live floor here keeps
++            // the whole engine's working set out of the block tier's reach.
++            const uint64_t floor_mib = 2048;
++            const char* state = "OK";
++            std::string note;
++            // ---- the RAM steps ----
++            const uint64_t have_ram = (uint64_t) src.live_ram_bytes();
++            const uint64_t want_ram = req.resident_mib << 20;
++            if (want_ram < have_ram) {   // a shrink: whole blocks out, the LAST grown first
++                bool ram_done = false;
++                const uint64_t drop = have_ram - want_ram;
++                uint64_t dropped = 0, remaining = have_ram;
++                const bool released = strata::core::live_memory_ram_step(ram_done, [&](bool& reached) {
++                    std::string e2;
++                    if (!src.live_ram_release(drop, dropped, remaining, e2)) {
++                        note = e2;
++                        return false;
++                    }
++                    // whole blocks: the tier may land below the MiB target - that shrink is complete
++                    reached = remaining <= want_ram || dropped >= drop;
++                    return true;
++                });
++                if (!released || !ram_done) {
++                    state = "PARTIAL";
++                    if (note.empty()) note = "the RAM release fell short of the target";
++                }
++            } else if (want_ram > have_ram) {
++                bool ram_done = false;
++                while (!ram_done) {
++                    uint64_t added = 0;
++                    bool pinned = false;
++                    std::string e2;
++                    const bool grew = strata::core::live_memory_ram_step(ram_done, [&](bool& reached) {
++                        if (!src.live_ram_grow(want_ram - (uint64_t) src.live_ram_bytes(), floor_mib << 20, memory_rank,
++                                               added, pinned, e2)) {
++                            note = e2;
++                            return false;
++                        }
++                        reached = (uint64_t) src.live_ram_bytes() >= want_ram || added == 0;   // nothing fits: this is all
++                        return true;
++                    });
++                    if (!grew) {
++                        state = (uint64_t) src.live_ram_bytes() > have_ram ? "PARTIAL" : "REFUSED";
++                        if (note.empty()) note = "the RAM growth stopped early";
++                        break;
++                    }
++                    if (added == 0) break;   // the rank is exhausted: this is all the tier can take
++                }
++                if (!ram_done && (uint64_t) src.live_ram_bytes() < want_ram) {
++                    state = (uint64_t) src.live_ram_bytes() > have_ram ? "PARTIAL" : "REFUSED";
++                    if (note.empty()) note = "the RAM growth fell short of the target";
++                }
++            }
++            // ---- the VRAM steps ----
++            const uint64_t previous_reserve = live_vram_reserve_mib;
++            live_vram_reserve_mib = req.vram_reserve_mib;
++            size_t free_b = 0, total_b = 0;
++            cudaMemGetInfo(&free_b, &total_b);
++            const int64_t seg = xcache.segment_bytes() > 0 ? xcache.segment_bytes() : 32 << 20;
++            const uint64_t budget = strata::core::live_memory_gpu_budget(
++                free_b, (uint64_t) xcache.mapped_bytes(), req.vram_reserve_mib << 20, (uint64_t) seg,
++                strata::core::live_memory_gpu_growth_allowed(req, (uint64_t) src.live_ram_bytes(), previous_reserve));
++            if (budget != (uint64_t) xcache.mapped_bytes()) {
++                if (budget < (uint64_t) xcache.mapped_bytes()) {
++                    // the tail's experts leave their slots BEFORE the shrink: resize_transactional refuses a
++                    // shrink that would strand a resident expert (PR3's rule); their refill rides vram_evicted
++                    strata::core::evict_slots_past(host_res, xcache.slots_within((int64_t) budget), vram_evicted);
++                    res_upload();
++                }
++                std::string e2;
++                const bool grew = budget > (uint64_t) xcache.mapped_bytes();
++                if (!xcache.resize_transactional((int64_t) budget, e2)) {
++                    if (state == "OK") state = "PARTIAL";
++                    if (note.empty()) note = e2;
++                } else if (grew) {
++                    // the grow landed: the evicted experts go back into their slots (refill_evicted)
++                    std::string e3;
++                    if (!refill_evicted(e3)) {
++                        if (state == "OK") state = "PARTIAL";
++                        if (note.empty()) note = e3;
++                    }
++                }
++                relend();
++            }
++            // ---- the terminal ACK: the ACTUAL capacity, and the limitation when one stopped the request ----
++            cudaMemGetInfo(&free_b, &total_b);
++            const uint64_t ram_resident_mib = (uint64_t) src.live_ram_bytes() >> 20;
++            const uint64_t vram_committed_mib = (uint64_t) xcache.mapped_bytes() >> 20;
++            std::string ack_note;
++            ack_note.reserve(note.size());
++            for (const char c : note)   // the note rides as one note= token: '_' in place of spaces
++                ack_note.push_back(c == ' ' || c == '\t' || c == '\n' ? '_' : c);
++            const strata::core::LiveMemoryAck ack_state =
++                std::strcmp(state, "OK") == 0 ? strata::core::LiveMemoryAck::Ok
++                : std::strcmp(state, "PARTIAL") == 0 ? strata::core::LiveMemoryAck::Partial
++                                                     : strata::core::LiveMemoryAck::Refused;
++            std::printf("%s\n", strata::core::live_memory_ack_line(req.id, ack_state, ram_resident_mib,
++                                                                   vram_committed_mib, live_vram_reserve_mib, ack_note)
++                                     .c_str());
++            std::fflush(stdout);
++            emit_capacity();
++        };
++        auto memory_command = [&](const std::string& line, std::string& e) {
++            strata::core::LiveMemoryRequest req;
++            if (line == "CAPACITY") {   // the report on demand: never a state change
++                emit_capacity();
++                return true;
++            }
++            if (!strata::core::parse_live_memory_request(line, req)) {
++                e = "expected: MEMORY <id> <resident-mib> <vram-reserve-mib> (whole MiB)";
++                return false;
++            }
++            if (!live_memory_on) {
++                e = "MEMORY needs an engine started with STRATA_LIVE_MEMORY=1";
++                return false;
++            }
++            if (!live_resize_supported(e)) return false;   // structural: the caller answers ERR at once
++            if (!live_resize_ready(e)) {
++                // not a safe point: the request waits here instead of being lost, unless a newer one that
++                // releases capacity in both tiers replaces it (live_memory.hpp's supersede rule)
++                std::string why;
++                if (!live_pending.push(req, (uint64_t) src.live_ram_bytes(), why))
++                    std::printf("%s\n", strata::core::live_memory_ack_line(req.id, strata::core::LiveMemoryAck::Refused,
++                                                                           (uint64_t) src.live_ram_bytes() >> 20,
++                                                                           (uint64_t) xcache.mapped_bytes() >> 20,
++                                                                           live_vram_reserve_mib, why)
++                                         .c_str());
++                std::fflush(stdout);
++                return true;
++            }
++            apply_memory(req);
++            return true;
++        };
+         // ---- --batch: the slots of the batch windows
+         struct BSlot {
+             bool active = false, stop = false;
+@@ -17581,6 +17819,21 @@ int main(int argc, char** argv) {
+             if (!batch_on() && !(piped && pipe_inflight()) && !strata::core::progress().busy.load()) {
+                 pool_topup();
+                 segpool_kick();
++                // Live Memory: the request that waited for a safe point (a loan was out) is applied here, at the
++                // prompt/refill boundary; then the periodic CAPACITY report (its own cadence, off with 0)
++                if (live_memory_on) {
++                    strata::core::LiveMemoryRequest req;
++                    if (live_pending.take(req)) {
++                        std::string merr;
++                        if (live_resize_ready(merr)) apply_memory(req);
++                        else live_pending.push(req, (uint64_t) src.live_ram_bytes(), merr);   // still not safe: back it goes
++                    }
++                    if (live_memory_capacity_s > 0.0 &&
++                        std::chrono::duration<double>(Clock::now() - live_capacity_at).count() >= live_memory_capacity_s) {
++                        live_capacity_at = Clock::now();
++                        emit_capacity();
++                    }
++                }
+             }
+             if (batch_on() || (piped && pipe_inflight())) {
+                 if (!try_next_line(line)) {
+@@ -17643,6 +17896,15 @@ int main(int argc, char** argv) {
+                 else vram_command(line, verr);
+                 if (!verr.empty()) std::printf("ERR %s\n", verr.c_str());
+                 std::fflush(stdout);
++                if (live_memory_on && verr.empty()) emit_capacity();   // one owner, one report
++                continue;
++            }
++            if (line.rfind("MEMORY ", 0) == 0 || line == "CAPACITY") {   // Live Memory (above): acknowledged
++                std::string merr;
++                if (batch_on()) merr = "MEMORY: not while batch slots are decoding";
++                else memory_command(line, merr);
++                if (!merr.empty()) std::printf("ERR MEMORY: %s\n", merr.c_str());
++                std::fflush(stdout);
+                 continue;
+             }
+             // a command may touch the expert cache (a request lends slots, a K/V growth moves them, a session restore
+diff --git a/terminal/data/settings-register.json b/terminal/data/settings-register.json
+index ae746a510..a43265ed4 100644
+--- a/terminal/data/settings-register.json
++++ b/terminal/data/settings-register.json
+@@ -17511,6 +17511,46 @@
+    "retire_after": "",
+    "retired_in": ""
+   },
++  {
++   "name": "STRATA_LIVE_MEMORY",
++   "status": "opt-in",
++   "owner": "core",
++   "note": "[downstream live-memory] Live Memory MEMORY protocol and the releasable RAM blocks tier (downstream live-memory package)",
++   "retire_after": "",
++   "retired_in": ""
++  },
++  {
++   "name": "STRATA_LIVE_MEMORY_CAPACITY_S",
++   "status": "opt-in",
++   "owner": "core",
++   "note": "[downstream live-memory] Live Memory CAPACITY report cadence between requests, seconds (0: on demand only)",
++   "retire_after": "",
++   "retired_in": ""
++  },
++  {
++   "name": "STRATA_LIVE_MEMORY_INITIAL_MIB",
++   "status": "opt-in",
++   "owner": "core",
++   "note": "[downstream live-memory] Live Memory: the ExpertCache VMM arena initially committed prefix, whole MiB",
++   "retire_after": "",
++   "retired_in": ""
++  },
++  {
++   "name": "STRATA_LIVE_MEMORY_MAX_BLOCK_MIB",
++   "status": "opt-in",
++   "owner": "core",
++   "note": "[downstream live-memory] Live Memory: one RAM growth step block cap, whole MiB (default 512)",
++   "retire_after": "",
++   "retired_in": ""
++  },
++  {
++   "name": "STRATA_LIVE_MEMORY_PIN_RAM",
++   "status": "opt-in",
++   "owner": "core",
++   "note": "[downstream live-memory] Live Memory: try page-locked RAM blocks, falling back to pageable per block",
++   "retire_after": "",
++   "retired_in": ""
++  },
+   {
+    "name": "STRATA_LEND_MIRROR",
+    "backends": [

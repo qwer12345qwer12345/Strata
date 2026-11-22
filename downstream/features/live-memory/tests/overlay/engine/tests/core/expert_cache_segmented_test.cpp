@@ -140,6 +140,54 @@ int main() {
         c.close();
         set_env("STRATA_LIVE_MEMORY_INITIAL_MIB", nullptr);
     }
+    // Live Memory's transactional resize: failed partial growth is rolled back, failed partial
+    // shrink restores the original mapped prefix, and a resident tail slot blocks shrink entirely.
+    {
+        strata::core::ExpertCache c;
+        c.set_segment_bytes(kSeg);
+        c.set_initial_segment_bytes(32ll << 20);
+        std::string err;
+        if (!c.open(kSlots, 4, 64, kBlob, err)) return fail("transactional: open", err);
+        uint8_t* const first = c.device_slot(0);
+        if (!fill(c, 0, 32, kBlob)) return fail("transactional: initial fill");
+        for (int64_t i = 0; i < 32; ++i)
+            if (c.admit(i / 8, i % 8) != i) return fail("transactional: initial residency");
+
+        strata::core::ec_test::refuse_segment_call = [](const char* call, int64_t seg) {
+            return seg == 5 && std::string(call) == "map";
+        };
+        const bool grew = c.resize_transactional(70ll << 20, err);
+        strata::core::ec_test::refuse_segment_call = nullptr;
+        if (grew || c.mapped_bytes() != (32ll << 20) || c.slots() != 32 || c.resident() != 32)
+            return fail("transactional: growth rollback", err);
+        if (c.device_slot(0) != first || !check(c, 32, kBlob))
+            return fail("transactional: prefix after growth rollback");
+
+        if (!c.grow(1ll << 40, err) || c.slots() != kSlots)
+            return fail("transactional: prepare full arena", err);
+        strata::core::ec_test::refuse_segment_call = [](const char* call, int64_t seg) {
+            return seg == 9 && std::string(call) == "release";
+        };
+        const bool shrank = c.resize_transactional(30ll << 20, err);
+        strata::core::ec_test::refuse_segment_call = nullptr;
+        if (shrank || c.mapped_bytes() != kSlots * kBlob || c.slots() != kSlots || c.resident() != 32)
+            return fail("transactional: shrink rollback", err);
+        if (c.device_slot(0) != first || !check(c, 32, kBlob))
+            return fail("transactional: prefix after shrink rollback");
+
+        if (!c.resize_transactional(30ll << 20, err) || c.slots() != 32 ||
+            c.mapped_bytes() != (32ll << 20))
+            return fail("transactional: successful shrink", err);
+        if (c.device_slot(32) != nullptr || c.admit(3, 8) != strata::core::ExpertCache::kNotResident)
+            return fail("transactional: access beyond live prefix");
+
+        if (!c.grow(1ll << 40, err) || c.slots() != kSlots)
+            return fail("transactional: regrow after shrink", err);
+        if (c.admit(3, 8) != 32) return fail("transactional: tail residency");
+        if (c.resize_transactional(30ll << 20, err) || c.mapped_bytes() != kSlots * kBlob)
+            return fail("transactional: resident tail was unmapped", err);
+        c.close();
+    }
     // a shrink the driver refuses part way (strata/core/expert_cache_refuse.hpp): what was given back before the refusal
     // is gone, the rest keeps its bytes, the residency entries past it are taken (strata/core/residency_trim.hpp), and a
     // grow maps everything again.  12 segments of 8 MiB; a shrink to 30 MiB walks segments 11 down to 4.

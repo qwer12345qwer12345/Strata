@@ -5,19 +5,21 @@
     "-DSTRATA_NATIVE_EXPERTS=ON"
   ],
   "targets": [
-    "live_memory_policy_test"
+    "live_memory_policy_test",
+    "live_ram_blocks_test"
   ],
   "optional_targets": {
     "cuda": [
       "expert_cache_segmented_test"
     ]
   },
-  "ctest_regex": "^live_memory_policy_test$",
+  "ctest_regex": "^(live_memory_policy_test|live_ram_blocks_test)$",
   "optional_ctest_regex": {
     "cuda": "^expert_cache_segmented_test$"
   },
   "overlays": [
     "overlay/engine/tests/core/live_memory_policy_test.cpp",
+    "overlay/engine/tests/core/live_ram_blocks_test.cpp",
     "overlay/engine/tests/core/expert_cache_segmented_test.cpp",
     "overlay/tools/test_settings_register.py"
   ],

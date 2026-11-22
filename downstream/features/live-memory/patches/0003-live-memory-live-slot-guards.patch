@@ -1,0 +1,74 @@
+diff --git a/engine/include/strata/core/expert_cache.hpp b/engine/include/strata/core/expert_cache.hpp
+--- a/engine/include/strata/core/expert_cache.hpp
++++ b/engine/include/strata/core/expert_cache.hpp
+@@ -246,8 +246,8 @@
+     uint64_t slot_room(int32_t s) const { return slot_offset(s + 1) - slot_offset(s); }
+     /// STRATA_MMQ_DIRECT: the address `blob` bytes into slot `s` when the slot has room for `need` more bytes there
+     /// (null otherwise, or for a bad slot).  Uniform slots too: their stride is the largest blob.
+     uint8_t* slot_tail(int32_t s, uint64_t blob, uint64_t need) const {
+-        if (s < 0 || s >= slots_ || base_ == nullptr) return nullptr;
++        if (s < 0 || s >= live_slots_ || base_ == nullptr) return nullptr;
+         return slot_room(s) >= blob + need ? base_ + slot_offset(s) + blob : nullptr;
+     }
+ 
+diff --git a/engine/src/core/expert_cache.cpp b/engine/src/core/expert_cache.cpp
+--- a/engine/src/core/expert_cache.cpp
++++ b/engine/src/core/expert_cache.cpp
+@@ -873,50 +873,53 @@
+ 
+ /// R4.2g.  Layer `l` owns `[l*q, (l+1)*q)` with `q = slots_ / n_layers_`; the LAST layer takes whatever is
+ /// left over, so the ranges always cover `0..slots_` exactly and no slot is orphaned by the division.
+ void ExpertCache::layer_slot_range(int64_t layer, int64_t& lo, int64_t& hi) const {
+     lo = 0;
+     hi = 0;
+     if (n_layers_ <= 0 || slots_ <= 0 || layer < 0 || layer >= n_layers_) return;
+     const int64_t q = slots_ / n_layers_;
+     lo = layer * q;
+     hi = (layer == n_layers_ - 1) ? slots_ : (layer + 1) * q;
++    hi = std::min(hi, live_slots_);
++    if (lo > live_slots_) lo = hi = live_slots_;
+ }
+ 
+ int32_t ExpertCache::slot_of(int64_t layer, int64_t expert) const {
+     if (layer < 0 || layer >= n_layers_ || expert < 0 || expert >= n_expert_) return kNotResident;
+-    return residency_[(size_t) (layer * n_expert_ + expert)];
++    const int32_t slot = residency_[(size_t) (layer * n_expert_ + expert)];
++    return slot >= 0 && slot < live_slots_ ? slot : kNotResident;
+ }
+ 
+ int32_t ExpertCache::admit(int64_t layer, int64_t expert) {
+     if (sealed_) return kNotResident;   // STRATA_EXPERT_NIBBLE: nothing is admitted (and so filled) after the startup fill
+     if (layer < 0 || layer >= n_layers_ || expert < 0 || expert >= n_expert_) return kNotResident;
+     const size_t at = (size_t) (layer * n_expert_ + expert);
+     if (residency_[at] != kNotResident) return residency_[at];
+     // R4.2g: THE PER-LAYER PATH.  Same "no eviction" rule, but the ceiling is this layer's own range rather
+     // than one counter shared by all 48 - which is what confined the measured hit rate to 2.97%.
+     if (per_layer_) {
+         if (layer_next_.empty()) return kNotResident;
+         int64_t lo = 0, hi = 0;
+         layer_slot_range(layer, lo, hi);
+         if ((int64_t) layer_next_[(size_t) layer] >= hi) return kNotResident;   // this layer's quota is full
+         residency_[at] = layer_next_[(size_t) layer]++;
+         ++admitted_;
+         return residency_[at];
+     }
+-    if (next_free_ >= slots_) return kNotResident;   // full: no eviction, deliberately - see the header
++    if (next_free_ >= live_slots_) return kNotResident;   // the mapped prefix, not the reserved full arena
+     residency_[at] = (int32_t) next_free_;
+     return (int32_t) next_free_++;
+ }
+ 
+ uint8_t* ExpertCache::device_slot(int32_t slot) {
+-    if (slot < 0 || slot >= slots_) return nullptr;
++    if (slot < 0 || slot >= live_slots_) return nullptr;
+     if (!off_.empty()) return base_ + off_[(size_t) slot];
+     return base_ + (size_t) slot * (size_t) blob_;
+ }
+ 
+ const uint8_t* ExpertCache::device_slot(int32_t slot) const {
+-    if (slot < 0 || slot >= slots_) return nullptr;
++    if (slot < 0 || slot >= live_slots_) return nullptr;
+     if (!off_.empty()) return base_ + off_[(size_t) slot];
+     return base_ + (size_t) slot * (size_t) blob_;
+ }
+ 

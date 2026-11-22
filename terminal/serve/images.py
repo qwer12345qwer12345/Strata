@@ -653,6 +653,22 @@ def _make_room(svc, gen: ImageGen, policy: str, need: int):
     """Do what `policy` says before the job; -> what _give_back needs."""
     eng = svc.engine
     if policy == "shrink":
+        # Live Memory (PR4 Phase D): an engine that runs the MEMORY protocol takes its Vision reserve through
+        # the SAME serialized owner the automatic policy uses - never a second cache owner racing it.  The
+        # RAM tier rides at its current level; the raised reserve is what makes the cache give VRAM back.
+        if getattr(eng, "has_live_memory", lambda: False)():
+            latest = eng.latest_capacity() or {}
+            previous_reserve = int(latest.get("vram_reserve_mib") or 0)
+            try:
+                out = eng.request_memory(int(latest.get("ram_resident_mib") or 0), need)
+                gen._say(f"image job: the engine's memory owner gave VRAM back "
+                         f"({out.get('vram_free_mib', latest.get('vram_free_mib', '?'))} MiB free, "
+                         f"{out.get('state')})")
+                return ("shrunk-memory", previous_reserve)
+            except Exception as e:                   # noqa: BLE001 - the job still runs, with what is free
+                gen._say(f"image job: the engine's memory owner could not give VRAM back ({e}); "
+                         "the job runs with what is free")
+                return None
         try:
             out = eng.vram(need)
             gen._say(f"image job: the engine's expert cache gave VRAM back ({out.get('vram_free_mib')} MiB free)")
@@ -686,6 +702,14 @@ def _give_back(svc, gen: ImageGen, policy: str, restore) -> None:
             eng.vram(svc.vram_reserve)               # the reserve asked for last (None: the start's)
         except Exception as e:                       # noqa: BLE001
             gen._say(f"image job: the expert cache did not grow back ({e}); POST /v1/vram can retry")
+    elif isinstance(restore, tuple) and restore and restore[0] == "shrunk-memory":
+        # the MEMORY owner's reserve goes back through the same owner (Phase D), at the RAM tier's current level
+        previous_reserve = restore[1] if len(restore) > 1 else 0
+        try:
+            latest = eng.latest_capacity() or {}
+            eng.request_memory(int(latest.get("ram_resident_mib") or 0), previous_reserve)
+        except Exception as e:                       # noqa: BLE001
+            gen._say(f"image job: the memory owner did not give the reserve back ({e}); POST /v1/memory can retry")
     elif policy == "unload" and restore:
         if restore != "unloaded":
             svc.restore_after_load = restore         # Service.ensure_loaded restores it after the next start

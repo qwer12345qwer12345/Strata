@@ -37,9 +37,25 @@ def main():
     if git(["rev-parse", "HEAD"], cwd=source).stdout.strip() != base:
         raise RuntimeError(f"source HEAD is not the pinned base commit {base}")
 
-    # Reverse-check the package patches so tests cannot silently run against an unpatched source tree.
-    for patch_id, patch, _ in patch_items(args.feature, stack):
-        git(["apply", "--reverse", "--check", "--whitespace=nowarn", patch], cwd=source)
+    # Confirm the source is exactly base + the package's patches, so tests cannot silently run against an
+    # unpatched or half-patched tree.  Un-applying the stack (last patch first) must land on the clean
+    # base and re-applying it must restore every byte; a stack whose later patches modify the same files
+    # as earlier ones cannot be checked one patch at a time against the final tree.
+    patches = [patch for _, patch, _ in patch_items(args.feature, stack)]
+    for patch in reversed(patches):
+        git(["apply", "--reverse", "--whitespace=nowarn", patch], cwd=source)
+    restored = True
+    try:
+        for patch in patches:
+            git(["apply", "--check", "--whitespace=nowarn", patch], cwd=source)
+            git(["apply", "--whitespace=nowarn", patch], cwd=source)
+    except Exception:
+        restored = False
+        raise
+    finally:
+        if not restored:   # a failed re-apply leaves the tree between states; say so before anything else runs
+            print(f"the source tree is no longer fully patched after a failed check in {source}",
+                  file=sys.stderr)
 
     test_config_path = feature_dir / meta["tests"]
     config = json.loads(test_config_path.read_text(encoding="utf-8"))

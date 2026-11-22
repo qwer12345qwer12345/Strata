@@ -1,6 +1,6 @@
 # Live Memory implementation plan
 
-Status: the request grammar and CPU-only policy tests are in place. ExpertCache now supports an opt-in partially committed VMM prefix at startup via `set_initial_segment_bytes()` or `STRATA_LIVE_MEMORY_INITIAL_MIB` (default 32 MiB segments), with a CUDA regression test. Dynamic MEMORY/ACK/CAPACITY handling and independent RAM block release are not implemented yet. This branch is opt-in and does not change the default allocator.
+Status (PR #4): Phases A-D of this plan are implemented and opt-in. PR #1-#3 delivered the request grammar, the CPU policy tests, the partially committed VMM prefix, `resize_transactional()` with rollback, resident-tail protection and live-slot bounds. PR #4 adds Phase 2's independently releasable RAM expert blocks in FileExpertSource (pageable-first, optional pinned fallback, cgroup-aware admission per growth step, whole-block release with entries unpublished before the free, allocation/copy failure injection in the CPU test), Phase 3's Engine MEMORY/ACK/CAPACITY handling with the VRAM command's safe-point sequence and a one-slot pending queue, and Phase 4's opt-in Server policy (serve/live_memory_policy.py: debounce, cooldown with REFUSED backoff, bounded steps, growth never a side effect) plus the unified Vision owner and the /v1/memory API. What remains open is the hardware qualification in section 5 - the CPU-only and Python tests pass, the CUDA/safe-point paths still need a Linux VMM machine.
 
 Baseline: `Niko1221/Strata/main` at `6e38f588a646c0ee6948a74afbe670eb75896106` (0.2.18 / Engine 0.1.64). This implementation is being built against the current Engine interfaces, not by merging the older reference branch.
 
@@ -53,10 +53,10 @@ These helpers are not a runtime implementation. They do not allocate, resize, ac
 ### Phase A — capacity owner
 
 1. Add a Live VMM open path that reserves the profile-sized address range but maps only the active prefix. The first version is in place; next, connect it to the Engine's capacity owner and make runtime changes safe at reader/graph boundaries.
-2. Make resize transactional. On a failed shrink, restore mappings already removed; on failed growth, release only newly mapped blocks. Report actual rounded committed bytes, never the requested target.
+2. **Implemented at the ExpertCache primitive level:** `resize_transactional()` checks resident tail slots, synchronizes GPU work, attempts grow/shrink, and rolls partial driver progress back to the previous mapped prefix. If rollback itself fails, it reports actual mapped bytes. The caller must still drain host readers and prompt loans before calling it; Engine safe-point integration remains Phase B.
 3. Add independently releasable RAM expert blocks to `FileExpertSource`, with pageable-first allocation and an optional pinned fallback. Remove every expert pointer into a block before freeing it.
 4. Reuse the current cgroup-aware `sample_host_memory()` and `conversation_memory_admit()` logic for each RAM growth step.
-5. Add fault injection for VMM map/unmap/release, RAM allocation, copy failure and rollback.
+5. **VMM map/unmap/release fault injection is implemented** in the segmented-cache test. RAM allocation, copy failure and RAM-block rollback injection remain outstanding.
 
 ### Phase B — protocol and safe points
 
