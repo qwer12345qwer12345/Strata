@@ -1,0 +1,441 @@
+diff --git a/engine/include/strata/core/conversation_file.hpp b/engine/include/strata/core/conversation_file.hpp
+--- a/engine/include/strata/core/conversation_file.hpp
++++ b/engine/include/strata/core/conversation_file.hpp
+@@ -243,1 +243,19 @@
+-} // namespace strata::core
++
++// An immutable Base is followed by independent Delta files. Each Delta stores the complete non-KV state and, for
++// each of the five KV parts (K, V, K scale, V scale, pooled), a caller-computed unchanged prefix plus its changed tail.
++// Keep lengths are opaque byte boundaries: callers must obtain them from the official Snapshot layout/part-size API,
++// never estimate them from token counts. A layout change requires a new Base.
++using SessionDeltaKeep = std::vector<std::array<uint64_t, 5>>;
++bool session_delta_write(const std::string& path, const SavedConversation& meta,
++                         const std::vector<SessionKvSource>& tails, const SessionDeltaKeep& keep,
++                         const SessionFileIdentity& id, uint64_t chain_id, uint64_t parent_generation,
++                         uint64_t generation, size_t& bytes, std::string& error,
++                         const SessionWriteOptions& options = {}, SessionStatus* status = nullptr);
++// Applies one exact child generation to an in-progress Base image. The chain ID and parent generation must match.
++// A parse/validation failure leaves the image unchanged. If allocation/copy fails during application, discard it;
++// it may be partially materialized and must not be used for inference.
++bool session_delta_apply(const std::string& path, const SessionFileIdentity& id, uint64_t chain_id,
++                         uint64_t expected_parent_generation, SavedConversation& base,
++                         uint64_t& generation, size_t& bytes, std::string& error,
++                         const SessionReadLimits& limits = {}, SessionStatus* status = nullptr);
++} // namespace strata::core
+
+diff --git a/engine/src/core/conversation_file.cpp b/engine/src/core/conversation_file.cpp
+--- a/engine/src/core/conversation_file.cpp
++++ b/engine/src/core/conversation_file.cpp
+@@ -1256,1 +1256,398 @@
+-} // namespace strata::core
++
++namespace {
++constexpr char kDeltaMagic[8] = {'S', 'T', 'R', 'S', 'D', 'L', 'T', '\x01'};
++constexpr char kDeltaEnd[8] = {'S', 'T', 'R', 'D', 'E', 'N', 'D', '\x01'};
++constexpr size_t kDeltaHeader = 96;
++
++void delta_header_bytes(uint8_t* h, const SessionFileIdentity& id, uint64_t chain,
++                        uint64_t parent, uint64_t generation, uint64_t payload, uint64_t layers) {
++    std::memset(h, 0, kDeltaHeader);
++    std::memcpy(h, kDeltaMagic, 8);
++    const uint32_t version = 1, size = kDeltaHeader;
++    std::memcpy(h + 8, &version, 4);
++    std::memcpy(h + 12, &size, 4);
++    std::memcpy(h + 16, &id.model, 8);
++    std::memcpy(h + 24, &id.config, 8);
++    std::memcpy(h + 32, &chain, 8);
++    std::memcpy(h + 40, &parent, 8);
++    std::memcpy(h + 48, &generation, 8);
++    std::memcpy(h + 56, &payload, 8);
++    std::memcpy(h + 64, &layers, 8);
++    const uint64_t hh = session_hash64(h, 88, 0);
++    std::memcpy(h + 88, &hh, 8);
++}
++
++void put_delta_payload(Out& out, const SavedConversation& meta, const std::vector<SessionKvSource>& tails,
++                       const SessionDeltaKeep& keep) {
++    for (const auto& layer : keep)
++        for (uint64_t bytes : layer) out.u64(bytes);
++    put_payload(out, meta, &tails);
++}
++
++bool delta_write_impl(const std::string& path, const SavedConversation& meta,
++                      const std::vector<SessionKvSource>& tails, const SessionDeltaKeep& keep,
++                      const SessionFileIdentity& id, uint64_t chain, uint64_t parent, uint64_t generation,
++                      size_t& bytes, std::string& error, const SessionWriteOptions& opt, SessionStatus& st) {
++    error.clear();
++    st = {};
++    st.error = SessionError::invalid;
++    if (chain == 0 || parent == UINT64_MAX || generation != parent + 1) {
++        error = "session delta: chain ID and consecutive generations are required";
++        return false;
++    }
++    if (!meta.kv.empty() || !meta.stage_images.empty() || has_stage_parts(meta)) {
++        error = "session delta: metadata must contain no K/V or layer-split state";
++        return false;
++    }
++    if (tails.size() != keep.size()) {
++        error = "session delta: keep table and K/V layer count differ";
++        return false;
++    }
++
++    Out sizing;
++    put_delta_payload(sizing, meta, tails, keep);
++    if (sizing.overflow || sizing.n > UINT64_MAX - kDeltaHeader - kTrailer ||
++        sizing.n + kDeltaHeader + kTrailer > (uint64_t) std::numeric_limits<size_t>::max()) {
++        error = "session delta: the state is too large for this build";
++        return false;
++    }
++    const uint64_t payload = sizing.n, total = kDeltaHeader + payload + kTrailer;
++    st.error = SessionError::io;
++    if (opt.min_free_bytes) {
++        uint64_t avail = 0;
++        if (!free_space(path, avail)) {
++            error = "session delta: cannot read the free disk space for " + path;
++            return false;
++        }
++        if (avail < total || avail - total < opt.min_free_bytes) {
++            st.error = SessionError::storage;
++            error = "session delta: not enough disk space";
++            return false;
++        }
++    }
++
++    Publisher pub;
++    if (!pub.open(path, error)) { st.error = pub.kind(); return false; }
++    RawFile raw;
++    if (!pub.create_temp(raw, error)) {
++        st.error = raw.kind();
++        error = "session delta: cannot create a temporary file beside " + path + ": " + error;
++        return false;
++    }
++    FileSink file(raw);
++    if (!file.ok()) { st.error = SessionError::memory; error = "session delta: " + file.error(); return false; }
++    if (opt.progress) file.progress.emplace(opt.progress);
++    file.phase = opt.phase;
++    file.expected = total;
++    if (file.progress) (*file.progress)(0, total);
++    const std::function<int(const char*)>* fault = opt.fault ? &opt.fault : nullptr;
++    file.write_fault = injected(fault, "write");
++    file.flush_fault = injected(fault, "file_flush");
++
++    uint8_t header[kDeltaHeader];
++    delta_header_bytes(header, id, chain, parent, generation, payload, tails.size());
++    bool ok = file.write(header, kDeltaHeader);
++    SessionHasher hash(0);
++    Out out;
++    out.f = &file;
++    out.hash = &hash;
++    if (ok) put_delta_payload(out, meta, tails, keep);
++    ok = ok && out.ok && out.n == payload;
++    if (ok) {
++        const uint64_t digest = hash.digest();
++        ok = file.write(&digest, 8) && file.write(kDeltaEnd, 8);
++    }
++    ok = file.finish(opt.durable) && ok;
++    std::string why;
++    if (!ok) {
++        why = out.read_failed ? "K/V tail source read" +
++                (out.read_error.empty() ? std::string() : ": " + out.read_error) : file.error();
++        st.error = out.read_failed ? SessionError::io : file.kind();
++    } else {
++        if (opt.phase) opt.phase("publish", total);
++        if (pub.publish(why, opt.durable, st, fault)) {
++            st.error = SessionError::none;
++            bytes = (size_t) total;
++            return true;
++        }
++    }
++    error = "session delta: writing " + path + " failed" + (why.empty() ? std::string() : ": " + why);
++    if (st.published) error += " (the new file has already been published)";
++    return false;
++}
++
++struct ParsedDelta {
++    SavedConversation image;
++    SessionDeltaKeep keep;
++    uint64_t generation = 0;
++};
++
++bool delta_read_impl(const std::string& path, const SessionFileIdentity& id, uint64_t chain,
++                     uint64_t expected_parent, ParsedDelta& parsed, size_t& bytes, std::string& error,
++                     const SessionReadLimits& limits, SessionStatus& st) {
++    error.clear();
++    st = {};
++    st.error = SessionError::invalid;
++    RawFile raw;
++    uint64_t size = 0;
++    if (!raw.open_session(path, size)) {
++        st.error = raw.refused() ? SessionError::invalid : raw.kind();
++        error = "session delta: " + path + ": " + raw.error();
++        return false;
++    }
++    if (size < kDeltaHeader + kTrailer) {
++        error = "session delta: file is below the minimum size";
++        return false;
++    }
++    if (size > (uint64_t) std::numeric_limits<size_t>::max()) {
++        error = "session delta: file is too large for this build";
++        return false;
++    }
++
++    FileSource file(raw);
++    if (!file.ok()) { st.error = SessionError::memory; error = "session delta: " + file.error(); return false; }
++    if (limits.progress) file.progress.emplace(limits.progress);
++    file.expected = size;
++    uint8_t h[kDeltaHeader];
++    if (!file.read(h, kDeltaHeader)) {
++        st.error = file.kind();
++        error = "session delta: header read error: " + file.error();
++        return false;
++    }
++
++    uint32_t version = 0, header_size = 0;
++    uint64_t model = 0, config = 0, file_chain = 0, parent = 0, generation = 0;
++    uint64_t payload = 0, layers = 0, reserved0 = 0, reserved1 = 0, header_hash = 0;
++    std::memcpy(&version, h + 8, 4);
++    std::memcpy(&header_size, h + 12, 4);
++    std::memcpy(&model, h + 16, 8);
++    std::memcpy(&config, h + 24, 8);
++    std::memcpy(&file_chain, h + 32, 8);
++    std::memcpy(&parent, h + 40, 8);
++    std::memcpy(&generation, h + 48, 8);
++    std::memcpy(&payload, h + 56, 8);
++    std::memcpy(&layers, h + 64, 8);
++    std::memcpy(&reserved0, h + 72, 8);
++    std::memcpy(&reserved1, h + 80, 8);
++    std::memcpy(&header_hash, h + 88, 8);
++
++    if (std::memcmp(h, kDeltaMagic, 8) != 0) { error = "session delta: bad magic"; return false; }
++    if (header_hash != session_hash64(h, 88, 0)) { error = "session delta: header checksum mismatch"; return false; }
++    if (version != 1 || header_size != kDeltaHeader || reserved0 || reserved1) {
++        error = "session delta: unsupported version or invalid header fields";
++        return false;
++    }
++    if (model != id.model || config != id.config) {
++        error = "session delta: model/config identity mismatch";
++        return false;
++    }
++    if (chain == 0 || file_chain != chain || parent != expected_parent ||
++        parent == UINT64_MAX || generation != parent + 1) {
++        error = "session delta: wrong chain, parent generation, or generation sequence";
++        return false;
++    }
++    if (payload > size || size - kDeltaHeader - kTrailer != payload) {
++        error = "session delta: file size does not match its header";
++        return false;
++    }
++    if (layers > limits.max_kv_layers || layers > payload / 40 ||
++        layers > (uint64_t) std::numeric_limits<size_t>::max() / sizeof(std::array<uint64_t, 5>)) {
++        error = "session delta: K/V layer count exceeds its limit or payload";
++        return false;
++    }
++    uint64_t max_size = session_read_max_file_bytes(limits);
++    if (max_size != UINT64_MAX) {
++        const uint64_t extra = layers > (UINT64_MAX - 32) / 40 ? UINT64_MAX : 32 + layers * 40;
++        max_size = extra > UINT64_MAX - max_size ? UINT64_MAX : max_size + extra;
++    }
++    if (size > max_size) {
++        error = "session delta: file exceeds this engine's read limit";
++        return false;
++    }
++    if (limits.admit) {
++        std::string why;
++        // The parsed tails coexist briefly with the destination's appended bytes during materialization.
++        const uint64_t parsed_peak = session_read_peak_bytes(size);
++        const uint64_t need = size > UINT64_MAX - parsed_peak ? UINT64_MAX : parsed_peak + size;
++        if (!limits.admit(need, why)) {
++            st.error = SessionError::memory;
++            error = "session delta: " + why;
++            return false;
++        }
++    }
++
++    ParsedDelta result;
++    result.keep.resize((size_t) layers);
++    In in{&file, SessionHasher(0), payload, error, limits};
++    for (auto& layer : result.keep)
++        for (uint64_t& n : layer)
++            if (!in.u64(n)) { st.error = in.kind; return false; }
++    if (!get_payload(in, result.image)) { st.error = in.kind; return false; }
++    if (in.left) {
++        error = "session delta: payload has " + std::to_string(in.left) + " unparsed bytes";
++        return false;
++    }
++    if (result.image.kv.size() != layers || !result.image.stage_images.empty()) {
++        error = "session delta: payload layer count or state shape is invalid";
++        return false;
++    }
++    for (size_t i = 0; i < result.image.kv.size(); ++i) {
++        const auto& k = result.image.kv[i];
++        const std::array<const ConversationBuffer*, 5> parts = {&k.k, &k.v, &k.k_scale, &k.v_scale, &k.pooled};
++        for (size_t part = 0; part < 5; ++part) {
++            const uint64_t tail = parts[part]->size();
++            const uint64_t keep = result.keep[i][part];
++            if (tail > UINT64_MAX - keep ||
++                (i < limits.max_kv_bytes.size() && keep + tail > limits.max_kv_bytes[i][part])) {
++                error = "session delta: materialized K/V part exceeds its limit";
++                return false;
++            }
++        }
++    }
++    uint8_t trailer[kTrailer];
++    if (!file.read(trailer, kTrailer)) {
++        st.error = file.kind();
++        error = "session delta: trailer read error: " + file.error();
++        return false;
++    }
++    uint64_t digest = 0;
++    std::memcpy(&digest, trailer, 8);
++    if (digest != in.hash.digest()) { error = "session delta: payload checksum mismatch"; return false; }
++    if (std::memcmp(trailer + 8, kDeltaEnd, 8) != 0) { error = "session delta: bad end marker"; return false; }
++
++    result.generation = generation;
++    parsed = std::move(result);
++    bytes = (size_t) size;
++    st.error = SessionError::none;
++    return true;
++}
++
++bool delta_apply_part(ConversationBuffer& dst, const ConversationBuffer& tail, uint64_t keep, std::string& error) {
++    if (keep > dst.size() || keep > (uint64_t) std::numeric_limits<size_t>::max() ||
++        tail.size() > std::numeric_limits<size_t>::max() - (size_t) keep) {
++        error = "session delta: keep length exceeds the parent part or result size overflows";
++        return false;
++    }
++    const size_t prefix = (size_t) keep;
++    const size_t target = prefix + tail.size();
++    dst.resize(prefix);
++    dst.resize_for_overwrite(target);
++    return tail.visit(0, tail.size(), [&](const uint8_t* p, size_t n, size_t at) {
++        const size_t dest_at = prefix + at;
++        size_t copied = 0;
++        const bool ok = dst.visit(dest_at, n, [&](uint8_t* q, size_t count, size_t absolute) {
++            std::memcpy(q, p + absolute - dest_at, count);
++            copied += count;
++            return true;
++        });
++        return ok && copied == n;
++    });
++}
++
++bool delta_apply_image(SavedConversation& base, ParsedDelta&& delta, std::string& error) {
++    SavedConversation& next = delta.image;
++    if (base.geometry != next.geometry || base.layer_lo != next.layer_lo || base.layer_hi != next.layer_hi ||
++        base.kv.size() != next.kv.size() || base.pending || base.live_pending || !base.stage_images.empty()) {
++        error = "session delta: base geometry, layer range, or K/V layer count changed";
++        return false;
++    }
++    for (size_t i = 0; i < base.kv.size(); ++i) {
++        const ConversationKv& old = base.kv[i];
++        const ConversationKv& now = next.kv[i];
++        if (old.pending) {
++            error = "session delta: parent K/V copy is still pending";
++            return false;
++        }
++        if (old.format != now.format || old.heads != now.heads || old.head_dim != now.head_dim ||
++            old.page_size != now.page_size || old.idx_dim != now.idx_dim) {
++            error = "session delta: K/V layout changed; a new Base is required";
++            return false;
++        }
++        const std::array<const ConversationBuffer*, 5> before = {&old.k, &old.v, &old.k_scale, &old.v_scale, &old.pooled};
++        const std::array<const ConversationBuffer*, 5> tails = {&now.k, &now.v, &now.k_scale, &now.v_scale, &now.pooled};
++        for (size_t part = 0; part < 5; ++part) {
++            const uint64_t keep = delta.keep[i][part];
++            if (keep > before[part]->size() || keep > (uint64_t) std::numeric_limits<size_t>::max() ||
++                tails[part]->size() > std::numeric_limits<size_t>::max() - (size_t) keep) {
++                error = "session delta: invalid keep length or result size";
++                return false;
++            }
++        }
++    }
++
++    for (size_t i = 0; i < base.kv.size(); ++i) {
++        ConversationKv& dst = base.kv[i];
++        ConversationKv& src = next.kv[i];
++        const std::array<ConversationBuffer*, 5> parts = {&dst.k, &dst.v, &dst.k_scale, &dst.v_scale, &dst.pooled};
++        const std::array<const ConversationBuffer*, 5> tails = {&src.k, &src.v, &src.k_scale, &src.v_scale, &src.pooled};
++        for (size_t part = 0; part < 5; ++part) {
++            if (!delta_apply_part(*parts[part], *tails[part], delta.keep[i][part], error)) {
++                if (error.empty()) error = "session delta: copying a tail failed";
++                return false;
++            }
++        }
++        dst.cells = src.cells;
++        dst.pooled_rows = src.pooled_rows;
++        dst.format = src.format;
++        dst.heads = src.heads;
++        dst.head_dim = src.head_dim;
++        dst.page_size = src.page_size;
++        dst.idx_dim = src.idx_dim;
++    }
++
++    base.geometry = next.geometry;
++    base.layer_lo = next.layer_lo;
++    base.layer_hi = next.layer_hi;
++    base.live = std::move(next.live);
++    base.checkpoints = std::move(next.checkpoints);
++    base.cvec = next.cvec;
++    base.stage_images = std::move(next.stage_images);
++    return true;
++}
++} // namespace
++
++bool session_delta_write(const std::string& path, const SavedConversation& meta,
++                         const std::vector<SessionKvSource>& tails, const SessionDeltaKeep& keep,
++                         const SessionFileIdentity& id, uint64_t chain, uint64_t parent_generation,
++                         uint64_t generation, size_t& bytes, std::string& error,
++                         const SessionWriteOptions& options, SessionStatus* status) {
++    SessionStatus st;
++    bool ok = false;
++    try {
++        ok = delta_write_impl(path, meta, tails, keep, id, chain, parent_generation, generation,
++                              bytes, error, options, st);
++    } catch (const std::bad_alloc&) {
++        error = "session delta: out of memory while writing " + path;
++        st.error = SessionError::memory;
++        ok = false;
++    }
++    if (status) *status = st;
++    return ok;
++}
++
++bool session_delta_apply(const std::string& path, const SessionFileIdentity& id, uint64_t chain,
++                         uint64_t expected_parent_generation, SavedConversation& base,
++                         uint64_t& generation, size_t& bytes, std::string& error,
++                         const SessionReadLimits& limits, SessionStatus* status) {
++    SessionStatus st;
++    bool ok = false;
++    try {
++        ParsedDelta parsed;
++        if (delta_read_impl(path, id, chain, expected_parent_generation, parsed, bytes, error, limits, st)) {
++            ok = delta_apply_image(base, std::move(parsed), error);
++            if (ok) {
++                generation = expected_parent_generation + 1;
++                st.error = SessionError::none;
++            } else {
++                st.error = SessionError::invalid;
++            }
++        }
++    } catch (const std::bad_alloc&) {
++        error = "session delta: out of memory while applying " + path;
++        st.error = SessionError::memory;
++        ok = false;
++    }
++    if (status) *status = st;
++    return ok;
++}
++} // namespace strata::core
+
+diff --git a/engine/CMakeLists.txt b/engine/CMakeLists.txt
+--- a/engine/CMakeLists.txt
++++ b/engine/CMakeLists.txt
+@@ -213,2 +213,8 @@
+   add_test(NAME conversation_spill_test COMMAND conversation_spill_test)
++  # Immutable Base + independent Delta file core (pure Host).
++  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/conversation_delta_test.cpp")
++    add_executable(conversation_delta_test src/core/conversation_delta_test.cpp src/core/conversation_file.cpp)
++    target_include_directories(conversation_delta_test PRIVATE include)
++    add_test(NAME conversation_delta_test COMMAND conversation_delta_test)
++  endif()
+   # #6052: the periodic conversation checkpoints (--prompt-cache-every) on the resumed request's grid (header-only)

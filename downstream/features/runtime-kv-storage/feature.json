@@ -1,0 +1,18 @@
+{
+  "id": "runtime-kv-storage",
+  "name": "Runtime KV Storage — immutable Base and Delta chain",
+  "version": "0.1.0",
+  "status": "active",
+  "base_commit": "6e38f588a646c0ee6948a74afbe670eb75896106",
+  "patched_tree": "aa9fe3e95f15d80ab077914fc580be67c32f4228",
+  "requires": [],
+  "patches": [
+    {
+      "id": "session-delta-core",
+      "path": "patches/0001-session-delta-core.patch",
+      "sha256": "b8cfa49010aa9e9229bd07bd03f0226a2ef85fd5dfa9e83266f06b180d39bd74"
+    }
+  ],
+  "tests": "tests/test.json",
+  "environment": {}
+}

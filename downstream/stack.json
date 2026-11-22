@@ -6,12 +6,13 @@
     "branch": "main"
   },
   "base_commit": "6e38f588a646c0ee6948a74afbe670eb75896106",
-  "patched_tree": "ecae54ab6dee2a6f02866a645f8955cd4ecfd9e5",
+  "patched_tree": "929c0a798b10ef83d4da33c7f1dccb8b821799e7",
   "feature_order": [
     "tq-cpu",
     "tq-ampere",
     "qsa-imma",
-    "live-memory"
+    "live-memory",
+    "runtime-kv-storage"
   ],
   "features": [
     {
@@ -29,6 +30,10 @@
     {
       "id": "live-memory",
       "path": "features/live-memory/feature.json"
+    },
+    {
+      "id": "runtime-kv-storage",
+      "path": "features/runtime-kv-storage/feature.json"
     }
   ]
 }
