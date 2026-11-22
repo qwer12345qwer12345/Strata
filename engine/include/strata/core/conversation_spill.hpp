@@ -392,7 +392,19 @@ public:
     /// than the whole tier, or the write failed; nothing of this call is then left on the disk.  The file is written outside the
     /// lock, under a budget reserved for it.
     bool put(const SavedConversation& image, const SessionFileIdentity& id, std::string& error, uint64_t* serial_out = nullptr) {
-        const uint64_t need = (uint64_t) image.bytes() + (uint64_t(1) << 20);   // the payload and the file's own tables
+        uint64_t need = (uint64_t) image.bytes() + (uint64_t(1) << 20);   // payload and session-file tables
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            if (persistent_) {
+                uint64_t meta_bytes = (uint64_t) image.live.bytes();
+                for (const auto& cp : image.checkpoints) {
+                    const uint64_t n = (uint64_t) cp.bytes();
+                    meta_bytes = n > UINT64_MAX - meta_bytes ? UINT64_MAX : meta_bytes + n;
+                }
+                need = meta_bytes > UINT64_MAX - need - (uint64_t(1) << 20)
+                    ? UINT64_MAX : need + meta_bytes + (uint64_t(1) << 20);
+            }
+        }
         uint64_t serial = 0;
         std::filesystem::path f, mf;
         bool persistent = false;
@@ -403,6 +415,11 @@ public:
             while (!budget_.reserve(need)) {
                 if (entries_.empty()) { error = "no room in the SSD tier"; return false; }
                 drop_locked(0);
+            }
+            if (next_serial_ == 0 || next_serial_ == UINT64_MAX) {
+                budget_.finish(need, 0);
+                error = "persistent spill serial space exhausted";
+                return false;
             }
             serial = next_serial_++;
             f = ns_.file_for(serial);
