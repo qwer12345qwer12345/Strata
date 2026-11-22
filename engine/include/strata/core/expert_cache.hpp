@@ -125,7 +125,7 @@ public:
     /// resident expert and no loan: the CALLER evicts them first (they become CPU misses).
     void set_segment_bytes(int64_t seg_bytes) { seg_req_ = seg_bytes > 0 ? seg_bytes : 0; }
     /// Live Memory: reserve the full segmented address range but commit only this initial prefix.
-    /// 0 keeps the existing all-segments-at-open behavior.
+    /// 0 keeps the existing full-map behavior when the environment override is unset.
     void set_initial_segment_bytes(int64_t bytes) { initial_seg_req_ = bytes > 0 ? bytes : 0; }
     /// STRATA_MMQ_DIRECT: `open_sized` leaves at least `g` bytes of room after each slot's blob (the prompt MMQ
     /// reads a little past a down matrix when it reads an expert in its slot).  Set before opening, like
