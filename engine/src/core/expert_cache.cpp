@@ -448,7 +448,10 @@ bool ExpertCache::open_segmented(uint64_t want, std::string& err) {
         segs_.push_back(0);
         seg_size_.push_back((int64_t) std::min<uint64_t>((uint64_t) seg_, total - at));
     }
-    for (size_t i = 0; i < segs_.size(); ++i) {
+    const uint64_t initial = initial_seg_req_ > 0
+        ? std::min<uint64_t>(total, ((uint64_t) initial_seg_req_ + (uint64_t) seg_ - 1) / (uint64_t) seg_ * (uint64_t) seg_)
+        : total;
+    for (size_t i = 0; i < segs_.size() && (uint64_t) i * (uint64_t) seg_ < initial; ++i) {
         if (!map_segment(v, dev, va + (CUdeviceptr) ((uint64_t) i * (uint64_t) seg_), (size_t) seg_size_[i],
                          segs_[i])) {
             char buf[200];
@@ -615,6 +618,14 @@ bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int6
     }
 
     const uint64_t want = (uint64_t) n_slots * (uint64_t) blob_bytes;
+    if (initial_seg_req_ > 0 && seg_req_ <= 0) {
+        err = "ExpertCache: Live Memory's initial commit requires a segmented VMM arena";
+        return false;
+    }
+    const uint64_t initial_want = initial_seg_req_ > 0
+        ? std::min<uint64_t>(want, ((uint64_t) initial_seg_req_ + (uint64_t) seg_req_ - 1) /
+                                      (uint64_t) seg_req_ * (uint64_t) seg_req_)
+        : want;
 
     // ---- **THE ALLOCATION IS CHECKED AGAINST THE CARD, NOT AGAINST THE REQUEST.**
     //
@@ -625,14 +636,22 @@ bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int6
     size_t free_b = 0, total_b = 0;
     if (cudaMemGetInfo(&free_b, &total_b) == cudaSuccess) {
         free_b = device_free_bytes();   // unified memory: what the OS can give back counts (see the header)
-        if ((uint64_t) free_b < want) {
-            char buf[320];
-            std::snprintf(buf, sizeof buf,
-                          "ExpertCache: %lld slots x %lld B = %.2f GiB, but only %.2f GiB of VRAM is free "
-                          "(%.2f GiB of %.2f GiB total). Lower --expert-cache.",
-                          (long long) n_slots, (long long) blob_bytes, (double) want / 1073741824.0,
-                          (double) free_b / 1073741824.0, (double) (total_b - free_b) / 1073741824.0,
-                          (double) total_b / 1073741824.0);
+        if ((uint64_t) free_b < initial_want) {
+            char buf[384];
+            if (initial_seg_req_ > 0) {
+                std::snprintf(buf, sizeof buf,
+                              "ExpertCache: Live Memory initial commit %.2f GiB (of %.2f GiB reserved) exceeds "
+                              "the %.2f GiB of VRAM free",
+                              (double) initial_want / 1073741824.0, (double) want / 1073741824.0,
+                              (double) free_b / 1073741824.0);
+            } else {
+                std::snprintf(buf, sizeof buf,
+                              "ExpertCache: %lld slots x %lld B = %.2f GiB, but only %.2f GiB of VRAM is free "
+                              "(%.2f GiB of %.2f GiB total). Lower --expert-cache.",
+                              (long long) n_slots, (long long) blob_bytes, (double) want / 1073741824.0,
+                              (double) free_b / 1073741824.0, (double) (total_b - free_b) / 1073741824.0,
+                              (double) total_b / 1073741824.0);
+            }
             err = buf;
             return false;
         }
@@ -669,15 +688,16 @@ bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int6
     }
     // Zeroed so a slot read before it is filled is a DETERMINISTIC wrong answer rather than whatever the
     // allocator handed back.  A stale block of a previous process's memory would still sum to finite floats.
-    if (cudaMemset(base_, 0, (size_t) want) != cudaSuccess) {
-        err = "ExpertCache: cudaMemset of the slot arena failed";
+    const uint64_t zero_bytes = segmented() ? (uint64_t) mapped_bytes() : want;
+    if (zero_bytes > 0 && cudaMemset(base_, 0, (size_t) zero_bytes) != cudaSuccess) {
+        err = "ExpertCache: cudaMemset of the committed slot prefix failed";
         close();
         return false;
     }
 
     residency_.assign((size_t) (n_layers * n_expert), kNotResident);
     slots_ = n_slots;
-    live_slots_ = n_slots;
+    live_slots_ = segmented() ? slots_within(mapped_bytes()) : n_slots;
     n_layers_ = n_layers;
     n_expert_ = n_expert;
     blob_ = blob_bytes;
@@ -715,7 +735,7 @@ bool ExpertCache::open_sized(const std::vector<int64_t>& slot_bytes, int64_t n_l
     // one allocation of the summed size, through the uniform path's checks: n "slots" of 1 byte
     if (!open((int64_t) off.back(), n_layers, n_expert, 1, err)) return false;
     slots_ = (int64_t) slot_bytes.size();
-    live_slots_ = slots_;
+    live_slots_ = segmented() ? slots_within(mapped_bytes()) : slots_;
     blob_ = mx;
     off_ = std::move(off);
     guard_ = guard_req_;
