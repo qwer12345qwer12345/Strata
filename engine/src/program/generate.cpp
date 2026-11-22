@@ -13504,7 +13504,10 @@ int main(int argc, char** argv) {
                 if (persistent_spill) {
                     strata::core::SessionFileIdentity id;
                     std::string identity_error;
-                    if (!session_identity(id, identity_error, {})) {
+                    bool identity_ok = false;
+                    try { identity_ok = session_identity(id, identity_error, {}); }
+                    catch (...) { identity_error = "out of memory while fingerprinting the model"; }
+                    if (!identity_ok) {
                         why = "the model identity cannot be fingerprinted for persistent L2 (" + identity_error + ")";
                         cap = 0;
                     } else {
