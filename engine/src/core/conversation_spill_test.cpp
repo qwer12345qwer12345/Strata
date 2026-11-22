@@ -267,6 +267,42 @@ int main() {
         }
         sp.close();
     }
+    // Persistent L2 mode: the model/config namespace and metadata index survive orderly close and process reopen.
+    {
+        auto img = [](std::vector<int32_t> ids, uint8_t fill) {
+            SavedConversation s;
+            s.live.ids = ids;
+            s.live.gdn.assign(1 << 18, fill);
+            s.cvec = true;
+            return s;
+        };
+        const SessionFileIdentity id{31, 41};
+        ConversationSpill first;
+        std::string err;
+        check(first.open_persistent(root, uint64_t(64) << 20, id, err), "persistent tier opens");
+        uint64_t serial = 0;
+        check(first.put(img({10, 11, 12}, 0x5a), id, err, &serial), "persistent entry written");
+        const auto dir = first.dir();
+        const auto session = first.find(serial);
+        const auto meta = dir / ("conv-" + std::to_string(serial) + ".meta");
+        check(session && fs::is_regular_file(session->file) && fs::is_regular_file(meta),
+              "payload and metadata sidecar are both published");
+        first.close();
+        check(fs::is_directory(dir) && fs::is_regular_file(meta), "persistent close keeps the files");
+
+        ConversationSpill second;
+        check(second.open_persistent(root, uint64_t(64) << 20, id, err), "persistent tier reopens");
+        check(second.size() == 1 && second.bytes() > 0, "metadata index is rebuilt without loading K/V");
+        const auto match = second.best(std::vector<int32_t>{10, 11, 12, 99}, {}, true);
+        check(match.tokens == 3 && match.serial == serial, "reopened entry participates in prefix matching");
+        SavedConversation restored;
+        check(second.take_serial(serial, id, {}, restored, err) &&
+              restored.live.gdn == std::vector<uint8_t>(1 << 18, 0x5a),
+              "reopened entry restores its original session payload");
+        check(!fs::exists(meta) && !fs::exists(second.dir() / ("conv-" + std::to_string(serial) + ".session")),
+              "taking the entry removes both files");
+        second.close();
+    }
     fs::remove_all(root, ec);
     std::printf("conversation_spill_test: %d checks, %d failed\n", checks, failures);
     return failures == 0 ? 0 : 1;
