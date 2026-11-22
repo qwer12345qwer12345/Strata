@@ -1,5 +1,7 @@
-// Pure-host tests for the immutable Base + independent Delta file format.
+// Pure-host tests for the immutable Base + independent Delta file format, and for the Delta provenance adapter
+// that turns a restored image's reuse into the keep lengths a Delta stores (conversation_delta_keep.hpp).
 #include "strata/core/conversation_file.hpp"
+#include "strata/core/conversation_delta_keep.hpp"
 
 #include <array>
 #include <cstdio>
@@ -254,6 +256,133 @@ int main() {
     check(!session_delta_apply((root / "corrupt").string(), id, chain, 2,
                                restored, generation, bytes, error, {}, &status) &&
           same_image(restored, unchanged), "payload checksum failure is rejected without mutation");
+
+    // ---- the provenance adapter: what a restored image's reuse lends the next park (conversation_delta_keep.hpp)
+    {
+        // a parent as a real capture records it: page_size 4, captured 9 tokens -> cells 12, pooled rows 3
+        // (two complete rows and the moving spare); every part's bytes divide into its recorded units
+        ConversationKv parent;
+        parent.format = 2;
+        parent.cells = 12;
+        parent.heads = 2;
+        parent.head_dim = 4;
+        parent.page_size = 4;
+        parent.pooled_rows = 3;
+        parent.idx_dim = 2;
+        set_buffer(parent.k, std::vector<uint8_t>(12 * 4, 1));        // 4 bytes per cell
+        set_buffer(parent.v, std::vector<uint8_t>(12 * 4, 2));
+        set_buffer(parent.k_scale, std::vector<uint8_t>(12 * 2, 3));  // 2 bytes per cell
+        set_buffer(parent.v_scale, std::vector<uint8_t>(12 * 2, 4));
+        set_buffer(parent.pooled, std::vector<uint8_t>(3 * 8, 5));    // 8 bytes per row
+
+        auto source_for = [](const ConversationKv& k) {
+            SessionKvSource s;
+            s.format = k.format; s.cells = k.cells; s.heads = k.heads; s.head_dim = k.head_dim;
+            s.page_size = k.page_size; s.pooled_rows = k.pooled_rows; s.idx_dim = k.idx_dim;
+            const std::array<const ConversationBuffer*, 5> parts =
+                {&k.k, &k.v, &k.k_scale, &k.v_scale, &k.pooled};
+            for (size_t i = 0; i < 5; ++i) s.sizes[i] = parts[i]->size();
+            return s;
+        };
+
+        // the next state of the same layout: grown to 13 tokens (cells 16, pooled rows 4)
+        ConversationKv next = parent;
+        next.cells = 16;
+        next.pooled_rows = 4;
+        const SessionKvSource grown = source_for(next);
+
+        auto plan_for = [&](int64_t captured, int64_t unchanged, const SessionKvSource& src) {
+            ConversationKvReuse reuse;
+            reuse.kv.push_back(parent);
+            reuse.captured_tokens = captured;
+            reuse.unchanged_tokens = unchanged;
+            return conversation_delta_keep_plan(reuse, {src}, 4);
+        };
+
+        // a pure append: the complete pages below the boundary are the parent's bytes verbatim, the moving spare
+        // row never; the materialized layer is the new state's own bytes byte for byte
+        {
+            const auto plan = plan_for(9, 9, grown);
+            check(plan.ok && plan.why.empty(), "an append's provenance plans a Delta");
+            const std::array<uint64_t, 5> want = {8 * 4, 8 * 4, 8 * 2, 8 * 2, 2 * 8};
+            check(plan.keep.size() == 1 && plan.keep[0] == want,
+                  "keep = complete pages of cells below the boundary, complete indexer rows, no spare row");
+        }
+        // a rewrite below the append point: the official dirty tracking still proves the pages below it
+        {
+            const auto plan = plan_for(9, 8, grown);
+            check(plan.ok && plan.keep[0] == std::array<uint64_t, 5>{8 * 4, 8 * 4, 8 * 2, 8 * 2, 2 * 8},
+                  "an unchanged prefix at a page boundary keeps the same pages");
+        }
+        {
+            const auto plan = plan_for(9, 7, grown);
+            check(plan.ok && plan.keep[0] == std::array<uint64_t, 5>{4 * 4, 4 * 4, 4 * 2, 4 * 2, 1 * 8},
+                  "a mid-page boundary keeps only the complete pages and rows below it");
+        }
+        // no provable prefix: a new Base, never a guess
+        {
+            const auto plan = plan_for(9, 0, grown);
+            check(!plan.ok && plan.keep.empty() && !plan.why.empty(),
+                  "no complete unchanged unit plans no Delta");
+        }
+        // a rewind or truncation (the new extent below the captured one) is a new Base
+        {
+            ConversationKv shrunk = next;
+            shrunk.cells = 8;
+            shrunk.pooled_rows = 3;
+            const auto plan = plan_for(9, 9, source_for(shrunk));
+            check(!plan.ok && !plan.why.empty(), "a rewind is refused");
+        }
+        // a layout that changed is refused, exactly as the Delta apply refuses it
+        {
+            ConversationKv rotated = next;
+            rotated.format = 18;
+            check(!plan_for(9, 9, source_for(rotated)).ok, "a changed K/V format is refused");
+            ConversationKv narrower = next;
+            narrower.head_dim = 8;
+            check(!plan_for(9, 9, source_for(narrower)).ok, "a changed head dim is refused");
+            ConversationKv repaged = next;
+            repaged.page_size = 8;
+            check(!plan_for(9, 9, source_for(repaged)).ok, "a changed page size is refused");
+        }
+        // the layer counts must agree, and a layer split's stage reuse is not a Delta's parent
+        {
+            ConversationKvReuse reuse;
+            reuse.kv.push_back(parent);
+            reuse.kv.push_back(parent);
+            reuse.captured_tokens = 9;
+            reuse.unchanged_tokens = 9;
+            check(!conversation_delta_keep_plan(reuse, {grown}, 4).ok, "a layer count mismatch is refused");
+        }
+        {
+            ConversationKvReuse reuse;
+            reuse.kv.push_back(parent);
+            reuse.stages.emplace_back();
+            reuse.captured_tokens = 9;
+            reuse.unchanged_tokens = 9;
+            check(!conversation_delta_keep_plan(reuse, {grown}, 4).ok, "a stage reuse is refused");
+        }
+        // every refusal leaves no table behind, and a part that does not divide into its units is refused
+        {
+            ConversationKv torn = parent;
+            set_buffer(torn.v, std::vector<uint8_t>(12 * 4 + 1, 2));
+            ConversationKvReuse reuse;
+            reuse.kv.push_back(torn);
+            reuse.captured_tokens = 9;
+            reuse.unchanged_tokens = 9;
+            const auto plan = conversation_delta_keep_plan(reuse, {grown}, 4);
+            check(!plan.ok && plan.keep.empty() && !plan.why.empty(), "a torn part size is refused");
+        }
+        {
+            ConversationKvReuse empty;
+            check(!conversation_delta_keep_plan(empty, {grown}, 4).ok &&
+                  conversation_delta_keep_plan(empty, {grown}, 4).keep.empty(),
+                  "no retained storage plans no Delta");
+            check(SessionDeltaLineage{}.chain == 0 && SessionDeltaLineage{}.generation == 0,
+                  "no lineage by default: the next park writes a Base");
+            check(plan_for(9, 9, grown).keep[0][4] == 16, "the pooled keep counts complete rows only");
+        }
+    }
 
     fs::remove_all(root, ec);
     std::fprintf(stderr, "conversation_delta_test: %d checks, %d failures\n", checks, failures);

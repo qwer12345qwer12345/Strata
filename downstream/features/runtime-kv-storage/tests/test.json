@@ -5,11 +5,18 @@
   "targets": [
     "conversation_delta_test"
   ],
-  "optional_targets": {},
+  "optional_targets": {
+    "cuda": [
+      "conversation_delta_roundtrip_test"
+    ]
+  },
   "ctest_regex": "^conversation_delta_test$",
-  "optional_ctest_regex": {},
+  "optional_ctest_regex": {
+    "cuda": "^conversation_delta_roundtrip_test$"
+  },
   "overlays": [
-    "overlay/engine/src/core/conversation_delta_test.cpp"
+    "overlay/engine/src/core/conversation_delta_test.cpp",
+    "overlay/engine/tests/core/conversation_delta_roundtrip_test.cpp"
   ],
   "python_tests": [],
   "settings_generation": false
