@@ -8,11 +8,20 @@
 #include <cuda_runtime.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace {
+void set_env(const char* name, const char* value) {
+#if defined(_WIN32)
+    _putenv_s(name, value ? value : "");
+#else
+    if (value) setenv(name, value, 1);
+    else unsetenv(name);
+#endif
+}
 int fail(const char* what, const std::string& err = "") {
     std::fprintf(stderr, "FAIL %s %s\n", what, err.c_str());
     return 1;
@@ -115,6 +124,21 @@ int main() {
         if (c.device_slot(0) != first || !fill(c, 32, 64, kBlob) || !check(c, 64, kBlob))
             return fail("live grown prefix");
         c.close();
+    }
+    // The environment entry point chooses the default 32 MiB segment size and commits the requested 32 MiB prefix.
+    {
+        set_env("STRATA_LIVE_MEMORY_INITIAL_MIB", "32");
+        strata::core::ExpertCache c;
+        std::string err;
+        if (!c.open(kSlots, 4, 64, kBlob, err)) {
+            set_env("STRATA_LIVE_MEMORY_INITIAL_MIB", nullptr);
+            return fail("live environment open", err);
+        }
+        if (!c.segmented() || c.segment_bytes() != (32ll << 20) || c.slots() != 32 ||
+            c.mapped_bytes() != 32ll << 20) return fail("live environment prefix");
+        if (!c.grow(70ll << 20, err) || c.slots() != 64) return fail("live environment grow", err);
+        c.close();
+        set_env("STRATA_LIVE_MEMORY_INITIAL_MIB", nullptr);
     }
     // a shrink the driver refuses part way (strata/core/expert_cache_refuse.hpp): what was given back before the refusal
     // is gone, the rest keeps its bytes, the residency entries past it are taken (strata/core/residency_trim.hpp), and a
