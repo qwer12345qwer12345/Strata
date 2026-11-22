@@ -697,10 +697,10 @@ bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int6
 
     residency_.assign((size_t) (n_layers * n_expert), kNotResident);
     slots_ = n_slots;
-    live_slots_ = segmented() ? slots_within(mapped_bytes()) : n_slots;
     n_layers_ = n_layers;
     n_expert_ = n_expert;
     blob_ = blob_bytes;
+    live_slots_ = segmented() ? slots_within(mapped_bytes()) : n_slots;
 #if defined(STRATA_USE_HIP)
     if (!ensure_blocking_staging((std::size_t) blob_, err)) {
         close();
@@ -735,10 +735,10 @@ bool ExpertCache::open_sized(const std::vector<int64_t>& slot_bytes, int64_t n_l
     // one allocation of the summed size, through the uniform path's checks: n "slots" of 1 byte
     if (!open((int64_t) off.back(), n_layers, n_expert, 1, err)) return false;
     slots_ = (int64_t) slot_bytes.size();
-    live_slots_ = segmented() ? slots_within(mapped_bytes()) : slots_;
     blob_ = mx;
     off_ = std::move(off);
     guard_ = guard_req_;
+    live_slots_ = segmented() ? slots_within(mapped_bytes()) : slots_;
 #if defined(STRATA_USE_HIP)
     if (!ensure_blocking_staging((std::size_t) blob_, err)) {
         close();
