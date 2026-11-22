@@ -1,6 +1,6 @@
 # Patch A — Runtime KV Storage
 
-状态：**设计已细化，开始实现**。本计划对应独立的 Runtime KV Storage 功能包；它不会并入 Patch B，也不修改跨重启缓存。
+状态：**Patch 1 代码已写入活动 Feature Package；编译和测试验证待执行。运行时接入尚未开始。**本计划对应独立的 Runtime KV Storage 功能包；它不会并入 Patch B，也不修改跨重启缓存。
 
 ## 已确定的设计
 
@@ -21,7 +21,7 @@
 
 ## 实现顺序
 
-### Patch 1 — Session Delta Core（当前开始）
+### Patch 1 — Session Delta Core（代码已落地，验证待执行）
 
 - 在现有 SessionFile 序列化层增加独立版本化 Delta 文件格式，不改 STRSESS v1。
 - Delta header 绑定 model/config identity、chain ID、parent generation、generation、payload 长度和校验值。
@@ -29,6 +29,8 @@
 - 提供 Delta 写入、严格读取/校验、将 Delta 应用到 Base image 的接口。
 - keep 长度只作为字节边界处理；调用方必须使用官方 Snapshot 的 part-size/layout 结果计算，禁止按 token 数自行估算。
 - 纯 Host 测试覆盖 Base + 多 Delta、五个 part、追加、keep=0 全量替换、generation/identity 错误、截断和哈希错误。
+- 生产补丁：[0001-session-delta-core.patch](../../features/runtime-kv-storage/patches/0001-session-delta-core.patch)。测试源码仅通过 Feature Package overlay 注入。
+- 当前只增加 Delta 文件核心 API，不改变 ConversationSpill 的 put/take 行为；SSD 写入量尚未因此减少。
 
 **验收门槛：** Base + Delta materialize 的 SavedConversation 与对应完整快照逐字段、逐字节一致。此阶段不接入运行时淘汰路径。
 

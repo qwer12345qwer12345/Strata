@@ -12,3 +12,9 @@ Required files:
 - `validation/README.md`: evidence and outstanding qualification.
 
 Test overlays are copied into a disposable prepared worktree only while tests run, then restored. Do not add test-only source files to production patches unless they are genuinely required by the feature at runtime.
+
+## Registered packages
+
+| Feature ID | Current scope | State |
+|---|---|---|
+| `runtime-kv-storage` | Session Delta Core; runtime spill integration is still pending | Active in stack |

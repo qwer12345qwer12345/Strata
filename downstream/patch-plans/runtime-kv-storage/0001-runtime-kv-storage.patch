@@ -1,4 +1,5 @@
-# PLACEHOLDER ONLY — NOT AN APPLYABLE PATCH
-# Runtime KV Storage implementation has not started.
-# Scope and acceptance criteria: README.md
-# Replace this file with a verified unified diff before creating an active Feature Package.
+# PLAN-ONLY PLACEHOLDER — NOT AN APPLYABLE PATCH
+# The active Patch A implementation lives in:
+# downstream/features/runtime-kv-storage/patches/0001-session-delta-core.patch
+# This file remains only as a pointer in the original patch-plan directory.
+# Do not pass this file to git apply.
