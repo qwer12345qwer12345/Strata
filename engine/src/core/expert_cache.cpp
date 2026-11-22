@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <cstdio>
 #include <filesystem>
 #include <cstdlib>
@@ -617,6 +618,23 @@ bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int6
         return false;
     }
 
+    // Explicit opt-in for a partially committed Live Memory arena. The ordinary cache remains fully mapped
+    // unless this variable is present or the caller sets the initial prefix through the API.
+    if (initial_seg_req_ == 0) {
+        const char* live_mib = std::getenv("STRATA_LIVE_MEMORY_INITIAL_MIB");
+        if (live_mib != nullptr) {
+            uint64_t mib = 0;
+            const char* end = live_mib + std::strlen(live_mib);
+            const auto parsed = std::from_chars(live_mib, end, mib);
+            if (live_mib[0] == '\0' || parsed.ec != std::errc{} || parsed.ptr != end || mib == 0 ||
+                mib > (uint64_t) INT64_MAX / (uint64_t(1) << 20)) {
+                err = "ExpertCache: STRATA_LIVE_MEMORY_INITIAL_MIB must be a positive whole-MiB value";
+                return false;
+            }
+            initial_seg_req_ = (int64_t) (mib << 20);
+            if (seg_req_ <= 0) seg_req_ = 32ll << 20;
+        }
+    }
     const uint64_t want = (uint64_t) n_slots * (uint64_t) blob_bytes;
     if (initial_seg_req_ > 0 && seg_req_ <= 0) {
         err = "ExpertCache: Live Memory's initial commit requires a segmented VMM arena";
