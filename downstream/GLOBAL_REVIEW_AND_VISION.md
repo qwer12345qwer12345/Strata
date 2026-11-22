@@ -18,12 +18,12 @@
 | 宽窗口 × 显存/专家 | 宽窗口图按需捕获；显存不足时上游禁用该宽度并回退。额外预留显存会减少GPU专家，RAM补集增加。prior又与GPU驻留相关，变化可能影响输出和命中 | 保持448MiB预留；对比记录实际宽度、内存、文件读取，不把cap16开启当成16行有效收益 |
 | KV常驻 × 专家 | 增大KV常驻可减少长上下文传输，却占GPU专家空间；减小则可能把瓶颈移到PCIe。CPU/GPU可同时快也不代表两者分配最优 | 保持KV resident20480；不能凭静态推演定量断言更大或更小更优 |
 | warm-up × prior | 上游 `STRATA_WINDOW_WARM` 默认遇到prior时关闭，明确为避免dummy token填入的专家影响首次请求路由。强行预热或开机基准会改变冷启动的缓存状态 | 正常启动无模型测试；不强行打开window warm，允许首次请求捕获图的成本存在 |
-| 异步交换 × 可重复性 | 上游SM86默认已移除ADAPT_NOWAIT=1，并解释其CPU/GPU执行副本时序可能使输出不重复。追求低等待不能直接把旧快速开关全部恢复 | 继承当前上游默认，不强开未验证异步交换 |
+| 异步交换 × 可重复性 | 上游SM86默认已移除ADAPT_NOWAIT=1，并解释其CPU/GPU执行副本时序可能使输出不重复。用户接受这类差异，不能据此替用户把性能选项一律关闭 | 已显式开启NOWAIT=1、lag=2，加入adapt-tail矩阵，性能与质量标记未测 |
 | BF16 compact × 内存 | compact把H2D减半且不丢BF16精度，但raw GPU scratch、BF16行缓存仍占资源；复制流改善重叠并不凭空省掉专家容量 | 保留已有compact/独立流；不以这项传输优化支持增加视觉预算 |
 
 源码入口：`engine/src/kernels/cuda/dflash2.cu`（表与TC优先级）；`engine/src/core/dflash2.cpp`（context/bridge）；`engine/include/strata/spec/window_rule.hpp`（延后）；`engine/src/program/generate.cpp`（窗口上限、graph_fits、prior warm-up、VRAM命令）；`engine/src/prefill/prefill.cpp`（group scratch资格）；`engine/src/core/nv_defaults.cpp`（SM86默认）。
 
-对比从36组逐项消融扩成50组关键交互矩阵，默认预算3小时。详见 [日常配置与命令](DAILY_CONFIGURATION.md)。这仍是有限实验设计，不是所有开关的高维穷举。
+对比已扩成70组关键交互矩阵，默认预算4小时，含ADAPT_NOWAIT与tail skip及spec的交叉。详见 [日常配置与命令](DAILY_CONFIGURATION.md)。这仍是有限实验设计，不是所有开关的高维穷举。
 
 ## 识图现在的准确状态
 
@@ -45,3 +45,6 @@
 上游支持 `vision.gpu=false`，可绕开GPU腾显存问题；仍需在RAM容纳编码器权重和工作区，读取图片也有CPU耗时。当前32GiB与0.25GiB专家headroom并不足以静态证明额外内存一定能装下，旧reader兼容性也未验证。它是比GPU借还更接近现成实现的候选，并不是已验收功能。若开启，宜按需加载、限制图片token，单独核对内存与图片输出，再决定是否日常启用。
 
 本次保持识图关闭，保留当前文本服务容量；未启用Live Memory、未重开ninfer、未下载或加载视觉模型。
+
+
+补充：ADAPT_NOWAIT与官方tail skip的源码核对、文档矛盾和用户性能取舍见 [NOWAIT_AND_TAIL_SKIP.md](NOWAIT_AND_TAIL_SKIP.md)。此前以严格重复性关闭NOWAIT的本机决策已纠正；上游默认不做修改，通过其保留的环境开关显式选入。

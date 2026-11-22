@@ -102,3 +102,10 @@ follow it whether a person or an agent writes the text. The short version:
 
 - Do not use Astra models for subagents, including `gpt-6-astra` and `gpt-6.2-astra`.
 - If delegation is explicitly requested, select an allowed non-Astra model instead of inheriting Astra.
+
+## Performance preference for this deployment
+
+- The user prioritizes useful performance gains and accepts numerical/output differences. Do not disable a supported optimization solely to retain bitwise repeatability.
+- Keep `STRATA_ROUTE_PRIOR=0.5`. Clearly label theoretical combinations and unmeasured quality/performance; do not describe unknown quality impact as proven small.
+- Model benchmarks run only through the explicit manual headless command. Normal service startup must not send benchmark prompts or consume test queues.
+- Respect backend and mode compatibility; acceptance of rounding differences does not authorize known memory corruption or incompatible settings.

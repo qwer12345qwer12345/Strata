@@ -1,6 +1,6 @@
 {
   "status": "passed",
-  "tests": 24,
+  "tests": 25,
   "python": "3.12.15 (same interpreter as system service)",
   "modules": [
     "l2.test_runtime_config",
@@ -11,5 +11,5 @@
   ],
   "command": "PYTHONPATH=terminal python3 -m unittest -q l2.test_runtime_config l2.test_manual_compare l2.test_headless_experiments l2.test_startup_benchmark l2.test_controller",
   "model_or_gpu_performance_tests": false,
-  "scope": "configuration override, no automatic generation at startup, manual plan and desktop guard, mocked worker failure/service restoration, request streaming, shutdown archive drain and existing controller regressions"
+  "scope": "configuration override, no automatic generation at startup, manual plan and desktop guard, mocked worker failure/service restoration, request streaming, shutdown archive drain and existing controller regressions, factorial NOWAIT/tail and tail/spec coverage, observed wait/skip counters with missing samples kept empty"
 }

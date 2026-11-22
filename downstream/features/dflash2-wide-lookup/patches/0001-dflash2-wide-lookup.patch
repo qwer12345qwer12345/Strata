@@ -352,10 +352,10 @@ index 000000000..95e38a2e7
 +    main()
 diff --git a/terminal/l2/headless_experiments.py b/terminal/l2/headless_experiments.py
 new file mode 100644
-index 000000000..376dba718
+index 000000000..87f35b558
 --- /dev/null
 +++ b/terminal/l2/headless_experiments.py
-@@ -0,0 +1,365 @@
+@@ -0,0 +1,381 @@
 +"""One-shot headless spec, SM86 shape and wide lookup comparisons. Never select a winner automatically."""
 +import datetime
 +import hashlib
@@ -579,9 +579,12 @@ index 000000000..376dba718
 +    result += mirror('dense-lookup',('dense','lookup'),[(0,8),(1,8),(1,16),(0,16)])
 +    result += mirror('skip-lookup',('skip','lookup'),[(0,8),(8,8),(8,16),(0,16)])
 +    result += mirror('rows',('rows',),[(2,),(0,)])
++    result += mirror('adapt-tail',('nowait','tail'),[(0,0),(1,0),(1,7),(0,7)])
++    result += mirror('tail-spec',('tail','spec'),[(0,6),(7,6),(7,4),(0,4),(0,3),(7,3)])
 +    if groups:
 +        aliases = {'spec':'spec-lookup','lookup':'spec-lookup','shape':'shape-qkv',
-+                   'qkv-tc':'shape-qkv','dense':'dense-lookup','lookup-skip':'skip-lookup'}
++                   'qkv-tc':'shape-qkv','dense':'dense-lookup','lookup-skip':'skip-lookup',
++                   'nowait':'adapt-tail','tail-skip':'adapt-tail'}
 +        wanted = {aliases.get(group,group) for group in groups}
 +        unknown = wanted - {r['group'] for r in result}
 +        if unknown:raise ValueError('Unknown comparison groups: '+', '.join(sorted(unknown)))
@@ -610,7 +613,9 @@ index 000000000..376dba718
 +               drafting='dflash2', mtp=False, user_args=options, engine_ready_s=180)
 +    if str(cfg['env'].get('STRATA_ROUTE_PRIOR')) != '0.5':
 +        raise ValueError('prior=0.5 is required')
-+    cfg['env'].update(STRATA_TQ_AMPERE_ROWS=str(arm['rows']), STRATA_DRAFT_LOG='1', STRATA_DECODE_TIMING='1',
++    cfg['env'].update(STRATA_ADAPT_NOWAIT=str(arm['nowait']), STRATA_ADAPT_LAG='2',
++                      STRATA_ROUTE_TAIL_SKIP=str(arm['tail']), STRATA_ROUTE_TAIL_RENORM='0',
++                      STRATA_TQ_AMPERE_ROWS=str(arm['rows']), STRATA_DRAFT_LOG='1', STRATA_DECODE_TIMING='1',
 +                      STRATA_DF2_AMPERE_TUNING=str(shape), STRATA_DENSE_I8_AMPERE_SHAPES=str(arm['dense']),
 +                      STRATA_DF2_GEMM_TC=str(arm['tc']), STRATA_DF2_LOOKUP_SKIP=str(arm['skip']), STRATA_DF2_WIDE_CONTEXT='1' if lookup > 8 else '0',
 +                      STRATA_SPEC_TRACE=str(folder / 'spec.trace'),
@@ -636,6 +641,14 @@ index 000000000..376dba718
 +            'outputs_sha256': sorted(set(r['output_sha256'] for r in rows)),
 +        }
 +    return result
++
++
++def optimization_log_summary(text):
++    tail = re.findall(r'route tail skip: (\d+) missed experts skipped \((\d+) entries\)',text)
++    wait = re.findall(r'strata decode timing:[^\n]*?adapt wait ([\d.]+)',text)
++    return {'tail_skip_reported': 'STRATA_ROUTE_TAIL_SKIP=7 is ON' in text,
++            'tail_skip_cumulative_samples': [{'experts':int(e),'entries':int(n)} for e,n in tail],
++            'adapt_wait_ms_per_window_samples':list(map(float,wait))}
 +
 +
 +def trace_summary(path):
@@ -687,7 +700,7 @@ index 000000000..376dba718
 +        seed = work / 'expert-profile.bin'
 +        seed.write_bytes(Path(args[args.index('--expert-profile') + 1]).read_bytes())
 +        report['seed_sha256'] = hashlib.sha256(seed.read_bytes()).hexdigest()
-+        deadline = time.monotonic() + min(14400, max(60, int(request.get('budget_s', 10800))))
++        deadline = time.monotonic() + min(14400, max(60, int(request.get('budget_s', 14400))))
 +        # Warmup plus 3072-token output and 1536-token long-context output.
 +        cases = workloads()[:3]
 +        print(f'Strata 开始 spec/形状/宽 lookup 无头对比，共 {len(sequence)} 组；完成后开放服务。报告 {work}', flush=True)
@@ -707,6 +720,9 @@ index 000000000..376dba718
 +            text = (folder / 'engine.log').read_text(errors='replace')
 +            result['wide_bridge_exercised'] = 'wide context bridge active' in text
 +            result['trace'] = trace_summary(folder / 'spec.trace')
++            result['optimization_log'] = optimization_log_summary(text)
++            result['effective_optimization_environment'] = {name:trial_cfg['env'][name] for name in
++                ('STRATA_ADAPT_NOWAIT','STRATA_ADAPT_LAG','STRATA_ROUTE_TAIL_SKIP','STRATA_ROUTE_TAIL_RENORM')}
 +            report['runs'].append(result)
 +            (work / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
 +            print(f'Strata 对比进度 {i}/{len(sequence)}: {arm["name"]} {result["status"]}', flush=True)
@@ -723,7 +739,7 @@ index 000000000..376dba718
 +    return report
 diff --git a/terminal/l2/manual_compare.py b/terminal/l2/manual_compare.py
 new file mode 100644
-index 000000000..fe93c124f
+index 000000000..eb178b2e4
 --- /dev/null
 +++ b/terminal/l2/manual_compare.py
 @@ -0,0 +1,90 @@
@@ -748,8 +764,8 @@ index 000000000..fe93c124f
 +    parser = argparse.ArgumentParser(description=__doc__)
 +    parser.add_argument('--profile', type=Path, default=Path('/etc/strata/server.json'))
 +    parser.add_argument('--state-dir', type=Path)
-+    parser.add_argument('--group', action='append', help='combined/spec-lookup/shape-qkv/dense-lookup/skip-lookup/rows; default all')
-+    parser.add_argument('--budget-s', type=int, default=10800)
++    parser.add_argument('--group', action='append', help='combined/spec-lookup/shape-qkv/dense-lookup/skip-lookup/rows/adapt-tail/tail-spec; default all')
++    parser.add_argument('--budget-s', type=int, default=14400)
 +    parser.add_argument('--plan', action='store_true', help='show the comparison plan without stopping or starting anything')
 +    parser.add_argument('--worker', type=Path, help=argparse.SUPPRESS)
 +    args = parser.parse_args(argv)
@@ -819,10 +835,10 @@ index 000000000..fe93c124f
 +    raise SystemExit(main())
 diff --git a/terminal/l2/test_headless_experiments.py b/terminal/l2/test_headless_experiments.py
 new file mode 100644
-index 000000000..32914da3c
+index 000000000..525f22a35
 --- /dev/null
 +++ b/terminal/l2/test_headless_experiments.py
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,132 @@
 +import copy
 +import hashlib
 +import json
@@ -878,6 +894,10 @@ index 000000000..32914da3c
 +    self.assertEqual(val('--max-context'),'262144')
 +    self.assertIn('--resident-experts',args)
 +    self.assertEqual(cfg['env']['STRATA_TQ_AMPERE_ROWS'],str(arm['rows']))
++    self.assertEqual(cfg['env']['STRATA_ADAPT_NOWAIT'],str(arm['nowait']))
++    self.assertEqual(cfg['env']['STRATA_ROUTE_TAIL_SKIP'],str(arm['tail']))
++    self.assertEqual(cfg['env']['STRATA_ROUTE_TAIL_RENORM'],'0')
++    self.assertEqual(cfg['env']['STRATA_ADAPT_LAG'],'2')
 +    self.assertEqual(cfg['env']['STRATA_DF2_WIDE_CONTEXT'],'1' if arm['lookup']>8 else '0')
 +    if arm['group']=='spec-lookup':
 +     expected='2,3,4,5,6,7,8'+(',10,12' if arm['lookup']>=12 else '')+(',16' if arm['lookup']==16 else '')
@@ -906,6 +926,17 @@ index 000000000..32914da3c
 +   self.assertEqual(data[0]['lookup']['round_latency_ms']['p99'],2.5)
 +   self.assertEqual(data[0]['widths'],{'4':1,'12':1})
 +   self.assertNotIn('789',json.dumps(data))
++ def test_skip_and_adapt_metrics_are_observed_not_inferred_from_flags(self):
++  text=('STRATA_ROUTE_TAIL_SKIP=7 is ON\n'
++        'strata serve: route tail skip: 15 missed experts skipped (21 entries) since the start\n'
++        'strata decode timing: 4 windows, avg T 2.0, 2.0 tokens/window, 25.0 ms/window; adapt wait 1.25 + verify 20\n')
++  result=h.optimization_log_summary(text)
++  self.assertTrue(result['tail_skip_reported'])
++  self.assertEqual(result['tail_skip_cumulative_samples'],[{'experts':15,'entries':21}])
++  self.assertEqual(result['adapt_wait_ms_per_window_samples'],[1.25])
++  empty=h.optimization_log_summary('')
++  self.assertEqual(empty['tail_skip_cumulative_samples'],[])
++  self.assertFalse(empty['tail_skip_reported'])
 + def test_trial_stream_metrics_and_cleanup(self):
 +  with tempfile.TemporaryDirectory() as t:
 +   root=Path(t);base=self.base(root)
@@ -926,21 +957,23 @@ index 000000000..32914da3c
 +   with socket.socket() as probe:self.assertNotEqual(probe.connect_ex(('127.0.0.1',port)),0)
 +
 + def test_groups_balanced_and_each_ablation_changes_one_field(self):
-+  seq=h.arms();self.assertEqual(len(seq),50)
++  seq=h.arms();self.assertEqual(len(seq),70)
 +  for group in {r['group'] for r in seq}:
 +   rows=h.arms([group]);self.assertEqual(rows,rows[::-1])
 +   if group!='combined':
 +    fields={k for k in h.DAILY if len({r[k] for r in rows})>1}
-+    expected={'spec-lookup':{'spec','lookup'},'shape-qkv':{'shapes','tc'},'dense-lookup':{'dense','lookup'},'skip-lookup':{'skip','lookup'},'rows':{'rows'}}
++    expected={'spec-lookup':{'spec','lookup'},'shape-qkv':{'shapes','tc'},'dense-lookup':{'dense','lookup'},'skip-lookup':{'skip','lookup'},'rows':{'rows'},'adapt-tail':{'nowait','tail'},'tail-spec':{'tail','spec'}}
 +    self.assertEqual(fields,expected[group],group)
 +  self.assertEqual(len({(a['spec'],a['lookup']) for a in h.arms(['spec-lookup'])}),9)
 +  self.assertEqual(len({(a['shapes'],a['tc']) for a in h.arms(['shape-qkv'])}),4)
++  self.assertEqual({(a['nowait'],a['tail']) for a in h.arms(['adapt-tail'])},{(0,0),(1,0),(0,7),(1,7)})
++  self.assertEqual(len({(a['tail'],a['spec']) for a in h.arms(['tail-spec'])}),6)
 +  self.assertEqual(h.arms(['combined'])[1],{**h.DAILY,'group':'combined','name':'combined-daily'})
 +
 +if __name__=='__main__':unittest.main()
 diff --git a/terminal/l2/test_manual_compare.py b/terminal/l2/test_manual_compare.py
 new file mode 100644
-index 000000000..cb92d9bce
+index 000000000..a8b7d4699
 --- /dev/null
 +++ b/terminal/l2/test_manual_compare.py
 @@ -0,0 +1,39 @@
@@ -962,7 +995,7 @@ index 000000000..cb92d9bce
 +   with patch.object(manual_compare.subprocess,'run') as run,patch.object(manual_compare.subprocess,'Popen') as popen,contextlib.redirect_stdout(out):
 +    self.assertEqual(manual_compare.main(['--profile',str(profile),'--plan']),0)
 +   run.assert_not_called();popen.assert_not_called()
-+   result=json.loads(out.getvalue());self.assertEqual(result['arms'],50);self.assertFalse(result['automatic_tests'])
++   result=json.loads(out.getvalue());self.assertEqual(result['arms'],70);self.assertFalse(result['automatic_tests'])
 + def test_active_desktop_rejected_before_service_stop(self):
 +  with tempfile.TemporaryDirectory() as t:
 +   _,profile,_=self.fixture(Path(t))

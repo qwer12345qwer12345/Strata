@@ -264,3 +264,5 @@ python downstream/scripts/test.py --feature example \
 当前本机日常配置与手动无头对比命令见 [DAILY_CONFIGURATION.md](DAILY_CONFIGURATION.md)。正常启动不再执行基准或请求队列。
 
 关键参数交互与识图当前边界见 [GLOBAL_REVIEW_AND_VISION.md](GLOBAL_REVIEW_AND_VISION.md)。
+
+当前显式开启ADAPT_NOWAIT与官方tail skip7，依据和手动测试组见 [NOWAIT_AND_TAIL_SKIP.md](NOWAIT_AND_TAIL_SKIP.md)。
