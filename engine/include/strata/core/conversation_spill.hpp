@@ -315,25 +315,46 @@ public:
         persistent_ = true;
         size_t removed = 0;
         if (cap > 0) {
-            std::error_code ec;
-            for (std::filesystem::directory_iterator it(ns_.dir(), ec), end; !ec && it != end; it.increment(ec)) {
-                const auto meta_path = it->path();
+            // Snapshot the directory entries before deleting anything: directory_iterator behavior while
+            // entries are removed is unspecified on some filesystems (notably Windows).
+            std::vector<std::filesystem::path> meta_paths, session_paths;
+            std::error_code scan_ec;
+            for (std::filesystem::directory_iterator it(ns_.dir(), scan_ec), end;
+                 !scan_ec && it != end; it.increment(scan_ec)) {
+                const auto p = it->path();
+                const auto st = it->symlink_status(scan_ec);
+                if (scan_ec) break;
+                if (std::filesystem::is_symlink(st) || !std::filesystem::is_regular_file(st)) continue;
+                const std::string name = p.filename().string();
+                if (name.rfind("conv-", 0) != 0) continue;
+                if (name.size() > 10 && name.substr(name.size() - 5) == ".meta") meta_paths.push_back(p);
+                else if (name.size() > 13 && name.substr(name.size() - 8) == ".session") session_paths.push_back(p);
+            }
+            if (scan_ec) {
+                error = "persistent spill folder " + ns_.dir().string() + " cannot be scanned: " + scan_ec.message();
+                ns_.close();
+                persistent_ = false;
+                return false;
+            }
+            auto remove_file = [](const std::filesystem::path& p) {
+                std::error_code ec;
+                return std::filesystem::remove(p, ec);
+            };
+            for (const auto& meta_path : meta_paths) {
                 const std::string name = meta_path.filename().string();
-                if (name.rfind("conv-", 0) != 0 || name.size() <= 10 ||
-                    name.substr(name.size() - 5) != ".meta" || it->is_symlink(ec) || !it->is_regular_file(ec)) continue;
                 const std::string digits = name.substr(5, name.size() - 10);
                 uint64_t serial = 0;
                 const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), serial);
                 if (parsed.ec != std::errc{} || parsed.ptr != digits.data() + digits.size() || serial == 0) {
-                    std::filesystem::remove(meta_path, ec);
-                    ++removed;
+                    if (remove_file(meta_path)) ++removed;
                     continue;
                 }
                 const auto session_path = ns_.file_for(serial);
                 std::error_code e2;
-                if (!std::filesystem::is_regular_file(session_path, e2) || std::filesystem::is_symlink(session_path, e2)) {
-                    std::filesystem::remove(meta_path, e2);
-                    ++removed;
+                const auto session_status = std::filesystem::symlink_status(session_path, e2);
+                if (e2 || std::filesystem::is_symlink(session_status) ||
+                    !std::filesystem::is_regular_file(session_status)) {
+                    if (remove_file(meta_path)) ++removed;
                     continue;
                 }
                 SavedConversation meta;
@@ -341,21 +362,24 @@ public:
                 std::string why;
                 SessionReadLimits limits;
                 if (!session_file_read(meta_path.string(), id, meta, read, why, limits)) {
-                    std::filesystem::remove(meta_path, e2);
-                    std::filesystem::remove(session_path, e2);
+                    remove_file(meta_path);
+                    remove_file(session_path);
                     ++removed;
                     continue;
                 }
+                e2.clear();
                 const uint64_t file_bytes = std::filesystem::file_size(session_path, e2);
                 if (e2) {
-                    std::filesystem::remove(meta_path, e2);
+                    remove_file(meta_path);
                     ++removed;
                     continue;
                 }
+                e2.clear();
                 const uint64_t meta_bytes = std::filesystem::file_size(meta_path, e2);
-                if (e2 || file_bytes > UINT64_MAX - meta_bytes || file_bytes + meta_bytes > UINT64_MAX - budget_.used) {
-                    std::filesystem::remove(meta_path, e2);
-                    std::filesystem::remove(session_path, e2);
+                if (e2 || file_bytes > UINT64_MAX - meta_bytes ||
+                    file_bytes + meta_bytes > UINT64_MAX - budget_.used) {
+                    remove_file(meta_path);
+                    remove_file(session_path);
                     ++removed;
                     continue;
                 }
@@ -371,19 +395,21 @@ public:
                 if (serial == UINT64_MAX) next_serial_ = 0;
                 else if (serial >= next_serial_) next_serial_ = serial + 1;
             }
-            // Remove session files left by a crash between the payload publish and metadata publish.
-            for (std::filesystem::directory_iterator it(ns_.dir(), ec), end; !ec && it != end; it.increment(ec)) {
-                const auto p = it->path();
-                const std::string name = p.filename().string();
-                if (name.rfind("conv-", 0) != 0 || name.size() <= 13 ||
-                    name.substr(name.size() - 8) != ".session" || it->is_symlink(ec) || !it->is_regular_file(ec)) continue;
+            // Remove payloads left by a crash before the metadata sidecar was published.
+            for (const auto& session_path : session_paths) {
+                const std::string name = session_path.filename().string();
                 const std::string digits = name.substr(5, name.size() - 13);
                 uint64_t serial = 0;
                 const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), serial);
-                if (parsed.ec != std::errc{} || parsed.ptr != digits.data() + digits.size() ||
-                    !std::filesystem::exists(ns_.meta_for(serial), ec)) {
-                    std::filesystem::remove(p, ec);
-                    ++removed;
+                if (parsed.ec != std::errc{} || parsed.ptr != digits.data() + digits.size() || serial == 0) {
+                    if (remove_file(session_path)) ++removed;
+                    continue;
+                }
+                std::error_code e2;
+                const auto meta_status = std::filesystem::symlink_status(ns_.meta_for(serial), e2);
+                if (e2 || std::filesystem::is_symlink(meta_status) ||
+                    !std::filesystem::is_regular_file(meta_status)) {
+                    if (remove_file(session_path)) ++removed;
                 }
             }
             std::sort(entries_.begin(), entries_.end(), [](const Entry& a, const Entry& b) { return a.serial < b.serial; });
