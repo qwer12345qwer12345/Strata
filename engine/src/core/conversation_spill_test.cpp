@@ -311,6 +311,13 @@ int main() {
         check(!fs::exists(meta) && !fs::exists(second.dir() / ("conv-" + std::to_string(serial) + ".session")),
               "taking the entry removes both files");
         second.close();
+
+        ConversationSpill other_identity;
+        check(other_identity.open_persistent(root, uint64_t(64) << 20, SessionFileIdentity{31, 42}, err),
+              "a different config identity gets its own namespace");
+        check(other_identity.size() == 0 && other_identity.dir() != dir,
+              "model/config identities do not share a persistent index");
+        other_identity.close();
     }
     fs::remove_all(root, ec);
     std::printf("conversation_spill_test: %d checks, %d failed\n", checks, failures);
