@@ -16,7 +16,7 @@
 
 正常supervisor不执行基准、不读取旧请求队列。显式命令 `sudo ~/.local/bin/strata-headless-compare` 在无头环境暂停服务，运行比较后恢复日常服务；`strata-headless-compare --plan` 只显示计划。源码入口为 `terminal/l2/manual_compare.py`，运行时以模型用户和无限memlock执行，不以root运行模型。
 
-默认70组，包含旧/新日常组合、新旧形状、QKV TC与DP4A、spec6/4/3、lookup上限8/12/16、Dense短窗TC、lookup草稿延后、单行/成对行、NOWAIT×tail skip及tail skip×spec。关键交互用二维参数矩阵，正反顺序平衡冷热与先后；完整定义见 [日常配置与对比计划](../../DAILY_CONFIGURATION.md)。每组3072-token代码和1536-token长上下文输出，默认四小时预算，测试不会自动修改日常配置。
+默认114组，包含旧/新日常组合、新旧形状、QKV TC与DP4A、spec6/4/3、lookup上限8/12/16、Dense短窗TC、lookup草稿延后、单行/成对行、NOWAIT×tail skip及tail skip×spec。关键交互用二维参数矩阵，正反顺序平衡冷热与先后；完整定义见 [日常配置与对比计划](../../DAILY_CONFIGURATION.md)。每组3072-token代码和1536-token长上下文输出，默认四小时预算，测试不会自动修改日常配置。
 
 保留完整驻留、零专家文件读取确认、内存/swap限制、流式与窗口延迟、输出散列及接受率报告。报告记录实际是否使用>8行，不能将“打开开关”当作已测到宽行收益。依赖legacy-session-archive提供统一runtime selection与正常supervisor，engine桥接本身仍是独立opt-in补丁。
 
@@ -29,3 +29,5 @@
 - ring恢复附加检查发现：开启上游批量context时，关闭新形状表也不逐位一致；`STRATA_DF2_CTX_BATCH=0` 则通过。批量context的TC与窄行重建不是同一累加路径。桥接只使用窄行context，未更改生产prompt批处理默认，也未声称解决上游所有ring精度问题。原始对照保存在 validation。
 
 本机按用户选择采用理论优先日常组合，明确标注未经无头组合验证；测试改为显式命令触发，详见统一配置文档。引擎二进制SHA256：`85a8b3084262d90b671ba5442bab6a0885bfb7faf34cc76e775b0f12ab4f7569`。编译和GPU测试依次执行，未切换桌面或网络。
+
+当前手动矩阵为114组，`--group numeric`只运行新增44组；覆盖Embedding×GDN精度、HC_UPMIX、GDN执行分块、prefill cap/CPU share与resident overlap替代调度。用户选择日常Embedding1/NP2，性能与质量尚未实测。正常启动不运行这些组，细节见[DAILY_CONFIGURATION.md](../../DAILY_CONFIGURATION.md)。

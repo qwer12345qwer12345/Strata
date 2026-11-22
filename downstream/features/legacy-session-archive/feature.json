@@ -1,16 +1,16 @@
 {
   "id": "legacy-session-archive",
   "name": "Complete PR5500 V2/V3 archive and automatic Chat Completions cache",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "status": "active",
   "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
-  "patched_tree": "bdd5db0ee66fe7bf90d5c0628ca6a32f07f241cf",
+  "patched_tree": "9bfa99780a05f9e999140fd3b1b394fc5a7875a0",
   "requires": [],
   "patches": [
     {
       "id": "legacy-v2-v3-archive",
       "path": "patches/0001-legacy-v2-v3-archive.patch",
-      "sha256": "0bb693fd58de16db85cf728a2693dda3cecc477d1b44863212152648ae549f28"
+      "sha256": "faa753bf76195b70d64dd6329c373233333cf42431bc00d0a4093d8b37c3a6f8"
     }
   ],
   "tests": "tests/test.json",
@@ -24,6 +24,9 @@
     "STRATA_ADAPT_LAG": "2",
     "STRATA_ROUTE_TAIL_SKIP": "7",
     "STRATA_ROUTE_TAIL_RENORM": "0",
-    "STRATA_HC_Q8": "1"
+    "STRATA_HC_Q8": "1",
+    "STRATA_EMB_REUSE_ACCOUNT": "1",
+    "STRATA_GDN_TC": "1",
+    "STRATA_GDN_TC_NP": "2"
   }
 }

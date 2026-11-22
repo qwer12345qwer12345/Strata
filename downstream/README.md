@@ -270,3 +270,5 @@ python downstream/scripts/test.py --feature example \
 当前显式开启ADAPT_NOWAIT与官方tail skip7，依据和手动测试组见 [NOWAIT_AND_TAIL_SKIP.md](NOWAIT_AND_TAIL_SKIP.md)。
 
 官方与下游数值/性能取舍的完整审计见 [NUMERICAL_PERFORMANCE_AUDIT.md](NUMERICAL_PERFORMANCE_AUDIT.md)，包含已有K8V4 IMMA与待扩展decode split的区别，以及spec参数接线修正。
+
+最新日常已启用Embedding实际计费与GDN NP2；[手动矩阵](DAILY_CONFIGURATION.md)现有114组（新增数值/执行候选44组），需要改代码的候选见[下一轮计划](NEXT_OPTIMIZATION_PLAN.md)。

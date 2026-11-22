@@ -352,10 +352,10 @@ index 000000000..95e38a2e7
 +    main()
 diff --git a/terminal/l2/headless_experiments.py b/terminal/l2/headless_experiments.py
 new file mode 100644
-index 000000000..87f35b558
+index 000000000..74f82f0b6
 --- /dev/null
 +++ b/terminal/l2/headless_experiments.py
-@@ -0,0 +1,381 @@
+@@ -0,0 +1,415 @@
 +"""One-shot headless spec, SM86 shape and wide lookup comparisons. Never select a winner automatically."""
 +import datetime
 +import hashlib
@@ -581,15 +581,38 @@ index 000000000..87f35b558
 +    result += mirror('rows',('rows',),[(2,),(0,)])
 +    result += mirror('adapt-tail',('nowait','tail'),[(0,0),(1,0),(1,7),(0,7)])
 +    result += mirror('tail-spec',('tail','spec'),[(0,6),(7,6),(7,4),(0,4),(0,3),(7,3)])
++    # Numerical differences are not an exclusion: compare interacting choices
++    # under the same residency and long-output requirements as the existing arms.
++    result += mirror('emb-gdn',('emb','gdn_np'),[(0,3),(1,3),(1,2),(0,2)])
++    result += mirror('gdn-precision',('gdn_np',),[(2,),(1,)])
++    result += mirror('hc-upmix',('upmix',),[(0,),(1,)])
++    result += mirror('gdn-execution',('gdn_tiles','gdn_fuse'),[(1,1),(2,1),(2,0),(1,0)])
++    result += mirror('prefill-cap',('prefill_cap',),[(8192,),(16384,),(32768,)])
++    result += mirror('cpu-prefill',('cpu_nt','cpu_max'),[(0,0),(32,3072),(32,6144),(8,6144)])
++    result += mirror('adapt-mode',('nowait','lag','overlap'),[(1,2,0),(0,1,1),(0,1,0)])
 +    if groups:
++        if 'numeric' in groups:
++            groups=[g for g in groups if g!='numeric']+['emb-gdn','gdn-precision','hc-upmix','gdn-execution','prefill-cap','cpu-prefill','adapt-mode']
 +        aliases = {'spec':'spec-lookup','lookup':'spec-lookup','shape':'shape-qkv',
 +                   'qkv-tc':'shape-qkv','dense':'dense-lookup','lookup-skip':'skip-lookup',
-+                   'nowait':'adapt-tail','tail-skip':'adapt-tail'}
++                   'nowait':'adapt-tail','tail-skip':'adapt-tail','embedding':'emb-gdn','gdn':'emb-gdn'}
 +        wanted = {aliases.get(group,group) for group in groups}
 +        unknown = wanted - {r['group'] for r in result}
 +        if unknown:raise ValueError('Unknown comparison groups: '+', '.join(sorted(unknown)))
 +        result = [r for r in result if r['group'] in wanted]
 +    return result
++
++
++def comparison_workloads(group):
++    cases=list(workloads()[:3])
++    if group=='cpu-prefill':
++        # The long prompt can exceed the share's range; include a follow-up-sized
++        # prompt so extending that range is actually exercised, not just requested.
++        records=[line for line in cases[2][1].splitlines() if line.startswith('Record ')][:60]
++        prompt='Use these incident records to write a detailed recovery handbook.\n'+'\n'.join(records)
++        prompt+='\nGive at least 30 fully written procedures, with diagnosis, actions, verification and failure examples. Do not abbreviate.'
++        cases.append(('medium_context',prompt,1536))
++    return cases
 +
 +
 +def configure(base, arm, folder, seed, port):
@@ -598,13 +621,13 @@ index 000000000..87f35b558
 +    args = cfg['args']
 +    for flag in ('--expert-profile-save', '--expert-profile', '--conversation-cache-mib',
 +                 '--conversation-cache-slots', '--spec', '--draft-conf', '--lookup-max-t',
-+                 '--lookup-sizes', '--spec-min-p'):
++                 '--lookup-sizes', '--spec-min-p', '--prefill'):
 +        while flag in args:
 +            at = args.index(flag)
 +            del args[at:at + 2]
 +    sizes = list(range(2, 9)) + ([10, 12] if lookup >= 12 else []) + ([16] if lookup == 16 else [])
 +    options = ['--spec', str(spec), '--draft-conf', '0.8', '--lookup-max-t', str(lookup),
-+               '--lookup-sizes', ','.join(map(str, sizes))]
++               '--lookup-sizes', ','.join(map(str, sizes)), '--prefill', f'auto:{arm["prefill_cap"]}']
 +    args += ['--expert-profile', str(seed), '--conversation-cache-mib', '0',
 +             '--conversation-cache-slots', '0'] + options
 +    for key in ('startup_benchmark', 'slot_save_path', 'l2_backend_port', 'l2_disk_budget_mib'):
@@ -613,13 +636,21 @@ index 000000000..87f35b558
 +               drafting='dflash2', mtp=False, user_args=options, engine_ready_s=180)
 +    if str(cfg['env'].get('STRATA_ROUTE_PRIOR')) != '0.5':
 +        raise ValueError('prior=0.5 is required')
-+    cfg['env'].update(STRATA_ADAPT_NOWAIT=str(arm['nowait']), STRATA_ADAPT_LAG='2',
++    cfg['env'].update(STRATA_ADAPT_NOWAIT=str(arm['nowait']), STRATA_ADAPT_LAG=str(arm['lag']),
++                      STRATA_ADAPT_OVERLAP=str(arm['overlap']), STRATA_ADAPT_OVERLAP_RESIDENT=str(arm['overlap']),
 +                      STRATA_ROUTE_TAIL_SKIP=str(arm['tail']), STRATA_ROUTE_TAIL_RENORM='0',
 +                      STRATA_TQ_AMPERE_ROWS=str(arm['rows']), STRATA_DRAFT_LOG='1', STRATA_DECODE_TIMING='1',
 +                      STRATA_DF2_AMPERE_TUNING=str(shape), STRATA_DENSE_I8_AMPERE_SHAPES=str(arm['dense']),
 +                      STRATA_DF2_GEMM_TC=str(arm['tc']), STRATA_DF2_LOOKUP_SKIP=str(arm['skip']), STRATA_DF2_WIDE_CONTEXT='1' if lookup > 8 else '0',
 +                      STRATA_SPEC_TRACE=str(folder / 'spec.trace'),
 +                      STRATA_CONV_DISK_DIR=str(folder / 'parked'))
++    cfg['env'].update(STRATA_EMB_REUSE_ACCOUNT=str(arm['emb']), STRATA_GDN_TC='1',
++                      STRATA_GDN_TC_NP=str(arm['gdn_np']), STRATA_HC_UPMIX=str(arm['upmix']),
++                      STRATA_GDN_TC_TILES=str(arm['gdn_tiles']), STRATA_GDN_TC_FUSE=str(arm['gdn_fuse']),
++                      STRATA_PREFILL_TIMING='1')
++    for key, field in (('STRATA_PREFILL_CPU_SHARE_NT','cpu_nt'),('STRATA_PREFILL_CPU_SHARE_MAX','cpu_max')):
++        cfg['env'].pop(key,None)
++        if arm[field]:cfg['env'][key]=str(arm[field])
 +    return cfg
 +
 +
@@ -688,7 +719,7 @@ index 000000000..87f35b558
 +    work = directory / ('spec-shape-lookup-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
 +    work.mkdir(mode=0o700, parents=True)
 +    (work / 'request.json').write_text(json.dumps(request, indent=2)+'\n')
-+    report = {'status': 'failed', 'runs': [], 'sequence': sequence, 'suite': 'manual-theory-v2'}
++    report = {'status': 'failed', 'runs': [], 'sequence': sequence, 'suite': 'manual-theory-v3'}
 +    try:
 +        check_environment()
 +        exe = Path(cfg['exe'])
@@ -702,11 +733,11 @@ index 000000000..87f35b558
 +        report['seed_sha256'] = hashlib.sha256(seed.read_bytes()).hexdigest()
 +        deadline = time.monotonic() + min(14400, max(60, int(request.get('budget_s', 14400))))
 +        # Warmup plus 3072-token output and 1536-token long-context output.
-+        cases = workloads()[:3]
 +        print(f'Strata 开始 spec/形状/宽 lookup 无头对比，共 {len(sequence)} 组；完成后开放服务。报告 {work}', flush=True)
 +        for i, arm in enumerate(sequence, 1):
 +            folder = work / f'{i:02d}-{arm["name"]}'
 +            trial_cfg = configure(cfg, arm, folder, seed, port)
++            cases = comparison_workloads(arm['group'])
 +            # run_phase owns every child and closes it before the next arm.
 +            result = run_phase(root, trial_cfg, arm['name'], folder, seed, port, deadline,
 +                               workloads=cases, launch_profile=trial_cfg, stream_latency=True)
@@ -722,7 +753,10 @@ index 000000000..87f35b558
 +            result['trace'] = trace_summary(folder / 'spec.trace')
 +            result['optimization_log'] = optimization_log_summary(text)
 +            result['effective_optimization_environment'] = {name:trial_cfg['env'][name] for name in
-+                ('STRATA_ADAPT_NOWAIT','STRATA_ADAPT_LAG','STRATA_ROUTE_TAIL_SKIP','STRATA_ROUTE_TAIL_RENORM')}
++                ('STRATA_ADAPT_NOWAIT','STRATA_ADAPT_LAG','STRATA_ADAPT_OVERLAP','STRATA_ADAPT_OVERLAP_RESIDENT','STRATA_ROUTE_TAIL_SKIP','STRATA_ROUTE_TAIL_RENORM',
++                 'STRATA_EMB_REUSE_ACCOUNT','STRATA_GDN_TC','STRATA_GDN_TC_NP','STRATA_GDN_TC_TILES',
++                 'STRATA_GDN_TC_FUSE','STRATA_HC_UPMIX','STRATA_PREFILL_CPU_SHARE_NT','STRATA_PREFILL_CPU_SHARE_MAX')
++                if name in trial_cfg['env']}
 +            report['runs'].append(result)
 +            (work / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
 +            print(f'Strata 对比进度 {i}/{len(sequence)}: {arm["name"]} {result["status"]}', flush=True)
@@ -739,7 +773,7 @@ index 000000000..87f35b558
 +    return report
 diff --git a/terminal/l2/manual_compare.py b/terminal/l2/manual_compare.py
 new file mode 100644
-index 000000000..c23a971f5
+index 000000000..d41782b0a
 --- /dev/null
 +++ b/terminal/l2/manual_compare.py
 @@ -0,0 +1,101 @@
@@ -764,7 +798,7 @@ index 000000000..c23a971f5
 +    parser = argparse.ArgumentParser(description=__doc__)
 +    parser.add_argument('--profile', type=Path, default=Path('/etc/strata/server.json'))
 +    parser.add_argument('--state-dir', type=Path)
-+    parser.add_argument('--group', action='append', help='combined/spec-lookup/shape-qkv/dense-lookup/skip-lookup/rows/adapt-tail/tail-spec; default all')
++    parser.add_argument('--group', action='append', help='combined/spec-lookup/shape-qkv/dense-lookup/skip-lookup/rows/adapt-tail/tail-spec/emb-gdn/gdn-precision/hc-upmix/gdn-execution/prefill-cap/cpu-prefill/adapt-mode; numeric selects new groups; default all')
 +    parser.add_argument('--budget-s', type=int, default=14400)
 +    parser.add_argument('--vision-check',action='store_true',help='run the optional vision lease correctness suite only')
 +    parser.add_argument('--plan', action='store_true', help='show the comparison plan without stopping or starting anything')
@@ -846,10 +880,10 @@ index 000000000..c23a971f5
 +    raise SystemExit(main())
 diff --git a/terminal/l2/test_headless_experiments.py b/terminal/l2/test_headless_experiments.py
 new file mode 100644
-index 000000000..525f22a35
+index 000000000..c49c153f3
 --- /dev/null
 +++ b/terminal/l2/test_headless_experiments.py
-@@ -0,0 +1,132 @@
+@@ -0,0 +1,148 @@
 +import copy
 +import hashlib
 +import json
@@ -901,6 +935,12 @@ index 000000000..525f22a35
 +    self.assertEqual(val('--spec'),str(arm['spec']))
 +    self.assertEqual(val('--lookup-max-t'),str(arm['lookup']))
 +    self.assertEqual(val('--draft-conf'),'0.8')
++    self.assertEqual(val('--prefill'),f'auto:{arm["prefill_cap"]}')
++    for name,key in [('STRATA_EMB_REUSE_ACCOUNT','emb'),('STRATA_GDN_TC_NP','gdn_np'),('STRATA_HC_UPMIX','upmix'),('STRATA_GDN_TC_TILES','gdn_tiles'),('STRATA_GDN_TC_FUSE','gdn_fuse')]:
++     self.assertEqual(cfg['env'][name],str(arm[key]))
++    for name,key in [('STRATA_PREFILL_CPU_SHARE_NT','cpu_nt'),('STRATA_PREFILL_CPU_SHARE_MAX','cpu_max')]:
++     if arm[key]:self.assertEqual(cfg['env'][name],str(arm[key]))
++     else:self.assertNotIn(name,cfg['env'])
 +    self.assertEqual(val('--pool-workers'),'15')
 +    self.assertEqual(val('--max-context'),'262144')
 +    self.assertIn('--resident-experts',args)
@@ -908,12 +948,20 @@ index 000000000..525f22a35
 +    self.assertEqual(cfg['env']['STRATA_ADAPT_NOWAIT'],str(arm['nowait']))
 +    self.assertEqual(cfg['env']['STRATA_ROUTE_TAIL_SKIP'],str(arm['tail']))
 +    self.assertEqual(cfg['env']['STRATA_ROUTE_TAIL_RENORM'],'0')
-+    self.assertEqual(cfg['env']['STRATA_ADAPT_LAG'],'2')
++    self.assertEqual(cfg['env']['STRATA_ADAPT_LAG'],str(arm['lag']))
++    self.assertEqual(cfg['env']['STRATA_ADAPT_OVERLAP'],str(arm['overlap']))
++    if arm['overlap']:self.assertEqual((arm['nowait'],arm['lag']),(0,1))
 +    self.assertEqual(cfg['env']['STRATA_DF2_WIDE_CONTEXT'],'1' if arm['lookup']>8 else '0')
 +    if arm['group']=='spec-lookup':
 +     expected='2,3,4,5,6,7,8'+(',10,12' if arm['lookup']>=12 else '')+(',16' if arm['lookup']==16 else '')
 +     self.assertEqual(val('--lookup-sizes'),expected)
 +   self.assertEqual(base,old)
++ def test_cpu_share_has_a_medium_prompt_inside_the_extended_range(self):
++  cases=h.comparison_workloads('cpu-prefill')
++  self.assertEqual(cases[-1][0],'medium_context')
++  self.assertEqual(cases[-1][2],1536)
++  self.assertEqual(sum(line.startswith('Record ') for line in cases[-1][1].splitlines()),60)
++  self.assertEqual(len(h.comparison_workloads('emb-gdn')),3)
 + def test_hash_mismatch_never_starts_a_trial(self):
 +  with tempfile.TemporaryDirectory() as t:
 +   root=Path(t);base=self.base(root)
@@ -968,13 +1016,15 @@ index 000000000..525f22a35
 +   with socket.socket() as probe:self.assertNotEqual(probe.connect_ex(('127.0.0.1',port)),0)
 +
 + def test_groups_balanced_and_each_ablation_changes_one_field(self):
-+  seq=h.arms();self.assertEqual(len(seq),70)
++  seq=h.arms();self.assertEqual(len(seq),114)
 +  for group in {r['group'] for r in seq}:
 +   rows=h.arms([group]);self.assertEqual(rows,rows[::-1])
 +   if group!='combined':
 +    fields={k for k in h.DAILY if len({r[k] for r in rows})>1}
-+    expected={'spec-lookup':{'spec','lookup'},'shape-qkv':{'shapes','tc'},'dense-lookup':{'dense','lookup'},'skip-lookup':{'skip','lookup'},'rows':{'rows'},'adapt-tail':{'nowait','tail'},'tail-spec':{'tail','spec'}}
++    expected={'spec-lookup':{'spec','lookup'},'shape-qkv':{'shapes','tc'},'dense-lookup':{'dense','lookup'},'skip-lookup':{'skip','lookup'},'rows':{'rows'},'adapt-tail':{'nowait','tail'},'tail-spec':{'tail','spec'},'emb-gdn':{'emb','gdn_np'},'gdn-precision':{'gdn_np'},'hc-upmix':{'upmix'},'gdn-execution':{'gdn_tiles','gdn_fuse'},'prefill-cap':{'prefill_cap'},'cpu-prefill':{'cpu_nt','cpu_max'},'adapt-mode':{'nowait','lag','overlap'}}
 +    self.assertEqual(fields,expected[group],group)
++  self.assertEqual(len(h.arms(['numeric'])),44)
++  self.assertEqual({(a['emb'],a['gdn_np']) for a in h.arms(['emb-gdn'])},{(0,3),(1,3),(0,2),(1,2)})
 +  self.assertEqual(len({(a['spec'],a['lookup']) for a in h.arms(['spec-lookup'])}),9)
 +  self.assertEqual(len({(a['shapes'],a['tc']) for a in h.arms(['shape-qkv'])}),4)
 +  self.assertEqual({(a['nowait'],a['tail']) for a in h.arms(['adapt-tail'])},{(0,0),(1,0),(0,7),(1,7)})
@@ -984,7 +1034,7 @@ index 000000000..525f22a35
 +if __name__=='__main__':unittest.main()
 diff --git a/terminal/l2/test_manual_compare.py b/terminal/l2/test_manual_compare.py
 new file mode 100644
-index 000000000..a8b7d4699
+index 000000000..5c1f01021
 --- /dev/null
 +++ b/terminal/l2/test_manual_compare.py
 @@ -0,0 +1,39 @@
@@ -1006,7 +1056,7 @@ index 000000000..a8b7d4699
 +   with patch.object(manual_compare.subprocess,'run') as run,patch.object(manual_compare.subprocess,'Popen') as popen,contextlib.redirect_stdout(out):
 +    self.assertEqual(manual_compare.main(['--profile',str(profile),'--plan']),0)
 +   run.assert_not_called();popen.assert_not_called()
-+   result=json.loads(out.getvalue());self.assertEqual(result['arms'],70);self.assertFalse(result['automatic_tests'])
++   result=json.loads(out.getvalue());self.assertEqual(result['arms'],114);self.assertFalse(result['automatic_tests'])
 + def test_active_desktop_rejected_before_service_stop(self):
 +  with tempfile.TemporaryDirectory() as t:
 +   _,profile,_=self.fixture(Path(t))

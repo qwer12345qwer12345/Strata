@@ -23,7 +23,7 @@
 
 源码入口：`engine/src/kernels/cuda/dflash2.cu`（表与TC优先级）；`engine/src/core/dflash2.cpp`（context/bridge）；`engine/include/strata/spec/window_rule.hpp`（延后）；`engine/src/program/generate.cpp`（窗口上限、graph_fits、prior warm-up、VRAM命令）；`engine/src/prefill/prefill.cpp`（group scratch资格）；`engine/src/core/nv_defaults.cpp`（SM86默认）。
 
-对比已扩成70组关键交互矩阵，默认预算4小时，含ADAPT_NOWAIT与tail skip及spec的交叉。详见 [日常配置与命令](DAILY_CONFIGURATION.md)。这仍是有限实验设计，不是所有开关的高维穷举。
+对比已扩成114组关键交互矩阵（新增44组数值与执行策略），默认预算4小时，含ADAPT_NOWAIT与tail skip及spec的交叉。详见 [日常配置与命令](DAILY_CONFIGURATION.md)。这仍是有限实验设计，不是所有开关的高维穷举。
 
 ## 识图现在的准确状态
 

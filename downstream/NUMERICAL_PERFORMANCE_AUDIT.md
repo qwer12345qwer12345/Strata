@@ -52,3 +52,5 @@ NOWAIT1/lag2、tail skip7、Dense短窗TC、prior0.5均已选入。新DP4A表下
 本轮发现并修正一个实际接线问题：旧profile没有`user_args`/`args_written`时，runtime selection只改`args`，官方drafting.apply会把选定spec4改回默认6。现在将选择器的明确覆盖项写入`user_args`，沿用官方参数优先级。新增回归覆盖旧profile；最终engine_args只生成命令、不启动模型，确认spec4、draft-conf0.8、lookup16。之前受限预算识图日志中确实为spec6；其图像生命周期结果仍有效，不视为spec4组合性能结果。
 
 本轮没有为未测候选更改运行开关、执行模型基准或修改正常启动行为。建议研究次序：embedding实际计费 → GDN NP2 → K8V4 decode TC/分块扩展 → Dense按形状比较非exact布局与当前分派 → HC_UPMIX资格和延迟。使用既有显式无头测试方式，不能把这份源码审计当作性能提升已验证。
+
+后续执行更新：用户已选择启用Embedding实际计费和GDN NP2。无需推理代码改动的候选已加入114组手动矩阵，其中新增44组可用`--group numeric`单独选择；待代码项见[NEXT_OPTIMIZATION_PLAN.md](NEXT_OPTIMIZATION_PLAN.md)。这更新了前文“本轮未改开关”的历史状态，仍无这些候选的真实性能结果。resident overlap已有`STRATA_ADAPT_OVERLAP_RESIDENT=1`，本次作为NOWAIT替代方案列测，不需新增所有权实现；ADAPT_FETCH仍需代码。

@@ -1,0 +1,36 @@
+{
+  "date": "2026-11-23",
+  "stack_tree": "fb23dfa93e948392b550e9d3474add554aa8acd3",
+  "runtime_source_files_match": 61,
+  "daily_environment": {
+    "STRATA_EMB_REUSE_ACCOUNT": "1",
+    "STRATA_GDN_TC": "1",
+    "STRATA_GDN_TC_NP": "2",
+    "STRATA_ROUTE_PRIOR": "0.5"
+  },
+  "daily_command_dry_run": {
+    "spec": 4,
+    "draft_conf": 0.8
+  },
+  "manual_total_arms": 114,
+  "manual_numeric_arms": 44,
+  "numeric_groups": {
+    "emb-gdn": 8,
+    "gdn-precision": 4,
+    "hc-upmix": 4,
+    "gdn-execution": 8,
+    "prefill-cap": 6,
+    "cpu-prefill": 8,
+    "adapt-mode": 6
+  },
+  "selected_control_tests_passed": 16,
+  "source_prepared_from_packages": true,
+  "live_python_modules_match": 3,
+  "model_or_gpu_benchmarks_run": false,
+  "new_inference_code_added": false,
+  "recompiled_binary": false,
+  "engine_sha256": "fd8f764182951680382da78ad8ae71b5ef5f8abd2e90dce68f2ec6940ca28ab1",
+  "new_daily_validation": "NOT TESTED; user explicitly selected these opt-ins before manual headless comparison",
+  "automatic_benchmarks": false,
+  "queued_requests": 0
+}

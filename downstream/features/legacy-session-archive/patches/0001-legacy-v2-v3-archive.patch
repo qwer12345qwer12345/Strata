@@ -8919,7 +8919,7 @@ index 000000000..486a4c4b8
 +if __name__=='__main__':main()
 diff --git a/terminal/l2/runtime_config.py b/terminal/l2/runtime_config.py
 new file mode 100644
-index 000000000..5a75f4397
+index 000000000..70b03ba66
 --- /dev/null
 +++ b/terminal/l2/runtime_config.py
 @@ -0,0 +1,58 @@
@@ -8929,8 +8929,8 @@ index 000000000..5a75f4397
 +import json
 +from pathlib import Path
 +
-+DAILY = dict(spec=4, shapes=2, lookup=16, tc=0, dense=1, skip=8, rows=2, nowait=1, tail=7)
-+PREVIOUS = dict(spec=6, shapes=1, lookup=8, tc=2, dense=0, skip=0, rows=2, nowait=0, tail=0)
++DAILY = dict(spec=4, shapes=2, lookup=16, tc=0, dense=1, skip=8, rows=2, nowait=1, tail=7, emb=1, gdn_np=2, upmix=0, gdn_tiles=1, gdn_fuse=1, prefill_cap=8192, cpu_nt=0, cpu_max=0, lag=2, overlap=0)
++PREVIOUS = dict(spec=6, shapes=1, lookup=8, tc=2, dense=0, skip=0, rows=2, nowait=0, tail=0, emb=0, gdn_np=3)
 +STATUS = '理论优先配置；组合尚未完成无头性能与质量验证（NOT TESTED）'
 +
 +
