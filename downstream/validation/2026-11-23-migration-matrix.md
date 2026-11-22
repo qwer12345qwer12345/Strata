@@ -8,7 +8,7 @@
 | TQ CPU AVX-VNNI | `tq-cpu` 已迁入，原生 TQ 数值测试通过 | 已保留 |
 | K8V4 Q*K IMMA | `qsa-imma` 已迁入，SM86 数值测试通过 | 已保留 |
 | `STRATA_KV_PREFETCH`、`STRATA_PF_HC_REGION`、`STRATA_PIN_BY_NEED` | 上游仍有相应实现 | 部署时核对开关即可 |
-| `STRATA_PF_FUSED_TQ=1` | 上游仍支持显式启用 | 3080 的 70 SM 不满足未显式启用时的 80 SM 门槛，新配置应保留显式选择 |
+| `STRATA_PF_FUSED_TQ=1` | 上游仍支持显式启用，原生无 MMQ 构建会自动启用 | 新配置保留显式选择可准确复现此前配置，实际路径以构建和启动日志核对 |
 | `STRATA_PF_GROUP_SCRATCH` | 上游仍保留 MMQ 专用实现 | 当前原生融合 TQ 基线取 0，符合此前 0.1.60 基线选择 |
 | ChatML 工具边界保护 | 新栈无 `chatml_tool_guard` 接线，也无等价的生成角色标记保护 | 实际遗漏，旧回归可复现 |
 | `STRATA_CONV_DISK` 文件后备快照及驻留页释放 | 新栈无此实现；上游有独立临时 SSD spill | 低内存快照行为尚未证明等价 |
