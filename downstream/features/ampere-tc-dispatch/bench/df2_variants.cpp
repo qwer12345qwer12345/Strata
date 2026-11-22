@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
         }
         std::vector<float> yref;
         std::vector<int> vars = {1, 17, 26, 31};
-        
+
         // Let clocks settle before the first gate/up sample; short kernels alone leave the
         // first process's initial sample in a lower power state.
         const int warmcols = argc > 3 ? std::atoi(argv[3]) : 6;
