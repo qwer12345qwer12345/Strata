@@ -1,0 +1,124 @@
+diff --git a/engine/include/strata/core/expert_cache.hpp b/engine/include/strata/core/expert_cache.hpp
+--- a/engine/include/strata/core/expert_cache.hpp
++++ b/engine/include/strata/core/expert_cache.hpp
+@@ -147,9 +147,14 @@
+     bool shrink(int64_t keep_bytes, std::string& err);
+     /// Maps segments again up to `want_bytes` (rounded DOWN to a segment, at most the arena; the last, shorter
+     /// segment only when `want_bytes` covers the arena).  Stops at the first segment the driver cannot back (false,
+     /// `err`: what was mapped by then stays).  The new slots are empty until the caller fills them.
+     bool grow(int64_t want_bytes, std::string& err);
++    /// Resize the mapped prefix with rollback on a driver failure. A shrink is refused if any
++    /// resident expert still occupies a slot beyond the rounded target. The caller must first
++    /// drain host readers and prompt loans; this method synchronizes GPU work but cannot see them.
++    /// On failure, `err` reports whether the original mapping was restored or the actual capacity left.
++    bool resize_transactional(int64_t want_bytes, std::string& err);
+     /// The number of leading slots that fit wholly inside the first `bytes` bytes.
+     int64_t slots_within(int64_t bytes) const;
+     /// The bytes the first `n` slots span.
+     int64_t bytes_of(int64_t n) const { return slot_end(n < 0 ? 0 : n > slots_ ? slots_ : n); }
+diff --git a/engine/src/core/expert_cache.cpp b/engine/src/core/expert_cache.cpp
+--- a/engine/src/core/expert_cache.cpp
++++ b/engine/src/core/expert_cache.cpp
+@@ -567,22 +567,85 @@
+                 live_slots_ = slots_within(mapped_bytes());
+                 return false;
+             }
+             segs_[i] = 0;
+         }
+-        if (!map_segment(v, dev, va + (CUdeviceptr) ((uint64_t) i * (uint64_t) seg_), (size_t) seg_size_[i],
+-                         segs_[i])) {
++        const bool refused = ec_test::refuse_segment_call != nullptr &&
++                             ec_test::refuse_segment_call("map", (int64_t) i);
++        if (refused || !map_segment(v, dev, va + (CUdeviceptr) ((uint64_t) i * (uint64_t) seg_),
++                                     (size_t) seg_size_[i], segs_[i])) {
+             (void) cudaGetLastError();
+             err = "the driver has no VRAM for another expert-cache segment";
+             live_slots_ = slots_within(mapped_bytes());
+             return false;
+         }
+         at += seg_size_[i];
+         ++mapped_segs_;
+     }
+     live_slots_ = slots_within(mapped_bytes());
+     return true;
+ #endif
+ }
+ 
++bool ExpertCache::resize_transactional(int64_t want_bytes, std::string& err) {
++    err.clear();
++    if (segs_.empty()) {
++        err = "the expert cache is not segmented (Live Memory needs CUDA VMM)";
++        return false;
++    }
++    if (want_bytes < 0) {
++        err = "the requested expert-cache capacity must not be negative";
++        return false;
++    }
++
++    const int64_t before = mapped_bytes();
++    if (want_bytes == before) return true;
++
++    // shrink() rounds up to whole segments. Check the exact prefix it will retain, not the
++    // caller's unrounded byte request, so no resident expert can be left in an unmapped slot.
++    if (want_bytes < before) {
++        int64_t rounded_keep = 0;
++        for (size_t i = 0; i < seg_size_.size() && rounded_keep < want_bytes; ++i)
++            rounded_keep += seg_size_[i];
++        const int64_t keep_slots = slots_within(rounded_keep);
++        for (size_t i = 0; i < residency_.size(); ++i) {
++            if (residency_[i] >= keep_slots) {
++                err = "cannot shrink the expert cache: a resident expert still occupies a slot beyond the target";
++                return false;
++            }
++        }
++    }
++
++    if (cudaDeviceSynchronize() != cudaSuccess) {
++        err = std::string("the device failed before the expert cache resized: ") +
++              cudaGetErrorString(cudaGetLastError());
++        return false;
++    }
++
++    std::string operation_error;
++    const bool ok = want_bytes < before ? shrink(want_bytes, operation_error)
++                                        : grow(want_bytes, operation_error);
++    if (ok) return true;
++
++    // grow()/shrink() intentionally expose partial progress for the legacy --vram-elastic
++    // caller. Live Memory instead tries to restore the pre-request prefix before returning.
++    const int64_t partial = mapped_bytes();
++    std::string rollback_error;
++    if (partial < before) (void) grow(before, rollback_error);
++    else if (partial > before) (void) shrink(before, rollback_error);
++
++    const int64_t actual = mapped_bytes();
++    live_slots_ = slots_within(actual);
++    if (actual == before) {
++        err = operation_error.empty() ? "expert-cache resize failed; original capacity restored"
++                                      : operation_error + "; original mapped capacity restored";
++    } else {
++        err = (operation_error.empty() ? "expert-cache resize failed" : operation_error) +
++              "; rollback incomplete: actual mapped capacity is " + std::to_string(actual) +
++              " of " + std::to_string(before) + " bytes";
++        if (!rollback_error.empty()) err += " (" + rollback_error + ")";
++    }
++    return false;
++}
++
+ #if defined(STRATA_USE_HIP)
+ bool ExpertCache::ensure_blocking_staging(std::size_t bytes, std::string& err) {
+diff --git a/engine/include/strata/core/expert_cache_refuse.hpp b/engine/include/strata/core/expert_cache_refuse.hpp
+--- a/engine/include/strata/core/expert_cache_refuse.hpp
++++ b/engine/include/strata/core/expert_cache_refuse.hpp
+@@ -5,10 +5,10 @@
+ #include <cstdint>
+ 
+ namespace strata::core::ec_test {
+ 
+-/// Asked before each unmap and each release a shrink makes (`call` is "unmap" or "release", `seg` the segment's index).
++/// Asked before each "map" during grow and each "unmap" / "release" during shrink (`seg` is the segment index).
+ /// True: that call counts as refused by the driver and is not made.  Null (the default, and always in the engine): every
+ /// call is made as usual.
+ extern bool (*refuse_segment_call)(const char* call, int64_t seg);
+ 
+ }  // namespace strata::core::ec_test

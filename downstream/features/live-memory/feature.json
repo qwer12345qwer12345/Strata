@@ -1,16 +1,21 @@
 {
   "id": "live-memory",
-  "name": "Live Memory initial VMM commit and policy helpers",
-  "version": "0.1.0",
+  "name": "Live Memory VMM and transactional resize",
+  "version": "0.2.0",
   "status": "active",
   "base_commit": "6e38f588a646c0ee6948a74afbe670eb75896106",
-  "patched_tree": "c05f5d335e622cf94594c2143cf551ac96a333c6",
+  "patched_tree": "44ab1fd4e7a9e26a8fe5b257e6da6b155155ead1",
   "requires": [],
   "patches": [
     {
       "id": "live-memory-vmm",
       "path": "patches/0001-live-memory-vmm.patch",
       "sha256": "25bf69328242e79ee178ab30c765f9fdec5ab13c8f92b63728f6887afab760b9"
+    },
+    {
+      "id": "live-memory-transactional-resize",
+      "path": "patches/0002-live-memory-transactional-resize.patch",
+      "sha256": "1a96cf34e8e9e71f0381ec5ee844b7f28734363a9bd4b81c156e3c75ead6797b"
     }
   ],
   "tests": "tests/test.json",
