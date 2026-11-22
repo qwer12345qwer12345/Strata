@@ -99,24 +99,24 @@ def main():
             if config.get("python_modules"):
                 run([sys.executable, "-m", "unittest", *config["python_modules"]], source / "terminal")
 
-            if not args.skip_configure:
+            targets = list(config.get("targets", []))
+            if args.with_cuda:
+                targets.extend(config.get("optional_targets", {}).get("cuda", []))
+            regex = config.get("ctest_regex", "")
+            if args.with_cuda and config.get("optional_ctest_regex", {}).get("cuda"):
+                extra = config["optional_ctest_regex"]["cuda"]
+                regex = f"({regex})|({extra})" if regex else extra
+
+            if not args.skip_configure and (targets or regex):
                 cmake_args = list(config.get("cmake_args", []))
                 if args.with_cuda and "-DSTRATA_ENABLE_CUDA=ON" not in cmake_args:
                     cmake_args.append("-DSTRATA_ENABLE_CUDA=ON")
                 cmake_args.extend(args.cmake_arg)
                 run(["cmake", "-S", source / "engine", "-B", build, *cmake_args], source)
 
-            targets = list(config.get("targets", []))
-            optional = config.get("optional_targets", {})
-            if args.with_cuda:
-                targets.extend(optional.get("cuda", []))
             if targets:
                 run(["cmake", "--build", build, "--parallel", "--target", *targets], source)
 
-            regex = config.get("ctest_regex", "")
-            if args.with_cuda and config.get("optional_ctest_regex", {}).get("cuda"):
-                extra = config["optional_ctest_regex"]["cuda"]
-                regex = f"({regex})|({extra})" if regex else extra
             if regex:
                 run(["ctest", "--test-dir", build, "--output-on-failure", "--no-tests=error", "-R", regex], source)
         finally:

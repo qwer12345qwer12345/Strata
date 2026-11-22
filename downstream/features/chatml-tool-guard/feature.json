@@ -1,0 +1,21 @@
+{
+  "id": "chatml-tool-guard",
+  "name": "Chat Completions ChatML tool boundary guard",
+  "version": "0.1.0",
+  "status": "active",
+  "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
+  "patched_tree": "a77bbe1004467fe06e815792f3d73a0ebe613272",
+  "requires": [],
+  "patches": [
+    {
+      "id": "chatml-tool-boundary",
+      "path": "patches/0001-chatml-tool-boundary.patch",
+      "sha256": "610ea5a45f2eaeeedb4c3e3e5090665fe533679fc63e855bc528e42108324509"
+    }
+  ],
+  "tests": "tests/test.json",
+  "environment": {},
+  "configuration": {
+    "chatml_tool_guard": true
+  }
+}

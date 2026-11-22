@@ -46,6 +46,7 @@ downstream/features/<feature-id>/
 | `tq-cpu` | TQ CPU AVX-VNNI pair-dot | 关闭，环境变量 opt-in |
 | `tq-ampere` | Ampere TQ Gate/Up 配对 CUDA Kernel | 关闭，环境变量 opt-in |
 | `qsa-imma` | K8V4 Q*K split-INT8 IMMA | 关闭，环境变量 opt-in |
+| `chatml-tool-guard` | Chat Completions 角色边界与完整工具调用发布 | 关闭，配置 `chatml_tool_guard=true` |
 | `live-memory` | Live Memory 容量所有者：VMM 初始 commit、事务性 resize、live-slot 守卫、可独立释放的 RAM blocks、Engine MEMORY/ACK/CAPACITY 协议与 safe-point 调度、Server 自动容量策略与 Vision 统一 VRAM 管理 | 默认关闭（STRATA_LIVE_MEMORY=1 / config "live_memory"） |
 | `runtime-kv-storage` | Immutable Base + Delta 文件核心和 Snapshot provenance（Patch 1、2） | 已加入活动栈；ConversationSpill 接入待完成 |
 | `shutdown-persistent-cache` | Engine 正常关闭时持久化 RAM 会话，下次启动按 metadata 重建索引 | 关闭，环境变量 opt-in（STRATA_SHUTDOWN_CACHE_MIB） |

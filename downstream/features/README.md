@@ -23,3 +23,5 @@ Test overlays are copied into a disposable prepared worktree only while tests ru
 | `live-memory` | ExpertCache VMM-backed allocation | Active |
 | `runtime-kv-storage` | Session Delta Core; runtime spill integration is pending | Active in stack; validation pending |
 | `shutdown-persistent-cache` | Shutdown flush of the RAM cache; sidecar index and matched restore on the next start | Active in stack; host test passed locally, serve validation pending |
+
+`chatml-tool-guard` adds the opt-in Chat Completions role-token boundary guard and complete tool argument publication. Its tests run through the loopback API.

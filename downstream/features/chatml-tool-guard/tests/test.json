@@ -1,0 +1,14 @@
+{
+  "cmake_args": [],
+  "targets": [],
+  "ctest_regex": "",
+  "overlays": [
+    "overlay/terminal/serve/test_chatml_tool_guard.py"
+  ],
+  "python_tests": [],
+  "python_modules": [
+    "serve.test_chatml_tool_guard.ChatMLToolGuard",
+    "serve.test_server.UnfinishedToolCall"
+  ],
+  "settings_generation": false
+}
