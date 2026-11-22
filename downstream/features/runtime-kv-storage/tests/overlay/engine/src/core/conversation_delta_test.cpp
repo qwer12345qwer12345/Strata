@@ -228,7 +228,7 @@ int main() {
     bad_meta.kv.clear();
     const std::array<uint64_t, 5> full_keep_zero = {0, 0, 0, 0, 0};
     std::vector<SessionKvSource> bad_tails{tails_for(bad_target.kv[0], full_keep_zero)};
-    SessionDeltaKeep bad_table{{UINT64_MAX, 0, 0, 0, 0}};
+    SessionDeltaKeep bad_table{{5, 0, 0, 0, 0}};
     check(session_delta_write(bad_path.string(), bad_meta, bad_tails, bad_table, id, chain, 3, 4,
                               bytes, error), "write malformed keep-table fixture");
     check(!session_delta_apply(bad_path.string(), id, chain, 3, restored, generation, bytes, error, {}, &status) &&
