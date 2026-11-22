@@ -2,13 +2,12 @@
 // include/strata/core/conversation_spill.hpp - the SSD tier of the conversation cache (phase P2 of the admission design,
 // RESULTS-ENG-1116.md): where a parked conversation is written when RAM refuses it, and how much may go there.
 //
-// Ownership: every engine process writes into a folder of its own, `<root>/<pid>-<16 hex nonce>`, and holds a lock on
-// `<that folder>/.lock` for its whole life (POSIX flock on an open file; Windows: the file opened with no sharing).  At start a
-// process removes the folders under `<root>` whose lock nobody holds - and nothing else: only folders named exactly that way,
-// never a link, never a file of the root, never another process's live folder.  Two engines on one data folder therefore
-// never delete or overwrite each other's files (#6034 wiped every .conv file of a shared folder at start), and a crashed
-// engine's files go at the next start.  The files themselves are session files (conversation_file.hpp: a temporary name,
-// then a rename; bounded reads), so an entry exists only once it is complete.
+// Ownership: the default `open()` mode is process-scoped: each engine writes into `<root>/<pid>-<16 hex nonce>` and
+// holds a lock for its lifetime. At start it removes only dead folders with that exact namespace name; it never follows links
+// or deletes another live engine's files (#6034). The opt-in `open_persistent()` mode instead uses a stable, locked
+// `<root>/persistent/<model>-<config>` directory and keeps session files across close/restart. Both modes use atomic session
+// file publication and bounded reads; persistent mode adds a metadata-only sidecar so startup can rebuild the prefix index
+// without loading K/V payloads into RAM.
 //
 // Budget: min(32 GiB, 25% of the free space), never below the free-space floor; a write reserves its estimate first and
 // the reservation counts until the write ends (temporary files included).
@@ -276,7 +275,8 @@ private:
     bool persistent_ = false;
 };
 
-/// The SSD tier's entries: parked conversations written as session files into this process's namespace, oldest first.
+/// The SSD tier's entries: parked conversations written as session files into the process namespace by default, or into
+/// the stable model/config namespace when opened with open_persistent(), oldest first.
 /// What stays in RAM per entry is only what matching needs: the token ids and picture keys of its live state and of each
 /// checkpoint (no running state, no K/V).  put() deletes the oldest entries when the budget needs the room, and never
 /// leaves a partial file behind; take() reads an entry back under the caller's read limits and removes it either way (a
