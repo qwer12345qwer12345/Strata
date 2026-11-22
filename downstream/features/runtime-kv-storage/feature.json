@@ -2,7 +2,7 @@
   "id": "runtime-kv-storage",
   "name": "Runtime KV Storage \u2014 immutable Base and Delta chain",
   "version": "0.2.0",
-  "status": "active",
+  "status": "reference",
   "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
   "patched_tree": "9be73402053755a4b9ebddc79bb53c682cd27328",
   "requires": [],

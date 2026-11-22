@@ -97,3 +97,8 @@ follow it whether a person or an agent writes the text. The short version:
   [docs/COMMUNITY_BENCHMARKS.md](docs/COMMUNITY_BENCHMARKS.md), compare against a same-day run of the build you are
   testing, and say what you did not test.
 - Open test requests and the hardware that is wanted are listed in [docs/TEST_REQUESTS.md](docs/TEST_REQUESTS.md).
+
+## Subagent model preference
+
+- Do not use Astra models for subagents, including `gpt-6-astra` and `gpt-6.2-astra`.
+- If delegation is explicitly requested, select an allowed non-Astra model instead of inheriting Astra.

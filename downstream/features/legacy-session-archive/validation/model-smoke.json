@@ -1,0 +1,146 @@
+{
+  "context_limit": 32768,
+  "expert_ram_budget_gib": 6,
+  "kind": "correctness-only desktop smoke",
+  "runs": [
+    {
+      "case": "cold-save",
+      "wall_s": 20.471,
+      "usage": {
+        "prompt_tokens": 6025,
+        "completion_tokens": 32,
+        "total_tokens": 6057,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 6025,
+        "prompt_ms": 18873.5,
+        "prompt_per_token_ms": 3.133,
+        "prompt_per_second": 319.2,
+        "predicted_n": 32,
+        "predicted_ms": 1098.4,
+        "predicted_per_token_ms": 34.325,
+        "predicted_per_second": 29.1,
+        "draft_n": 20,
+        "draft_n_accepted": 18
+      },
+      "finish": "length",
+      "archive_bytes": 304790143
+    },
+    {
+      "case": "restart-restore",
+      "wall_s": 3.112,
+      "usage": {
+        "prompt_tokens": 6025,
+        "completion_tokens": 32,
+        "total_tokens": 6057,
+        "prompt_tokens_details": {
+          "cached_tokens": 6018
+        }
+      },
+      "timings": {
+        "cache_n": 6018,
+        "prompt_n": 7,
+        "prompt_ms": 1065.4,
+        "prompt_per_token_ms": 152.2,
+        "prompt_per_second": 6.6,
+        "predicted_n": 32,
+        "predicted_ms": 1849.8,
+        "predicted_per_token_ms": 57.806,
+        "predicted_per_second": 17.3,
+        "draft_n": 20,
+        "draft_n_accepted": 17
+      },
+      "finish": "length",
+      "archive_bytes": 304790143
+    },
+    {
+      "case": "append-saveinc",
+      "wall_s": 1.203,
+      "usage": {
+        "prompt_tokens": 6081,
+        "completion_tokens": 20,
+        "total_tokens": 6101,
+        "prompt_tokens_details": {
+          "cached_tokens": 6056
+        }
+      },
+      "timings": {
+        "cache_n": 6056,
+        "prompt_n": 25,
+        "prompt_ms": 561.5,
+        "prompt_per_token_ms": 22.46,
+        "prompt_per_second": 44.5,
+        "predicted_n": 20,
+        "predicted_ms": 419.1,
+        "predicted_per_token_ms": 20.955,
+        "predicted_per_second": 47.7,
+        "draft_n": 14,
+        "draft_n_accepted": 11
+      },
+      "finish": "stop",
+      "archive_bytes": 314600976
+    },
+    {
+      "case": "restart-restore-append",
+      "wall_s": 3.197,
+      "usage": {
+        "prompt_tokens": 6081,
+        "completion_tokens": 20,
+        "total_tokens": 6101,
+        "prompt_tokens_details": {
+          "cached_tokens": 6074
+        }
+      },
+      "timings": {
+        "cache_n": 6074,
+        "prompt_n": 7,
+        "prompt_ms": 1527.0,
+        "prompt_per_token_ms": 218.143,
+        "prompt_per_second": 4.6,
+        "predicted_n": 20,
+        "predicted_ms": 1374.9,
+        "predicted_per_token_ms": 68.745,
+        "predicted_per_second": 14.5,
+        "draft_n": 12,
+        "draft_n_accepted": 10
+      },
+      "finish": "stop",
+      "archive_bytes": 314600976
+    }
+  ],
+  "min_mem_available_kib": 11866504,
+  "status": "passed",
+  "environment": {
+    "gpu": "RTX 3080 12 GiB SM86",
+    "cpu": "Core Ultra 7 270K Plus",
+    "ram": "32 GB DDR5",
+    "kernel": "7.3.3 CachyOS",
+    "driver": "620.70.06",
+    "nvcc": "13.4.92",
+    "gcc": "16.2.1",
+    "prior": 0.5,
+    "drafting": "DFlash2",
+    "spec": 6,
+    "confidence": 0.8,
+    "ampere_rows": 2,
+    "workers": 15,
+    "active_stack": [
+      "tq-cpu",
+      "tq-ampere",
+      "qsa-imma",
+      "legacy-session-archive",
+      "chatml-tool-guard"
+    ]
+  },
+  "interpretation": "Correctness only; desktop active; expert RAM deliberately capped at 6 GiB. Do not compare decode rates with headless full residency.",
+  "archive_actions": {
+    "initial_save_ms": 470.2,
+    "append_save_ms": 215.6,
+    "append_incremental": true,
+    "append_restore_preload_ms": 282.3
+  }
+}

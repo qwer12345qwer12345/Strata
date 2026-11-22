@@ -5,7 +5,8 @@
 本分支是 Strata 的**下游功能包管理层**。它不维护一份长期漂移的完整源码分叉，而是把每项下游改动拆成可单独应用、验证、测试、启停和退役的补丁包。
 
 - 上游源码基线：`Niko1221/Strata:main`
-- 下游管理分支：`downstream/main`
+- 原下游管理分支：`downstream/main`
+- 当前已验证补丁与旧存档移植：`audit/0219-patch-validation`
 - 当前固定基线：`c6f6427d9de9016fd92d13e29740f65625261df7`
 - 当前功能栈指纹：见 `stack.json` 的 `patched_tree`
 
@@ -47,9 +48,9 @@ downstream/features/<feature-id>/
 | `tq-ampere` | Ampere TQ Gate/Up 配对 CUDA Kernel | 关闭，环境变量 opt-in |
 | `qsa-imma` | K8V4 Q*K split-INT8 IMMA | 关闭，环境变量 opt-in |
 | `chatml-tool-guard` | Chat Completions 角色边界与完整工具调用发布 | 关闭，配置 `chatml_tool_guard=true` |
-| `live-memory` | Live Memory 容量所有者：VMM 初始 commit、事务性 resize、live-slot 守卫、可独立释放的 RAM blocks、Engine MEMORY/ACK/CAPACITY 协议与 safe-point 调度、Server 自动容量策略与 Vision 统一 VRAM 管理 | 默认关闭（STRATA_LIVE_MEMORY=1 / config "live_memory"） |
-| `runtime-kv-storage` | Immutable Base + Delta 文件核心和 Snapshot provenance（Patch 1、2） | 已加入活动栈；ConversationSpill 接入待完成 |
-| `shutdown-persistent-cache` | Engine 正常关闭时持久化 RAM 会话，下次启动按 metadata 重建索引 | 关闭，环境变量 opt-in（STRATA_SHUTDOWN_CACHE_MIB） |
+| `legacy-session-archive` | 完整旧 PR5500 V2/V3、Linux 文件后备停放、自动 Chat Completions 保存与正常退出等待（单一大补丁） | 活动；由 managed_server 启用 V2/V3 与同步保存 |
+
+`live-memory`、`runtime-kv-storage`、`shutdown-persistent-cache` 已从默认活动栈移除，原目录保留作参考，不能与完整存档包叠加使用。
 
 ### 1.3 Patch 只保存生产改动
 
@@ -60,7 +61,7 @@ downstream/features/<feature-id>/
 - 必需的 CMake target / test registration；
 - 必需的设置项解析入口。
 
-以下内容原则上不进入生产 patch：
+以下内容通常不进入生产 patch。`legacy-session-archive` 按用户要求整体交付，包含其原有回归测试、控制器和说明，作为例外：
 
 - 测试专用源文件：放在本功能的 `tests/overlay/`；
 - 生成的 Settings 文档和注册表：由上游 `tools/settings_register.py` 生成；
@@ -87,7 +88,8 @@ downstream/features/<feature-id>/
 | 分支 | 职责 |
 |---|---|
 | `main` | 上游源码基线，不放下游功能包 |
-| `downstream/main` | 功能包、补丁、测试、设计文档和自动化维护入口 |
+| `downstream/main` | 原始功能包管理层，当前核查修复见下一行 |
+| `audit/0219-patch-validation` | 已核查的补丁、完整旧存档移植、测试与验收记录 |
 | `feature/live-memory-cuda` | 保留的早期 Live Memory 研究/实现参考 |
 | `ampere-gyro-latency` | 保留的 Ampere 基准、测量记录和早期 L2 实现参考 |
 
@@ -101,13 +103,13 @@ downstream/features/<feature-id>/
 
 ```bash
 git fetch origin
-git switch --track origin/downstream/main
+git switch --track origin/audit/0219-patch-validation
 ```
 
 如果本地已有同名分支：
 
 ```bash
-git switch downstream/main
+git switch audit/0219-patch-validation
 git pull --ff-only
 ```
 
@@ -130,7 +132,7 @@ python downstream/scripts/prepare.py --all
 只准备一个功能：
 
 ```bash
-python downstream/scripts/prepare.py --feature live-memory
+python downstream/scripts/prepare.py --feature legacy-session-archive
 ```
 
 同时准备多个功能：
@@ -164,13 +166,10 @@ python downstream/scripts/test.py --feature qsa-imma \
   --source ../Strata-prepared --build ../Strata-build-qsa-imma
 
 
-# Live Memory CPU policy + Settings
-python downstream/scripts/test.py --feature live-memory \
-  --source ../Strata-prepared --build ../Strata-build-live-memory
+# 完整存档包
+python downstream/scripts/test.py --feature legacy-session-archive \
+  --source ../Strata-prepared --build ../Strata-build-archive
 
-# Live Memory 再加 CUDA VMM segmented-cache 测试
-python downstream/scripts/test.py --feature live-memory \
-  --source ../Strata-prepared --build ../Strata-build-live-memory-cuda --with-cuda
 ```
 
 `test.py` 会确认源码位于固定基线、确认该功能 patch 已应用，再临时覆盖测试源码、执行 Settings 生成/检查、Python 测试、CMake build 和 CTest，最后恢复 overlay 和生成文件。每个功能使用独立 build 目录，避免不同 CMake 配置互相污染。
@@ -179,7 +178,7 @@ python downstream/scripts/test.py --feature live-memory \
 
 - `tq-cpu` 的 AVX-VNNI 快速路径需要支持 AVX-VNNI 的 x86 CPU；其他 CPU 只能验证 fallback。
 - `tq-ampere` 和 `qsa-imma` 的优化路径需要 CUDA SM86 设备；不符合条件的设备不能作为优化路径通过的证据。
-- `live-memory --with-cuda` 需要支持 CUDA VMM 的设备/驱动。
+- `legacy-session-archive --with-cuda` 运行 CUDA 状态往返测试；Linux 文件后备需要可写且有空间的本地目录。
 - CPU-only policy 测试通过，不代表 CUDA 路径、真实模型或性能目标通过。
 
 ### 3.5 手动应用补丁
@@ -258,4 +257,4 @@ python downstream/scripts/test.py --feature example \
 
 ## 6. 当前验证边界
 
-本次迁移保存了 PR #1～#4 中仍在功能栈内的生产实现和相关测试源代码。L2 旧功能包已从活动功能栈移除。Patch A 的 Session Delta Core 已作为独立 Feature Package 加入活动栈；目前只提供 Delta 文件读写/应用核心与 Host 测试，尚未接入 ConversationSpill 生命周期，因此当前运行时 SSD 写入行为尚未改变。Patch A 的 Snapshot provenance adapter 已作为第二个 patch 加入同一 Feature Package（keep 边界来自官方 API 与镜像自身记录尺寸，其 CUDA 往返验收门槛已在真实 GPU 上通过）；后续 Spill lease/chain 接入和 compaction 阶段仍待实现。Patch B 已作为 shutdown-persistent-cache Feature Package 加入活动功能栈（环境变量 opt-in，默认关闭）：正常关闭时把 RAM 会话写入官方 session file + 轻量 sidecar，下次启动仅凭 metadata 重建索引、命中才读 payload；其 CPU Host 测试已在本地编译运行通过，真实模型上的 serve 验收仍待执行。CI 当前验证的是维护脚本语法、补丁哈希和 Git tree 指纹；并未在 CI 中编译全部 C++/CUDA 目标，也没有替代真实 SM86、AVX-VNNI 或 CUDA VMM 硬件验收。live-memory 的 CPU 测试（策略、RAM blocks、Settings 扫描器）与 Python 测试（策略、协议）已在迁移机器通过；CUDA VMM、safe-point 与硬件验收仍待对应设备。每项活动功能的具体待测项见对应的 validation/README.md。
+活动栈目前包含三个计算优化包、一个完整存档包和一个工具边界保护包。独立包与完整栈的 Git tree、SHA256 均校验；硬件与真实模型验收范围见各包 validation。存档迁移依据用户选定的旧方案，未启用 Live Memory 或未完成的 Runtime KV Storage。CI 的补丁校验不能替代真实 GPU、跨重启恢复与无头长上下文峰值验收。

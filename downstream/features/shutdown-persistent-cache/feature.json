@@ -2,7 +2,7 @@
   "id": "shutdown-persistent-cache",
   "name": "Shutdown Persistent Cache \u2014 park RAM conversations across a normal restart",
   "version": "0.1.0",
-  "status": "active",
+  "status": "reference",
   "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
   "patched_tree": "8475f156e3b26f2b11234088c8f02704e18134c5",
   "requires": [],

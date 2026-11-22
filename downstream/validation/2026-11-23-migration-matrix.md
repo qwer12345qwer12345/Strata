@@ -11,10 +11,10 @@
 | `STRATA_PF_FUSED_TQ=1` | 上游仍支持显式启用，原生无 MMQ 构建会自动启用 | 新配置保留显式选择可准确复现此前配置，实际路径以构建和启动日志核对 |
 | `STRATA_PF_GROUP_SCRATCH` | 上游仍保留 MMQ 专用实现 | 当前原生融合 TQ 基线取 0，符合此前 0.1.60 基线选择 |
 | ChatML 工具边界保护 | 已加入独立 `chatml-tool-guard` 功能包 | 原遗漏已补，独立及完整栈各 18 项测试通过 |
-| `STRATA_CONV_DISK` 文件后备快照及驻留页释放 | 新栈无此实现；上游有独立临时 SSD spill | 低内存快照行为尚未证明等价 |
-| PR5500 V2/V3 兼容存档与增量恢复 | 新栈没有旧 V2/V3 实现 | Runtime Delta Core 和 Snapshot adapter 尚未接入真实 Spill，迁移不完整 |
-| 正常退出后的跨重启缓存 | 新 Shutdown 包保存 RAM cache 中已停放条目 | 活动当前会话、临时 spill 及其在途写入的覆盖仍有缺口 |
-| 细粒度 CUDA 延迟测试、长输出 SSE 对照、无头开机测试与监督器 | 仍在旧分支及本机旧运行目录 | 新功能包只迁入了部分数值测试，工具迁移待补 |
+| `STRATA_CONV_DISK` 文件后备快照及驻留页释放 | 已迁入完整存档包，保留新版 SSD fallback | 文件后备 CUDA 往返通过；256K 峰值仍待无头验收 |
+| PR5500 V2/V3 兼容存档与增量恢复 | 单一 `legacy-session-archive` 大补丁已迁入 | 两次真实模型跨进程恢复与追加增量写入通过 |
+| 正常退出后的跨重启缓存 | 每轮完成后自动保存，退出等待正在进行的请求/存档 | 活动会话、续聊及 SIGINT 等待保存均有验证；强杀前未完成轮次不保证 |
+| 细粒度 CUDA 延迟测试、长输出 SSE 对照、无头开机测试与监督器 | 存档包已带入监督器与开机基准，完整对照工具仍在旧分支 | 监督器/基准接线有模拟验收；长输出正式对照保留旧入口 |
 | `prior=0.5`、DFlash2 spec 6/confidence 0.8、15 workers、K8V4 与驻留预算 | 属于部署配置 | `prepare.py` 应用代码补丁，feature.json 的 environment 用于声明，不会自动把这些值写入服务配置 |
 | `STRATA_UNDECLARED_TOOL_CALLS=call` | 上游支持这项配置 | 与 ChatML 角色边界保护的职责分别核对 |
 | `STRATA_TQ_AMPERE_ROWS=auto` 动态形状分派及共享输入候选 | 新内核包保留固定成对行 | 旧实测中候选较慢，历史记录保留在旧分支，生产收益迁移以固定成对行为准 |
@@ -31,10 +31,8 @@
 
 这组回归检验此前已选择的服务行为。它没有加载真实模型，也没有测量随机工具错误的发生率。
 
-## 后续迁移顺序
+## 当前选择与剩余验收
 
-先补齐 Chat Completions 工具边界保护及原回归测试。缓存部分结合新版官方 Spill 和 SessionFile 接口重新实现低内存捕获、运行时增量保存与退出时活动会话保存，并验证旧能力的覆盖范围。与此同时迁移部署参数和测试入口，使新基线能按原来的无头流程验收。
+用户选择旧方案作为一个大补丁直接使用，已完成迁移。完整存档包取代 Live Memory、实验性 Runtime KV Storage 和旧 Shutdown 包的活动地位。工具保护保持独立。
 
-旧文件后备缓存也修改过快照的 RAM 准入估算。新实现需要测量整个捕获阶段的峰值 RAM 与写盘进度，才能判断是否满足 32 GB 机器的需求。
-
-工具保护的补丁与验收见[功能包](../features/chatml-tool-guard/README.md)。存档迁移建议见[V3 迁移方案](../design/SESSION_ARCHIVE_MIGRATION.md)。
+[存档包的实际验收](../features/legacy-session-archive/validation/README.md)覆盖 Host、GPU 及真实模型跨重启。文件后备也保留旧 RAM 准入估算；256K 下的捕获峰值、写回脏页和专家驻留需要无头验收，不能由当前 6K 提示的结果推断。

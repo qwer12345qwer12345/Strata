@@ -1,0 +1,26 @@
+{
+  "cmake_args": [
+    "-DSTRATA_BUILD_CONVERSATION_TESTS=ON"
+  ],
+  "targets": [
+    "conversation_file_test",
+    "conversation_cache_test",
+    "conversation_cache_l2_test",
+    "conversation_spill_test"
+  ],
+  "ctest_regex": "^(conversation_file_test|conversation_cache_test|conversation_cache_l2_test|conversation_spill_test)$",
+  "optional_targets": {
+    "cuda": [
+      "conversation_snapshot_test"
+    ]
+  },
+  "optional_ctest_regex": {
+    "cuda": "^conversation_snapshot_test(_ckpt_async|_ckpt_vram_slots)?$"
+  },
+  "overlays": [],
+  "python_modules": [
+    "l2.test_controller",
+    "l2.test_startup_benchmark"
+  ],
+  "settings_generation": false
+}

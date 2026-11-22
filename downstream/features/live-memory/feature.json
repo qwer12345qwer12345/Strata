@@ -2,7 +2,7 @@
   "id": "live-memory",
   "name": "Live Memory capacity owner (VMM prefix, RAM blocks, MEMORY protocol, server policy)",
   "version": "0.2.0",
-  "status": "active",
+  "status": "reference",
   "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
   "patched_tree": "7278dafe14bd9f7112b8d93e9c58ebf1476a6d87",
   "requires": [],

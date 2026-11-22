@@ -6,14 +6,12 @@
     "branch": "main"
   },
   "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
-  "patched_tree": "347f0614867c09a9d74a97aaa57812d7fc358a27",
+  "patched_tree": "75e79afc0c319fa2bcd53ca2e38581a79afc6ca8",
   "feature_order": [
     "tq-cpu",
     "tq-ampere",
     "qsa-imma",
-    "live-memory",
-    "runtime-kv-storage",
-    "shutdown-persistent-cache",
+    "legacy-session-archive",
     "chatml-tool-guard"
   ],
   "features": [
@@ -44,6 +42,10 @@
     {
       "id": "chatml-tool-guard",
       "path": "features/chatml-tool-guard/feature.json"
+    },
+    {
+      "id": "legacy-session-archive",
+      "path": "features/legacy-session-archive/feature.json"
     }
   ]
 }
