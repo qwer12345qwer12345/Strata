@@ -65,6 +65,22 @@ class SettingsRegister(unittest.TestCase):
         bad = [e["name"] for e in self.entries if e.get("status") == "retired" and not e.get("retired_in")]
         self.assertEqual(bad, [], "retired entries need retired_in: " + ", ".join(bad))
 
+    def test_from_chars_is_an_integer_environment_value(self):
+        lines = [
+            'const char* live_mib = std::getenv("STRATA_LIVE_MEMORY_INITIAL_MIB");',
+            'if (live_mib != nullptr) {',
+            '    uint64_t mib = 0;',
+            '    const char* end = live_mib + std::strlen(live_mib);',
+            '    const auto parsed = std::from_chars(live_mib, end, mib);',
+            '}',
+        ]
+        kind, default_state, code_default = sr._analyze(
+            lines, 0, "STRATA_LIVE_MEMORY_INITIAL_MIB", "std::getenv", 0
+        )
+        self.assertEqual(kind, "int")
+        self.assertIsNone(default_state)
+        self.assertIsNone(code_default)
+
     def test_scan_sees_the_known_shapes(self):
         # guards the scanner itself: a plain getenv, a helper, and an off-switch
         self.assertIn("STRATA_HIPBLASLT_TUNING", self.engine)
