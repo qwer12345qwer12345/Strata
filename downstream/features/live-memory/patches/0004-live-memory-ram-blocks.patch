@@ -1,0 +1,635 @@
+diff --git a/engine/CMakeLists.txt b/engine/CMakeLists.txt
+index 490babb5a..fb413ce21 100644
+--- a/engine/CMakeLists.txt
++++ b/engine/CMakeLists.txt
+@@ -230,6 +230,14 @@ if(STRATA_BUILD_CONVERSATION_TESTS)
+     target_compile_features(live_memory_policy_test PRIVATE cxx_std_17)
+     add_test(NAME live_memory_policy_test COMMAND live_memory_policy_test)
+   endif()
++  # Live Memory PR4: independently releasable RAM expert blocks (header-only, CPU-only).  The test source
++  # rides this package's overlay, so a prepared tree without it configures without the target.
++  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/live_ram_blocks_test.cpp")
++    add_executable(live_ram_blocks_test tests/core/live_ram_blocks_test.cpp)
++    target_include_directories(live_ram_blocks_test PRIVATE include)
++    target_compile_features(live_ram_blocks_test PRIVATE cxx_std_17)
++    add_test(NAME live_ram_blocks_test COMMAND live_ram_blocks_test)
++  endif()
+   add_executable(conversation_file_test src/core/conversation_file_test.cpp src/core/conversation_file.cpp)
+   target_include_directories(conversation_file_test PRIVATE include)
+   add_test(NAME conversation_file_test COMMAND conversation_file_test)
+diff --git a/engine/include/strata/core/expert_source.hpp b/engine/include/strata/core/expert_source.hpp
+index b7093ff72..220a52995 100644
+--- a/engine/include/strata/core/expert_source.hpp
++++ b/engine/include/strata/core/expert_source.hpp
+@@ -25,6 +25,7 @@
+ #include "strata/core/pinned.hpp"
+ #include "strata/core/exchange_storage.hpp"
+ #include "strata/core/hit_hook.hpp"
++#include "strata/core/ram_expert_blocks.hpp"
+ #include "strata/kernels/cpu/pool.hpp"
+ 
+ #include <algorithm>
+@@ -805,6 +806,40 @@ public:
+     /// The budget passed to `pin_cache_complement` is the automatic RAM copy's (the engine chose it because the expert
+     /// arena did not fit), not --resident-budget-gib: the line printed when it is cut names no flag.  Set BEFORE it.
+     void budget_is_automatic(bool automatic) { budget_automatic_ = automatic; }
++
++    // ---- Live Memory (PR4 Phase 2): INDEPENDENTLY RELEASABLE RAM EXPERT BLOCKS ----
++    //
++    // A second RAM tier beside the startup complement: bounded BLOCKS of experts that the Engine's MEMORY
++    // requests grow, and give back whole to the mapped files.  `pin_cache_complement`'s one fixed allocation
++    // can never do that.  A block holds only experts NO tier holds (not the GPU cache's - the caller's rank
++    // skips those - not the complement's, not another block's).  Every block is admitted against a FRESH
++    // cgroup-aware reading (`sample_host_memory`, `conversation_memory_admit`); a failed step leaves nothing
++    // behind; a release publishes the entries out of reach BEFORE its memory is freed.
++    //
++    /// Enable the tier (blocks are taken later, by live_ram_grow; never by this call).  `pin`: try each block
++    /// page-locked (cudaHostAlloc), falling back to pageable when the driver refuses; false (the default)
++    /// keeps every block pageable.  `max_block_bytes` caps one step (0: uncapped - not recommended).
++    void set_live_ram(bool on, bool pin = false, uint64_t max_block_bytes = 0);
++    /// One growth step: at most `live_ram_block_bytes(add_bytes, max_block_bytes)` of the not-yet-resident
++    /// experts in `rank` order (hottest first; the Engine builds it from the profile minus the GPU cache's
++    /// residency), copied from the mapped files.  False (`err`, nothing taken) when the tier is off, the
++    /// memory cannot be read (fail closed), the block does not fit above `floor_bytes`, or a copy failed
++    /// (the block rolled back).  `added`: bytes published; `pinned`: the block's backing.
++    bool live_ram_grow(uint64_t add_bytes, uint64_t floor_bytes, const std::vector<std::pair<int32_t, int32_t>>& rank,
++                       uint64_t& added, bool& pinned, std::string& err);
++    /// Free whole blocks, the LAST grown first, until `drop_bytes` have gone or none are left.  SAFE-POINT
++    /// CONTRACT (the Engine's, like a VRAM resize): call between requests, verify windows drained, prompt
++    /// loans back, adaptive tier quiesced - a pointer into a released block handed out before the release
++    /// stays in its reader's hand until its layer is over.  The entries are unpublished before each free.
++    /// `dropped`: bytes freed; `remaining`: bytes still resident (0 when the tier is empty).
++    bool live_ram_release(uint64_t drop_bytes, uint64_t& dropped, uint64_t& remaining, std::string& err);
++    /// The blocks tier's resident bytes now (the startup complement's are resident_bytes()).
++    uint64_t live_ram_bytes() const { return live_blocks_.stats().bytes; }
++    /// Of those, page-locked.
++    uint64_t live_ram_pinned_bytes() const { return live_blocks_.stats().pinned_bytes; }
++    /// Whole blocks taken so far (each one releasable again).
++    size_t live_ram_blocks() const { return live_blocks_.stats().blocks; }
++    bool live_ram_enabled() const { return live_ram_on_; }
+     void close();
+ 
+     bool mapped() const { return base_ != nullptr; }
+@@ -1286,6 +1321,20 @@ private:
+     std::atomic<ForesightSwap*> fs_swap_{nullptr};   ///< set_foresight_swap
+     void fs_hold_staged(bool hold);
+     std::vector<size_t> soft_in_;             ///< soft_commit_exchanges: per `out` index, the `in` whose place it will take (SIZE_MAX: none)
++    // ---- Live Memory (PR4): the independently releasable RAM blocks tier (ram_expert_blocks.hpp)
++    RamExpertBlocks::PageableAllocator live_alloc_pageable_;
++    RamExpertBlocks::PinnedFallbackAllocator live_alloc_pinned_{
++        live_alloc_pageable_, &FileExpertSource::live_ram_pin_alloc, &FileExpertSource::live_ram_pin_free,
++        &live_ram_pin_};
++    RamExpertBlocks::DispatchAllocator live_alloc_{&live_alloc_pageable_};
++    RamExpertBlocks live_blocks_{live_alloc_, 0};
++    uint64_t live_ram_max_block_ = 0;   ///< set_live_ram's cap for one growth step
++    bool live_ram_on_ = false;
++    bool live_ram_pin_ = false;   ///< the pinned allocator reads it at every alloc (no reassignment)
++    /// The pinned step's trampolines (the header has no cuda_runtime.h): a refused cudaHostAlloc returns
++    /// null and the chain takes the pageable block instead. Defined in expert_source.cpp.
++    static void* live_ram_pin_alloc(size_t bytes);
++    static void live_ram_pin_free(void* p) noexcept;
+     const uint8_t* xstage_dev_ = nullptr;     ///< the exchange buffers' device alias (soft_commit_exchanges)
+     uint8_t* xstage_ = nullptr;               ///< exchange buffers, `xstage_cap_ x xstage_blob_`
+     bool xstage_pinned_ = false;
+diff --git a/engine/include/strata/core/ram_expert_blocks.hpp b/engine/include/strata/core/ram_expert_blocks.hpp
+new file mode 100644
+index 000000000..538ba93e4
+--- /dev/null
++++ b/engine/include/strata/core/ram_expert_blocks.hpp
+@@ -0,0 +1,289 @@
++// include/strata/core/ram_expert_blocks.hpp - Live Memory: independently releasable RAM expert blocks.
++//
++// The startup complement (`pin_cache_complement`) is ONE allocation sized once at start. Live Memory instead
++// takes RAM in BLOCKS: bounded allocations, each holding a plan's worth of expert blobs, that a later
++// `MEMORY <id> <resident-mib> <vram-reserve-mib>` request can give back WHOLE - a shrink releases the
++// last-grown blocks first, and a released expert falls back to the mapped files exactly like one a budget
++// left out (its bytes are re-read from the file when routed again).
++//
++// Two rules carry the safety, and both are enforced HERE rather than trusted to the caller:
++//
++//   1. **A block's entries are unpublished BEFORE its memory is freed.**  The flat-index table is erased
++//      under the store's lock for every entry of the dying block, so from that moment no `blob()` /
++//      `resident_blob()` lookup can reach into it - then, and only then, the allocator gets the pointer
++//      back.  (The Engine's safe-point contract still applies: release is called between requests, with
++//      every window drained and every loan back - this class cannot see an in-flight window, and a raw
++//      pointer handed out before the release stays in the reader's hand until the layer is over.)
++//   2. **A failed grow leaves nothing behind.**  The block is allocated, filled by the caller's `filler`,
++//      and only published (index + counters) once the filler returned true.  A refused allocation, a filler
++//      failure or an exception rolls the whole step back: the store looks exactly as it did before.
++//
++// GROWTH IS ADMISSION-GUARDED OUTSIDE: the caller samples the host memory (cgroup-aware) and refuses the
++// step before calling `grow`.  The store takes no readings of its own - the tests inject the allocator and
++// the filler, and the production caller keeps the policy in one place (FileExpertSource::live_ram_grow).
++#pragma once
++
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
++#include <cstdlib>
++#include <limits>
++#include <mutex>
++#include <new>
++#include <string>
++#include <unordered_map>
++#include <utility>
++#include <vector>
++
++namespace strata::core {
++
++// ---------------- pure policy helpers (CPU-testable, live_memory.hpp's style) ----------------
++
++// One growth step's block size: what the request asked for, capped at `max_block_bytes` so a later release
++// can free RAM in bounded whole-block steps (and one bad allocation cannot take it all at once).  0
++// requested stays 0; `max_block_bytes` 0 means unbounded (the caller did not cap it).
++inline uint64_t live_ram_block_bytes(uint64_t requested, uint64_t max_block_bytes) {
++    if (max_block_bytes != 0 && max_block_bytes < requested) return max_block_bytes;
++    return requested;
++}
++
++// Which experts one growth step admits: the pairs of `rank` (hottest first) that no tier holds yet, while
++// their blobs fit `budget` bytes.  `held(flat_index)` answers for every tier the caller knows (the GPU
++// cache's residency, the startup complement, the blocks already taken); a held pair is skipped, and a pair
++// whose blob does not fit the REST of the budget does not end the walk - a later, smaller blob of a colder
++// layer may still fit (a native pack's layer blob sizes differ).  `out` receives the pairs in rank order;
++// the total bytes are returned (0: nothing fits or nothing was offered - "nothing left to admit", not an
++// error).
++template<class Held, class BlobBytes>
++uint64_t live_ram_fill_plan(const std::vector<std::pair<int32_t, int32_t>>& rank, uint64_t budget,
++                            Held held, BlobBytes blob_bytes, std::vector<std::pair<int32_t, int32_t>>& out) {
++    out.clear();
++    uint64_t bytes = 0;
++    for (const auto& [layer, expert] : rank) {
++        if (layer < 0 || expert < 0) continue;
++        if (held((size_t) layer, (size_t) expert)) continue;
++        const uint64_t b = blob_bytes(layer, expert);
++        if (b == 0 || b > budget - bytes) continue;
++        bytes += b;
++        out.emplace_back(layer, expert);
++    }
++    return bytes;
++}
++
++// ---------------- the store ----------------
++
++class RamExpertBlocks {
++public:
++    // The allocation is behind an interface so the tests can inject failures (PORT_PLAN's allocation and
++    // rollback gates) and so the pinned path stays out of this header (no cuda_runtime.h here).
++    struct Allocator {
++        virtual void* alloc(size_t bytes, bool& pinned) = 0;
++        virtual void free(void* p, bool pinned) noexcept = 0;
++        virtual ~Allocator() = default;
++    };
++
++    // Plain heap memory: the DEFAULT and the fallback.  Pageable allocations cannot fail the process the
++    // way one huge page-locked one can (#1250): the kernel pages them out instead.
++    class PageableAllocator final : public Allocator {
++    public:
++        void* alloc(size_t bytes, bool& pinned) override {
++            pinned = false;
++            return std::malloc(bytes);
++        }
++        void free(void* p, bool /*pinned*/) noexcept override { std::free(p); }
++    };
++
++    // Forwards to a target that can be swapped before the first grow (the production caller turns pageable
++    // into pinned-with-fallback in set_live_ram; null forwards nowhere and grow refuses).
++    class DispatchAllocator final : public Allocator {
++    public:
++        explicit DispatchAllocator(Allocator* t = nullptr) : target(t) {}
++        void* alloc(size_t bytes, bool& pinned) override { return target != nullptr ? target->alloc(bytes, pinned) : nullptr; }
++        void free(void* p, bool pinned) noexcept override {
++            if (target != nullptr) target->free(p, pinned);
++        }
++        Allocator* target;
++    };
++
++    // Live Memory's optional pinned step: the caller wires `pin_alloc` / `pin_free` (cudaHostAlloc /
++    // cudaFreeHost trampolines, wired in the .cpp - no cuda_runtime.h here) at construction; a refused pin
++    // FALLS BACK to the inner allocator's pageable block rather than failing the growth - the tier works
++    // either way, only slower to DMA from.  `pin_enabled` (optional) gates the pinned attempt at alloc time,
++    // so one object serves a caller that turns pinning on and off (no reassignment: the reference member).
++    class PinnedFallbackAllocator final : public Allocator {
++    public:
++        using AllocFn = void* (*)(size_t);
++        using FreeFn = void (*)(void*) noexcept;
++        PinnedFallbackAllocator(Allocator& inner, AllocFn pin_alloc, FreeFn pin_free, const bool* pin_enabled = nullptr)
++            : inner_(inner), pin_alloc_(pin_alloc), pin_free_(pin_free), pin_enabled_(pin_enabled) {}
++        void* alloc(size_t bytes, bool& pinned) override {
++            if (pin_alloc_ != nullptr && (pin_enabled_ == nullptr || *pin_enabled_))
++                if (void* p = pin_alloc_(bytes)) { pinned = true; return p; }
++            return inner_.alloc(bytes, pinned);
++        }
++        void free(void* p, bool pinned) noexcept override {
++            if (pinned && pin_free_ != nullptr) pin_free_(p);
++            else inner_.free(p, pinned);
++        }
++    private:
++        Allocator& inner_;
++        AllocFn pin_alloc_ = nullptr;
++        FreeFn pin_free_ = nullptr;
++        const bool* pin_enabled_ = nullptr;
++    };
++
++    struct Stats {
++        uint64_t bytes = 0;          // resident in the blocks now
++        uint64_t pinned_bytes = 0;   // of those, page-locked
++        size_t blocks = 0;
++        size_t entries = 0;
++    };
++
++    // `allocator` must outlive the store (the production caller owns both); `max_block_bytes` caps every
++    // growth step (0: unbounded - not recommended, see live_ram_block_bytes).
++    explicit RamExpertBlocks(Allocator& allocator, uint64_t max_block_bytes = 0)
++        : alloc_(allocator), max_block_bytes_(max_block_bytes) {}
++
++    RamExpertBlocks(const RamExpertBlocks&) = delete;
++    RamExpertBlocks& operator=(const RamExpertBlocks&) = delete;
++
++    // The per-blob sizes grow's layout walk uses (a native pack's blobs differ per layer); set once by the
++    // owner before the first grow.  A later grow of a layer past the list reads 0 bytes and the plan skips it.
++    void set_blob_sizes(const uint64_t* per_layer, size_t n) {
++        std::lock_guard<std::mutex> lk(mu_);
++        blob_bytes_.assign(per_layer, per_layer + n);
++    }
++
++    Stats stats() const {
++        std::lock_guard<std::mutex> lk(mu_);
++        Stats s;
++        s.blocks = blocks_.size();
++        s.entries = where_.size();
++        for (const Block& b : blocks_) {
++            s.bytes += b.bytes;
++            if (b.pinned) s.pinned_bytes += b.bytes;
++        }
++        return s;
++    }
++
++    bool holds(size_t index) const {
++        std::lock_guard<std::mutex> lk(mu_);
++        return where_.find(index) != where_.end();
++    }
++
++    // The blob's bytes in the blocks, or null.  Any thread: the index only changes at a safe point
++    // (grow / release, both under mu_), and a reader that already holds a pointer is the caller's contract.
++    const uint8_t* blob(size_t index) const {
++        std::lock_guard<std::mutex> lk(mu_);
++        const auto it = where_.find(index);
++        if (it == where_.end()) return nullptr;
++        return static_cast<const uint8_t*>(blocks_[it->second.first].p) + it->second.second;
++    }
++
++    // ONE growth step: at most `min(want_bytes, max_block_bytes)` bytes of the plan `plan(entries)` admits,
++    // copied by `filler(base, entries, bytes)`.  The entries are published only after the filler returned
++    // true; every failure path frees the block first.  `added`: bytes published; `pinned`: whether the
++    // block's memory came back page-locked (reported, never assumed).
++    template<class Plan, class Filler, class ToIndex>
++    bool grow(uint64_t want_bytes, Plan plan, Filler filler, ToIndex to_index, uint64_t& added, bool& pinned,
++              std::string& err) {
++        added = 0;
++        pinned = false;
++        err.clear();
++        const uint64_t bytes = live_ram_block_bytes(want_bytes, max_block_bytes_);
++        if (bytes == 0) { err = "the RAM step is empty"; return false; }
++        if (bytes > std::numeric_limits<size_t>::max()) { err = "the RAM step is larger than one allocation"; return false; }
++
++        void* p = nullptr;
++        bool was_pinned = false;
++        try {
++            p = alloc_.alloc((size_t) bytes, was_pinned);
++        } catch (const std::bad_alloc&) {
++            p = nullptr;
++        }
++        if (p == nullptr) {
++            err = "the host refused a " + std::to_string(bytes >> 20) + " MiB RAM block";
++            return false;
++        }
++
++        std::vector<std::pair<int32_t, int32_t>> entries;
++        const uint64_t planned = plan(entries);
++        bool ok = false;
++        if (planned > bytes) {
++            err = "the plan exceeds the RAM step's block";
++        } else if (planned == 0) {
++            err = "no expert fits the RAM step";
++        } else {
++            ok = filler(static_cast<uint8_t*>(p), entries, planned);
++            if (!ok) err = "copying the experts into the RAM block failed";
++        }
++        if (!ok) {
++            alloc_.free(p, was_pinned);   // rollback: an unpublished block is memory nobody can reach
++            return false;
++        }
++
++        std::lock_guard<std::mutex> lk(mu_);
++        Block b;
++        b.p = p;
++        b.pinned = was_pinned;
++        b.bytes = planned;
++        uint64_t at = 0;
++        for (const auto& [layer, expert] : entries) {
++            b.indexed.emplace_back(to_index(layer, expert), at);
++            at += blob_size_(layer, expert);   // the filler laid the blobs back to back in plan order
++        }
++        const size_t bi = blocks_.size();
++        for (const auto& [slot, offset] : b.indexed) where_[slot] = {bi, offset};
++        blocks_.push_back(std::move(b));
++        pinned = was_pinned;
++        added = planned;
++        return true;
++    }
++
++    // Release whole blocks, the LAST grown first, until `drop_bytes` have gone or none are left.  Every
++    // entry of a dying block is unpublished (and unreachable) before the memory goes back.  `dropped`: the
++    // bytes actually freed.  Returns false only on the internal invariant below (never reachable; asserted
++    // for the tests).
++    bool release(uint64_t drop_bytes, uint64_t& dropped, std::string& err) {
++        dropped = 0;
++        err.clear();
++        std::lock_guard<std::mutex> lk(mu_);
++        while (dropped < drop_bytes && !blocks_.empty()) {
++            const Block& b = blocks_.back();
++            for (const auto& [slot, offset] : b.indexed) {
++                if (where_.erase(slot) == 0) {   // never reachable: every published entry is indexed
++                    err = "internal: a released block's entry was not indexed";
++                    return false;
++                }
++            }
++            const uint64_t bytes = b.bytes;
++            const bool pinned = b.pinned;
++            void* p = b.p;
++            blocks_.pop_back();      // the entries are out of reach FIRST (rule 1)
++            alloc_.free(p, pinned);
++            dropped += bytes;
++        }
++        return true;
++    }
++
++private:
++    uint64_t blob_size_(int64_t layer, int64_t /*expert*/) const {
++        return layer >= 0 && (size_t) layer < blob_bytes_.size() ? blob_bytes_[(size_t) layer] : 0;
++    }
++
++    struct Block {
++        void* p = nullptr;
++        bool pinned = false;
++        uint64_t bytes = 0;
++        std::vector<std::pair<size_t, uint64_t>> indexed;   // (flat index, byte offset in the block)
++    };
++
++    Allocator& alloc_;
++    uint64_t max_block_bytes_ = 0;
++    std::vector<uint64_t> blob_bytes_;                    // per layer, for grow's layout walk
++    mutable std::mutex mu_;
++    std::vector<Block> blocks_;                           // growth order: the last is released first
++    std::unordered_map<size_t, std::pair<size_t, uint64_t>> where_;   // flat index -> (block, offset)
++};
++
++}  // namespace strata::core
+diff --git a/engine/src/core/expert_source.cpp b/engine/src/core/expert_source.cpp
+index acf4af05d..e44319265 100644
+--- a/engine/src/core/expert_source.cpp
++++ b/engine/src/core/expert_source.cpp
+@@ -1674,6 +1674,14 @@ void FileExpertSource::close() {
+     ram_stop();
+     io_stop();
+     inputs_.clear();
++    // the Live Memory blocks go whole, entries out of reach first (release's own order)
++    if (live_blocks_.stats().blocks > 0) {
++        uint64_t dropped = 0;
++        std::string err;
++        (void) live_blocks_.release(~uint64_t{0}, dropped, err);
++    }
++    live_ram_on_ = false;
++    live_alloc_.target = &live_alloc_pageable_;
+     if (complement_arena_ != nullptr) {
+         if (complement_pinned_ && !complement_registered_) (void) cudaFreeHost(complement_arena_);
+         else {
+@@ -3365,8 +3373,8 @@ void FileExpertSource::warm(int64_t layer, const int64_t* experts, int64_t n) {
+         const int64_t e = experts[j];
+         if (e < 0 || e >= n_expert_) continue;
+         const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) e;
+-        if (complement_ready_ && resident_blob(index) != nullptr)
+-            continue;                                                    // in the RAM copy
++        if ((complement_ready_ || live_ram_on_) && resident_blob(index) != nullptr)
++            continue;                                                    // in a RAM tier
+         if (warm_stamp_) warm_stamp_[index].store(stamp, std::memory_order_relaxed);
+         warm_count_.fetch_add(1, std::memory_order_relaxed);
+         if (io_pf_ && direct_.empty() && gate_open()) {   // read it ahead with pread on the I/O threads (instead of an madvise hint)
+@@ -3742,10 +3750,10 @@ bool FileExpertSource::copy_blob(int64_t layer, int64_t expert, uint8_t* dst) {
+         return false;
+     const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) expert;
+     const uint64_t bytes = layer_blob_bytes_[(size_t) layer];
+-    if (complement_ready_) {
++    if (complement_ready_ || live_ram_on_) {
+         const uint8_t* held =
+             resident_blob(index);
+-        if (held == nullptr && !override_.empty()) held = override_[index];
++        if (held == nullptr && complement_ready_ && !override_.empty()) held = override_[index];
+         if (held != nullptr) {
+             std::memcpy(dst, held, (size_t) bytes);
+             return true;
+@@ -3772,8 +3780,9 @@ bool FileExpertSource::copy_blobs(const int32_t* layers, const int32_t* experts,
+         const int64_t l = layers[i], e = experts[i];
+         if (base_ == nullptr || dst[i] == nullptr || l < 0 || e < 0 || l >= n_layers_ || e >= n_expert_) return false;
+         const size_t index = (size_t) l * (size_t) n_expert_ + (size_t) e;
+-        if (complement_ready_ &&
+-            (resident_blob(index) != nullptr || (!override_.empty() && override_[index] != nullptr))) {
++        if ((complement_ready_ || live_ram_on_) &&
++            (resident_blob(index) != nullptr ||
++             (complement_ready_ && !override_.empty() && override_[index] != nullptr))) {
+             if (!copy_blob(l, e, dst[i])) return false;
+             continue;
+         }
+@@ -4611,13 +4620,143 @@ bool FileExpertSource::pin_cache_complement(
+     return true;
+ }
+ 
++// ---- Live Memory (PR4 Phase 2): the independently releasable RAM blocks tier ----
++
++// The pinned step's trampolines (declared in the header; it has no cuda_runtime.h).  A refused cudaHostAlloc
++// returns null and the PinnedFallbackAllocator takes the pageable block instead - the tier works either way.
++void* FileExpertSource::live_ram_pin_alloc(size_t bytes) {
++    void* p = nullptr;
++    if (cudaHostAlloc(&p, bytes, cudaHostAllocDefault) != cudaSuccess || p == nullptr) {
++        (void) cudaGetLastError();
++        return nullptr;
++    }
++    return p;
++}
++void FileExpertSource::live_ram_pin_free(void* p) noexcept {
++    (void) cudaFreeHost(p);
++}
++
++void FileExpertSource::set_live_ram(bool on, bool pin, uint64_t max_block_bytes) {
++    live_ram_pin_ = pin && on;
++    live_ram_on_ = on;
++    live_ram_max_block_ = max_block_bytes;
++    live_blocks_.set_blob_sizes(layer_blob_bytes_.data(), layer_blob_bytes_.size());
++    // the dispatch target is the whole wiring: the pinned chain (whose trampolines read live_ram_pin_) or
++    // the pageable allocator.  The store itself was built on the dispatch at construction.
++    live_alloc_.target = on && live_ram_pin_ ? static_cast<RamExpertBlocks::Allocator*>(&live_alloc_pinned_)
++                                             : static_cast<RamExpertBlocks::Allocator*>(&live_alloc_pageable_);
++    if (on) {
++        const RamExpertBlocks::Stats s = live_blocks_.stats();
++        std::fprintf(stderr, "FileExpertSource: Live Memory RAM blocks on (max block %llu MiB, %s)\n",
++                     (unsigned long long) (max_block_bytes >> 20), live_ram_pin_ ? "pinned with a pageable fallback" : "pageable");
++        if (s.blocks > 0)
++            std::fprintf(stderr, "FileExpertSource: %zu block(s), %llu MiB resident already\n", s.blocks,
++                         (unsigned long long) (s.bytes >> 20));
++        std::fflush(stderr);
++    }
++}
++
++bool FileExpertSource::live_ram_grow(uint64_t add_bytes, uint64_t floor_bytes,
++                                     const std::vector<std::pair<int32_t, int32_t>>& rank, uint64_t& added, bool& pinned,
++                                     std::string& err) {
++    added = 0;
++    pinned = false;
++    err.clear();
++    if (!live_ram_on_ || base_ == nullptr) {
++        err = "Live Memory RAM blocks are not enabled (STRATA_LIVE_MEMORY=1)";
++        return false;
++    }
++    // The cgroup-aware admission (PORT_PLAN Phase A.4): a fresh reading every step, fail closed when the
++    // RAM cannot be read - an unreadable reading is never treated as room.
++    const std::optional<HostMemoryReading> mem = sample_host_memory();
++    if (!mem) {
++        err = "cannot read the host memory for the RAM step (fail closed)";
++        return false;
++    }
++    const uint64_t block = live_ram_block_bytes(add_bytes, live_ram_max_block_);
++    if (block == 0) {
++        err = "the RAM step is empty";
++        return false;
++    }
++    if (!conversation_memory_admit(mem->available, block, floor_bytes)) {
++        err = "the RAM step does not fit above the floor (" + std::to_string(mem->available >> 20) + " MiB available, " +
++              std::to_string(block >> 20) + " MiB asked)";
++        return false;
++    }
++    live_blocks_.set_blob_sizes(layer_blob_bytes_.data(), layer_blob_bytes_.size());
++    // The plan: the rank's pairs no tier holds (the GPU cache's are the Engine's rank's job to skip; the
++    // complement's and the blocks' are checked here), until the block's budget is full.
++    auto plan = [&](std::vector<std::pair<int32_t, int32_t>>& entries) -> uint64_t {
++        return live_ram_fill_plan(rank, block,
++                                  [&](size_t layer, size_t expert) {
++                                      const size_t index = layer * (size_t) n_expert_ + expert;
++                                      return (complement_offsets_.size() > index && complement_offsets_[index] != kNoComplement) ||
++                                             live_blocks_.holds(index);
++                                  },
++                                  [&](int64_t layer, int64_t) -> uint64_t {
++                                      return layer >= 0 && (size_t) layer < layer_blob_bytes_.size()
++                                                 ? layer_blob_bytes_[(size_t) layer] : 0;
++                                  },
++                                  entries);
++    };
++    auto filler = [&](uint8_t* base, const std::vector<std::pair<int32_t, int32_t>>& entries, uint64_t) -> bool {
++        uint64_t at = 0;
++        for (const auto& [layer, expert] : entries) {
++            if (!copy_from_files(layer, expert, base + at)) return false;
++            at += layer_blob_bytes_[(size_t) layer];
++        }
++        return true;
++    };
++    const uint64_t t0_files = file_read_bytes_.load(std::memory_order_relaxed);
++    const bool ok = live_blocks_.grow(block, plan, filler,
++                                      [&](int64_t layer, int64_t expert) -> size_t {
++                                          return (size_t) layer * (size_t) n_expert_ + (size_t) expert;
++                                      },
++                                      added, pinned, err);
++    if (ok) {
++        const RamExpertBlocks::Stats s = live_blocks_.stats();
++        std::fprintf(stderr, "FileExpertSource: Live Memory RAM + %llu MiB (%zu blocks, %zu entries, %llu MiB resident%s); "
++                             "%.0f MiB read from the files\n",
++                     (unsigned long long) (added >> 20), s.blocks, s.entries,
++                     (unsigned long long) (s.bytes >> 20), pinned ? ", pinned" : "",
++                     (double) (file_read_bytes_.load(std::memory_order_relaxed) - t0_files) / 1048576.0);
++        std::fflush(stderr);
++    }
++    return ok;
++}
++
++bool FileExpertSource::live_ram_release(uint64_t drop_bytes, uint64_t& dropped, uint64_t& remaining, std::string& err) {
++    dropped = 0;
++    remaining = 0;
++    err.clear();
++    if (!live_ram_on_) {
++        err = "Live Memory RAM blocks are not enabled (STRATA_LIVE_MEMORY=1)";
++        return false;
++    }
++    // An exchange still staged reads its blobs from buffers the commit will move; a release would race it.
++    if (!staged_.empty()) {
++        err = "an expert exchange is still staged; land it first";
++        return false;
++    }
++    if (!live_blocks_.release(drop_bytes, dropped, err)) return false;
++    remaining = live_blocks_.stats().bytes;
++    if (dropped > 0)
++        std::fprintf(stderr, "FileExpertSource: Live Memory RAM - %llu MiB (%llu MiB still resident)\n",
++                     (unsigned long long) (dropped >> 20), (unsigned long long) (remaining >> 20));
++    std::fflush(stderr);
++    return true;
++}
++
+ const uint8_t* FileExpertSource::resident_blob(size_t index) const {
+     if (exchange_storage_.active()) return exchange_storage_.resident(index).host;
+-    return detail::cache_complement_blob_or_fallback(index, complement_offsets_, complement_host_, nullptr);
++    if (const uint8_t* p = detail::cache_complement_blob_or_fallback(index, complement_offsets_, complement_host_, nullptr))
++        return p;
++    return live_blocks_.blob(index);   // the Live Memory blocks: released whole at a safe point
+ }
+ 
+ bool FileExpertSource::has_resident(int64_t layer, int64_t expert) const {
+-    if (!complement_ready_ || layer < 0 || expert < 0 || layer >= n_layers_ || expert >= n_expert_) return false;
++    if ((!complement_ready_ && !live_ram_on_) || layer < 0 || expert < 0 || layer >= n_layers_ || expert >= n_expert_)
++        return false;
+     const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) expert;
+     return resident_blob(index) != nullptr;
+ }
+@@ -4947,7 +5086,7 @@ void FileExpertSource::ram_stop() {
+ int FileExpertSource::tier_of(int64_t layer, int64_t expert) const {
+     if (layer < 0 || expert < 0 || layer >= n_layers_ || expert >= n_expert_) return 2;
+     const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) expert;
+-    if (complement_ready_ && resident_blob(index) != nullptr) return 0;
++    if ((complement_ready_ || live_ram_on_) && resident_blob(index) != nullptr) return 0;
+ #if defined(__linux__)
+     uint64_t total = 0;
+     const uint64_t c = cached_bytes(layer, expert, total, false);
+@@ -5006,9 +5145,10 @@ const uint8_t* FileExpertSource::resident_blob(int64_t layer, int64_t expert) co
+ 
+ const uint8_t* FileExpertSource::blob_stable(int64_t layer, int64_t expert) {
+     if (io_pf_ && role_ptr_.empty() && direct_.empty()) {
+-        if (complement_ready_ && layer >= 0 && expert >= 0 && layer < n_layers_ && expert < n_expert_) {
++        if ((complement_ready_ || live_ram_on_) && layer >= 0 && expert >= 0 && layer < n_layers_ && expert < n_expert_) {
+             const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) expert;
+-            if (resident_blob(index) != nullptr || (!override_.empty() && override_[index] != nullptr)) return blob(layer, expert);
++            if (resident_blob(index) != nullptr ||
++                (complement_ready_ && !override_.empty() && override_[index] != nullptr)) return blob(layer, expert);
+         }
+         const uint8_t* b = mapped_blob(layer, expert);
+         if (b != nullptr) file_read_bytes_.fetch_add(layer_blob_bytes_[(size_t) layer], std::memory_order_relaxed);
+@@ -5025,6 +5165,8 @@ int FileExpertSource::blob_parts(int64_t layer, int64_t expert, BlobPart* out) {
+         layer >= n_layers_ || expert >= n_expert_)
+         return 0;
+     const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) expert;
++    // a blob the Live Memory blocks hold is one contiguous piece of anonymous memory, not the GGUF's slices
++    if (live_ram_on_ && resident_blob(index) != nullptr) return 0;
+     if (complement_ready_ && (resident_blob(index) != nullptr || (!override_.empty() && override_[index] != nullptr))) return 0;
+     Span sp[3];
+     const int ns = spans(layer, expert, sp);
+@@ -5041,12 +5183,12 @@ const uint8_t* FileExpertSource::blob(int64_t layer, int64_t expert) {
+     const size_t index = (size_t) layer * (size_t) n_expert_ + (size_t) expert;
+     const uint8_t* result = nullptr;
+     bool from_files = true;
+-    if (complement_ready_) {
++    if (complement_ready_ || live_ram_on_) {
+         result = resident_blob(index);
+         if (result != nullptr) {
+             ram_reads_.fetch_add(1, std::memory_order_relaxed);
+             from_files = false;
+-        } else if (!override_.empty() && override_[index] != nullptr) {
++        } else if (complement_ready_ && !override_.empty() && override_[index] != nullptr) {
+             result = override_[index];
+             from_files = false;
+         }

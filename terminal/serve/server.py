@@ -325,6 +325,7 @@ from serve import oomd_pacer  # noqa: E402
 from serve import lastrun  # noqa: E402
 from serve import hy4_kind  # noqa: E402
 from serve import hy4_dialect  # noqa: E402
+from serve import live_memory_policy  # noqa: E402
 from serve.webfiles import subtree_file as web_subtree_file  # noqa: E402
 from strata_control import engine_component  # noqa: E402
 from strata_control import tls  # noqa: E402
@@ -949,6 +950,13 @@ class StrataEngine:
         self.gen = self.__dict__.get("gen", 0) + 1      # which engine process this is (a request notes its own); first, so
         #                                                 a request that sees the new number sees the new queues (#4451)
         self.lines: queue.Queue = queue.Queue()
+        # Live Memory (PR4 Phase 4): ACK answers wait here for the request_memory() caller (one at a time: the
+        # caller holds _exclusive_control); CAPACITY reports land in terminal_capacity, never in a request's
+        # token stream.  _memory_mu serializes the MEMORY owner against itself (the policy thread, Vision).
+        self.ack_q: queue.Queue = queue.Queue()
+        self.terminal_capacity: dict | None = None
+        self._memory_mu = threading.Lock()
+        self._memory_seq = 0
         # --batch: concurrent requests in the engine's batch slots (see generate_batched).  The engine says how many
         # it runs (INFO batch_slots=N: it may have fewer than asked, or none, when they do not fit)
         asked = next((int(args[args.index(k) + 1]) for k in ("--batch", "--slots", "--parallel") if k in args), 0)
@@ -1039,6 +1047,23 @@ class StrataEngine:
                 sample = parse_stage_in_flight_sample(line)
                 if sample is not None and self.proc is proc:
                     self.terminal_stage_sample = {**sample, "observed_monotonic": time.monotonic()}
+                continue
+            if line.startswith("CAPACITY "):
+                # Live Memory (PR4): the tiers' actual capacity and a fresh RAM reading - control telemetry
+                # that never enters a request's token stream (BSTAT/PSTAT's shape)
+                sample = live_memory_policy.CapacitySample.parse(line.rstrip("\n"))
+                if sample is not None and self.proc is proc:
+                    self.terminal_capacity = {"observed_monotonic": sample.observed_monotonic,
+                                              "ram_resident_mib": sample.ram_resident_mib,
+                                              "ram_available_mib": sample.ram_available_mib,
+                                              "vram_committed_mib": sample.vram_committed_mib,
+                                              "vram_free_mib": sample.vram_free_mib,
+                                              "vram_reserve_mib": sample.vram_reserve_mib}
+                continue
+            if line.startswith("ACK "):
+                # one MEMORY request at a time (the caller holds _memory_mu and the control lines); an ACK
+                # nobody waits for (a timed-out caller) is dropped here instead of reaching a request
+                self.ack_q.put(line.rstrip("\n"))
                 continue
             if line.startswith(("BT ", "BDONE ")) and slot_q:   # --batch: a batch slot's own lines
                 try:
@@ -1251,6 +1276,56 @@ class StrataEngine:
                 return out
             if time.time() > deadline:
                 raise EngineDied("the engine did not answer the VRAM command")
+
+    def latest_capacity(self) -> dict | None:
+        """Live Memory (PR4): the newest CAPACITY report (the tiers' actual bytes, a fresh cgroup-aware RAM
+        reading and the reserve), or None.  Control telemetry: it never passes through a request's lines."""
+        return self.__dict__.get("terminal_capacity")
+
+    def has_live_memory(self) -> bool:
+        """Does the running engine run the acknowledged MEMORY protocol?  The INFO line says so
+        (live_memory=1, PR4); older engines answer only the VRAM command."""
+        return bool((getattr(self, "info", None) or {}).get("live_memory"))
+
+    def request_memory(self, resident_mib: int, vram_reserve_mib: int, timeout: float = 300.0) -> dict:
+        """Live Memory (PR4 Phase C): `MEMORY <id> <resident-mib> <vram-reserve-mib>` at the same serialized
+        owner the automatic policy and Vision's reserve share (_memory_mu).  The engine applies it at a safe
+        point - it QUEUES the request while a prompt's loan is out - and answers exactly once with a terminal
+        ACK (OK / PARTIAL / REFUSED) reporting the ACTUAL capacity; a REFUSED or PARTIAL is a normal answer,
+        not an error (the engine is the final admission authority).  -> the ACK's figures plus state and id."""
+        with self._memory_mu:
+            with self._exclusive_control():
+                return self._memory(resident_mib, vram_reserve_mib, timeout)
+
+    def _memory(self, resident_mib: int, vram_reserve_mib: int, timeout: float = 300.0) -> dict:
+        if not self.alive():
+            raise EngineDied("the engine is not running")
+        self._memory_seq = getattr(self, "_memory_seq", 0) + 1
+        request_id = self._memory_seq
+        self.proc.stdin.write(f"MEMORY {request_id} {int(resident_mib)} {int(vram_reserve_mib)}\n")
+        self.proc.stdin.flush()
+        deadline = time.time() + timeout
+        while True:
+            try:
+                line = self.ack_q.get(timeout=max(0.1, deadline - time.time()))
+            except queue.Empty:
+                raise EngineDied("the engine did not answer the MEMORY request") from None
+            parsed = live_memory_policy.parse_ack(line)
+            if parsed is None:
+                continue                                  # not an ACK line (a lagging one is dropped by _pump)
+            ack_id, state, numbers, note = parsed
+            if ack_id != request_id:
+                continue                                  # a timed-out earlier caller's answer
+            out = {"state": state, "id": ack_id, **numbers}
+            self.info.update({k: v for k, v in numbers.items()})
+            if state == "OK":
+                return out
+            note = note.replace("_", " ")
+            if state == "REFUSED":
+                raise ValueError(note or "the engine refused the MEMORY request")
+            if note:
+                out["note"] = note                        # PARTIAL: why it stopped short, in words
+            return out                                    # PARTIAL: the actual capacity rides the answer
 
     def pen_from_key(self, orig_len: int, prompt_len: int) -> str:
         """` pen_from=N` for a leg that continues a request (prompt + what it generated): where the reply began, Strata's penalty window start. The all-cards split engine
@@ -3544,6 +3619,10 @@ def engine_args(cfg: dict, exe: str | None = None, *, announce: bool = True) -> 
         seg = cfg.get("vram_segment_mib")
         if isinstance(seg, int) and not isinstance(seg, bool) and seg > 0 and "--vram-segment-mib" not in args:
             args += ["--vram-segment-mib", str(seg)]
+    # Live Memory (PR4): "live_memory": true opts the engine into the acknowledged MEMORY protocol; the
+    # segmented cache is its VRAM half, so it implies vram_elastic (the config's own key still wins)
+    if cfg.get("live_memory") not in (None, False) and "--vram-elastic" not in args:
+        args.append("--vram-elastic")
     args += parallel_args(cfg, args)
     args += pool_cores_args(cfg, args)
     return draft_costs_args(cfg, learned_profile_args(cfg, args), exe or cfg.get("exe"))
@@ -3753,6 +3832,20 @@ def child_env(cfg: dict, *, offline: bool = False) -> dict:
         env["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in ordered_gpus(cfg))
     for k, v in (cfg.get("env") or {}).items():      # engine settings the config carries (AMD: the GEMM tuning table)
         env[str(k)] = str(v)
+    # Live Memory (PR4): the config's "live_memory" turns the engine's MEMORY protocol on (its env switch);
+    # a dict tunes the blocks: {"pin_ram": true, "max_block_mib": 512, "capacity_s": 10}.  The config's own
+    # "env" entries above still win (setdefault never overrides one).
+    lm = cfg.get("live_memory")
+    if lm not in (None, False):
+        env.setdefault("STRATA_LIVE_MEMORY", "1")
+        sub = lm if isinstance(lm, dict) else {}
+        if sub.get("pin_ram"):
+            env.setdefault("STRATA_LIVE_MEMORY_PIN_RAM", "1")
+        if isinstance(sub.get("max_block_mib"), int) and not isinstance(sub.get("max_block_mib"), bool) \
+                and sub["max_block_mib"] > 0:
+            env.setdefault("STRATA_LIVE_MEMORY_MAX_BLOCK_MIB", str(sub["max_block_mib"]))
+        if isinstance(sub.get("capacity_s"), (int, float)) and not isinstance(sub.get("capacity_s"), bool):
+            env.setdefault("STRATA_LIVE_MEMORY_CAPACITY_S", str(sub["capacity_s"]))
     # 0.2.17 (owner 11-19): the route tail skip is Off unless the person turned it on (STRATA_ROUTE_TAIL_SKIP=7 in the config or in their own environment).
     # The engine's own rule for an unset value is rank 7, so an unset one is set to 0 here, for a config made before 0.2.17 too.
     speed_switches.engine_env_defaults(env)
@@ -3978,6 +4071,13 @@ class Service:
         self.before_load_strict = False                  # #1997: refuse (503) whenever it fails
         self.vram_reserve = None                         # #533: the last POST /v1/vram reserve (None: the start's)
         self.vram_reserve_asked = False                  # a POST /v1/vram was made (vram_reserve None is then asked)
+        # Live Memory (PR4 Phase 4): the opt-in automatic policy (config "live_memory_policy" or env
+        # STRATA_LIVE_MEMORY_POLICY=1) and the manual memory API share the engine's serialized MEMORY owner
+        self.live_memory_policy_cfg = live_memory_policy.PolicyConfig(
+            enabled=bool(os.environ.get("STRATA_LIVE_MEMORY_POLICY", "").strip().lower() not in ("", "0", "off", "false", "no")))
+        self._memory_policy_stop = threading.Event()
+        self._memory_policy_thread: threading.Thread | None = None
+        self._memory_policy_state = live_memory_policy.MemoryPolicy(self.live_memory_policy_cfg)
         self.vision_held = False                         # an elastic encoder holds VRAM the expert cache gave it
         self.vision_no_shrink = False                    # the engine said its cache never shrinks (no --vram-elastic)
         self.vision_no_shrink_said = False
@@ -4557,6 +4657,60 @@ class Service:
                 self.engine._ctl_held = False
                 ctl.release()
             self.fifo.release()
+
+    # ---- Live Memory (PR4 Phase 4): the manual memory API and the opt-in automatic policy ----
+
+    def memory(self, resident_mib: int | None = None, vram_reserve_mib: int | None = None) -> dict:
+        """POST /v1/memory: one MEMORY request through the engine's serialized owner (the engine stays the
+        final admission authority: its ACK reports the ACTUAL capacity, a PARTIAL/REFUSED rides the answer).
+        None resident_mib: a CAPACITY report only (GET's body).  The vision path and the automatic policy
+        thread use the same engine.request_memory() - one owner, never two cache owners racing."""
+        eng = self.engine
+        if not hasattr(eng, "request_memory"):
+            raise ValueError("this engine has no MEMORY protocol")
+        if resident_mib is None:
+            latest = eng.latest_capacity() if hasattr(eng, "latest_capacity") else None
+            if latest is None:
+                raise ValueError("the engine has not reported CAPACITY yet")
+            return {"status": "ok", **latest}
+        # the reserve rides unchanged at its current reported value unless this request names one
+        latest = eng.latest_capacity() if hasattr(eng, "latest_capacity") else None
+        reserve = vram_reserve_mib
+        if reserve is None:
+            reserve = (latest or {}).get("vram_reserve_mib", self.vram_reserve or 0)
+        out = eng.request_memory(int(resident_mib), int(reserve))
+        print(f"[strata] MEMORY {out.get('state')}: RAM tier {out.get('ram_resident_mib', '?')} MiB, "
+              f"expert cache {out.get('vram_committed_mib', '?')} MiB committed, reserve "
+              f"{out.get('vram_reserve_mib', '?')} MiB", flush=True)
+        return {"status": "ok", **out}
+
+    def start_memory_policy(self) -> None:
+        """The opt-in automatic policy (config "live_memory_policy" / STRATA_LIVE_MEMORY_POLICY=1): a thread
+        that watches the engine's CAPACITY reports and sends bounded MEMORY requests.  Off until an engine
+        that runs the MEMORY protocol is up (INFO live_memory=1); never started when disabled."""
+        if not self.live_memory_policy_cfg.enabled or self._memory_policy_thread is not None:
+            return
+        self._memory_policy_thread = threading.Thread(target=self._memory_policy_loop, daemon=True,
+                                                      name="strata-memory-policy")
+        self._memory_policy_thread.start()
+
+    def _memory_policy_loop(self) -> None:
+        cfg = self.live_memory_policy_cfg
+        while not self._memory_policy_stop.wait(cfg.interval_s):
+            eng = self.engine
+            if not hasattr(eng, "request_memory") or not getattr(eng, "has_live_memory", lambda: False)():
+                continue                        # an engine without the protocol: nothing to drive
+            request = self._memory_policy_state.observe(eng.latest_capacity() if hasattr(eng, "latest_capacity") else None)
+            if request is None:
+                continue
+            try:
+                out = eng.request_memory(request.resident_mib, request.vram_reserve_mib)
+                self._memory_policy_state.note_ack(out.get("state", "PARTIAL"))
+                print(f"[strata] memory policy: {request.reason}: RAM tier target {request.resident_mib} MiB -> "
+                      f"{out.get('state')} ({out.get('ram_resident_mib', '?')} MiB)", flush=True)
+            except (ValueError, EngineDied) as e:
+                self._memory_policy_state.note_ack("REFUSED")
+                print(f"[strata] memory policy: {request.reason}: the engine said no ({e})", flush=True)
 
     def _say_died(self, e: Exception) -> None:
         """The server window's line for an engine that died (or was ended, #481) in the middle of a request."""
@@ -7087,6 +7241,15 @@ def make_handler(svc: Service):
             elif path == "/v1/status":
                 if self._authorized():
                     self._json(200, svc.v1_status())
+            elif path == "/v1/memory":
+                # Live Memory (PR4): the newest CAPACITY report and the automatic policy's state (read-only)
+                if self._authorized():
+                    eng = svc.engine
+                    latest = eng.latest_capacity() if hasattr(eng, "latest_capacity") else None
+                    self._json(200, {"live_memory": bool(getattr(eng, "has_live_memory", lambda: False)()),
+                                     "policy": {"enabled": svc.live_memory_policy_cfg.enabled,
+                                                "cooldown_s": svc._memory_policy_state._cooldown_s},
+                                     "capacity": latest})
             else:
                 self._json(404, {"error": {"message": "not found"}})
 
@@ -7199,6 +7362,18 @@ def make_handler(svc: Service):
                         raise ValueError("reserve_mib: a whole number of MiB (0 or more), or null for the start's")
                     try:
                         self._json(200, svc.vram(r))
+                    except EngineDied as e:
+                        self._json(503, {"error": {"type": "server_error", "message": str(e)}})
+                    return
+                if path == "/v1/memory":                     # Live Memory (PR4): the acknowledged capacity API
+                    if not self._own_page("the memory tiers can be changed"):
+                        return
+                    ram, vram = req.get("resident_mib"), req.get("vram_reserve_mib")
+                    for name, value in (("resident_mib", ram), ("vram_reserve_mib", vram)):
+                        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                            raise ValueError(f"{name}: a whole number of MiB (0 or more), or null to keep it")
+                    try:
+                        self._json(200, svc.memory(ram, vram))
                     except EngineDied as e:
                         self._json(503, {"error": {"type": "server_error", "message": str(e)}})
                     return
@@ -7979,6 +8154,7 @@ def host_names_for(bind_host: str, allowed_hosts=(), trusted_origins=()) -> set[
 def serve(svc: Service, host="127.0.0.1", port=8095) -> ThreadingHTTPServer:
     svc.host_names = host_names_for(host, svc.allowed_hosts, svc.trusted_origins)
     svc.start_telemetry()
+    svc.start_memory_policy()   # Live Memory (PR4): opt-in; idles until an engine with the MEMORY protocol is up
     httpd = Server((host, port), make_handler(svc))
     httpd.svc = svc
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -8587,6 +8763,19 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
         svc.requested_slots = per_replica * len(groups) if groups else per_replica
     svc.answer_room = cfg.get("answer_room") is not False
     svc.reasoning_close_retry = cfg.get("reasoning_close_retry") is True    # #1053: opt-in, off by default
+    # Live Memory (PR4 Phase 4): the config's "live_memory_policy" (or env STRATA_LIVE_MEMORY_POLICY=1)
+    # turns the automatic policy thread on; the tuning sub-keys ride the same shape as the engine's
+    lm = cfg.get("live_memory_policy")
+    if lm not in (None, False):
+        sub = lm if isinstance(lm, dict) else {}
+        cfg_policy = svc.live_memory_policy_cfg
+        cfg_policy.enabled = True
+        for key in ("interval_s", "low_watermark_mib", "high_watermark_mib", "debounce_n", "cooldown_s",
+                    "max_shrink_mib", "max_grow_mib", "max_age_s"):
+            value = sub.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                setattr(cfg_policy, key, value)
+        svc._memory_policy_state = live_memory_policy.MemoryPolicy(cfg_policy)   # the state carries the same config
     if cfg.get("images"):                               # image generation (serve/images.py), set up by setup --images
         icfg = {k: (os.path.abspath(os.path.join(cfg.get("cwd") or ".", v))
                     if k in ("exe", "diffusion_model", "vae", "llm", "out_dir") and isinstance(v, str)

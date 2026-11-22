@@ -45,7 +45,7 @@ downstream/features/<feature-id>/
 | `tq-ampere` | Ampere TQ Gate/Up 配对 CUDA Kernel | 关闭，环境变量 opt-in |
 | `qsa-imma` | K8V4 Q*K split-INT8 IMMA | 关闭，环境变量 opt-in |
 | `l2-session` | ConversationSpill 跨进程持久化 | 关闭，环境变量 opt-in |
-| `live-memory` | ExpertCache 初始 VMM commit 与策略 helper | 默认不改变原分配行为 |
+| `live-memory` | Live Memory 容量所有者：VMM 初始 commit、事务性 resize、live-slot 守卫、可独立释放的 RAM blocks、Engine MEMORY/ACK/CAPACITY 协议与 safe-point 调度、Server 自动容量策略与 Vision 统一 VRAM 管理 | 默认关闭（STRATA_LIVE_MEMORY=1 / config "live_memory"） |
 
 ### 1.3 Patch 只保存生产改动
 
@@ -258,4 +258,4 @@ python downstream/scripts/test.py --feature example \
 
 ## 6. 当前验证边界
 
-本次迁移保存了 PR #1～#3 中的生产实现和相关测试源代码。CI 当前验证的是维护脚本语法、补丁哈希和 Git tree 指纹；并未在 CI 中编译全部 C++/CUDA 目标，也没有替代真实 SM86、AVX-VNNI 或 CUDA VMM 硬件验收。每项功能的具体待测项见对应的 `validation/README.md`。
+本次迁移保存了 PR #1～#4 中的生产实现和相关测试源代码。CI 当前验证的是维护脚本语法、补丁哈希和 Git tree 指纹；并未在 CI 中编译全部 C++/CUDA 目标，也没有替代真实 SM86、AVX-VNNI 或 CUDA VMM 硬件验收。live-memory 的 CPU 测试（策略、RAM blocks、Settings 扫描器）与 Python 测试（策略、协议）已在迁移机器通过；CUDA VMM、safe-point 与硬件验收仍待对应设备。每项功能的具体待测项见对应的 `validation/README.md`。

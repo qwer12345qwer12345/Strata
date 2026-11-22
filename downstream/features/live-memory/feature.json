@@ -1,16 +1,16 @@
 {
   "id": "live-memory",
-  "name": "Live Memory VMM and transactional resize",
-  "version": "0.3.0",
+  "name": "Live Memory capacity owner (VMM prefix, RAM blocks, MEMORY protocol, server policy)",
+  "version": "0.2.0",
   "status": "active",
   "base_commit": "6e38f588a646c0ee6948a74afbe670eb75896106",
-  "patched_tree": "b6811ad43b99490d52461896be76e432fe24e667",
+  "patched_tree": "024caf94837aac06eb38b3e077ac496235bc15c0",
   "requires": [],
   "patches": [
     {
       "id": "live-memory-vmm",
       "path": "patches/0001-live-memory-vmm.patch",
-      "sha256": "25bf69328242e79ee178ab30c765f9fdec5ab13c8f92b63728f6887afab760b9"
+      "sha256": "850e57c6d2a0fadb81c3e890929eda26b456eb006330419460cc390b798c48bb"
     },
     {
       "id": "live-memory-transactional-resize",
@@ -21,10 +21,30 @@
       "id": "live-memory-live-slot-guards",
       "path": "patches/0003-live-memory-live-slot-guards.patch",
       "sha256": "cbd16136d63680e9673b8c631dc42ee344dc44123aec3e1b8d7f44b81c157599"
+    },
+    {
+      "id": "live-memory-ram-blocks",
+      "path": "patches/0004-live-memory-ram-blocks.patch",
+      "sha256": "a341395c51a8d1b261c2207bedbf3b7219f24e33e455c8053413279b70e13ca3"
+    },
+    {
+      "id": "live-memory-engine-protocol",
+      "path": "patches/0005-live-memory-engine-protocol.patch",
+      "sha256": "947e266a1c32e06fbf70cc8732d3d3c2d54b7779a3969bc9c1277134d0f687bc"
+    },
+    {
+      "id": "live-memory-server-policy",
+      "path": "patches/0006-live-memory-server-policy.patch",
+      "sha256": "2cf146ecd5c3d00b0132f79067499cd949188422c1b15b26b2c3c6ce382caf36"
     }
   ],
   "tests": "tests/test.json",
   "environment": {
-    "STRATA_LIVE_MEMORY_INITIAL_MIB": "<positive whole MiB>"
+    "STRATA_LIVE_MEMORY_INITIAL_MIB": "<positive whole MiB>",
+    "STRATA_LIVE_MEMORY": "1",
+    "STRATA_LIVE_MEMORY_PIN_RAM": "1 (optional)",
+    "STRATA_LIVE_MEMORY_MAX_BLOCK_MIB": "<MiB, default 512>",
+    "STRATA_LIVE_MEMORY_CAPACITY_S": "<seconds, default 10>",
+    "STRATA_LIVE_MEMORY_POLICY": "1 (server-side automatic policy)"
   }
 }
