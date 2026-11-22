@@ -258,7 +258,7 @@ def _analyze(lines, i, name, fn, col):
             return "debug-gated", None, "read only when STRATA_PIPELINE_DEBUG=1"
     # std::getenv: look at the rest of the statement and the next two lines
     win = [first]
-    for k in range(1, 4):
+    for k in range(1, 6):
         if i + k < len(lines):
             win.append(lines[i + k])
     text = "\n".join(win)
