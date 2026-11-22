@@ -1,0 +1,103 @@
+[
+  {
+    "arm": "scalar-only",
+    "case": "warmup",
+    "T": {
+      "1": 10,
+      "4": 6,
+      "3": 5,
+      "2": 2
+    },
+    "sources": {
+      "neural": {
+        "rounds": 23,
+        "accepted": 24,
+        "offered": 30,
+        "acceptance": 0.8
+      },
+      "lookup": {
+        "rounds": 0,
+        "accepted": 0,
+        "offered": 0,
+        "acceptance": null
+      }
+    }
+  },
+  {
+    "arm": "scalar-only",
+    "case": "long_output",
+    "T": {
+      "4": 5,
+      "3": 33,
+      "5": 2,
+      "6": 148,
+      "2": 7,
+      "1": 10
+    },
+    "sources": {
+      "neural": {
+        "rounds": 57,
+        "accepted": 89,
+        "offered": 102,
+        "acceptance": 0.8725490196078431
+      },
+      "lookup": {
+        "rounds": 148,
+        "accepted": 729,
+        "offered": 734,
+        "acceptance": 0.9931880108991825
+      }
+    }
+  },
+  {
+    "arm": "df2-tuned",
+    "case": "warmup",
+    "T": {
+      "1": 9,
+      "4": 5,
+      "3": 5,
+      "2": 3,
+      "6": 1
+    },
+    "sources": {
+      "neural": {
+        "rounds": 23,
+        "accepted": 24,
+        "offered": 33,
+        "acceptance": 0.7272727272727273
+      },
+      "lookup": {
+        "rounds": 0,
+        "accepted": 0,
+        "offered": 0,
+        "acceptance": null
+      }
+    }
+  },
+  {
+    "arm": "df2-tuned",
+    "case": "long_output",
+    "T": {
+      "4": 6,
+      "3": 37,
+      "6": 2,
+      "2": 7,
+      "1": 10,
+      "5": 173
+    },
+    "sources": {
+      "neural": {
+        "rounds": 57,
+        "accepted": 89,
+        "offered": 101,
+        "acceptance": 0.8811881188118812
+      },
+      "lookup": {
+        "rounds": 178,
+        "accepted": 699,
+        "offered": 700,
+        "acceptance": 0.9985714285714286
+      }
+    }
+  }
+]

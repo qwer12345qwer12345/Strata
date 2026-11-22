@@ -6,13 +6,15 @@
     "branch": "main"
   },
   "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
-  "patched_tree": "75e79afc0c319fa2bcd53ca2e38581a79afc6ca8",
+  "patched_tree": "57f862c1ed1b426055a2aae529b101921d4e4dab",
   "feature_order": [
     "tq-cpu",
     "tq-ampere",
     "qsa-imma",
     "legacy-session-archive",
-    "chatml-tool-guard"
+    "chatml-tool-guard",
+    "ple-bf16-compact",
+    "ampere-tc-dispatch"
   ],
   "features": [
     {
@@ -46,6 +48,14 @@
     {
       "id": "legacy-session-archive",
       "path": "features/legacy-session-archive/feature.json"
+    },
+    {
+      "id": "ple-bf16-compact",
+      "path": "features/ple-bf16-compact/feature.json"
+    },
+    {
+      "id": "ampere-tc-dispatch",
+      "path": "features/ampere-tc-dispatch/feature.json"
     }
   ]
 }

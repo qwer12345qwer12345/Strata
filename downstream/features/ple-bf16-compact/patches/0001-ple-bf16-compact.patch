@@ -1,0 +1,285 @@
+diff --git a/engine/cmake/strata_gpu_engine.cmake b/engine/cmake/strata_gpu_engine.cmake
+index 120ebaf87..afa4ca598 100644
+--- a/engine/cmake/strata_gpu_engine.cmake
++++ b/engine/cmake/strata_gpu_engine.cmake
+@@ -1208,6 +1208,12 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+   add_test(NAME ple_iq4nl_dequant_test COMMAND ple_iq4nl_dequant_test)
+   set_tests_properties(ple_iq4nl_dequant_test PROPERTIES SKIP_RETURN_CODE 77)
+ 
++  add_executable(ple_bf16_widen_test src/kernels/ple_bf16_widen_test.cpp)
++  target_include_directories(ple_bf16_widen_test PRIVATE ${_strata_gpu_include_directories})
++  target_link_libraries(ple_bf16_widen_test PRIVATE strata_kernels ${_strata_gpu_runtime_target})
++  add_test(NAME ple_bf16_widen_test COMMAND ple_bf16_widen_test)
++  set_tests_properties(ple_bf16_widen_test PROPERTIES SKIP_RETURN_CODE 77)
++
+   # Plan v0.3 P7: INT8 KV storage vs a host reference and vs the FP16 path (GPU, synthetic, no model).
+   add_executable(kv_q8_parity src/kernels/kv_q8_parity.cpp)
+   target_include_directories(kv_q8_parity PRIVATE ${_strata_gpu_include_directories})
+diff --git a/engine/include/strata/kernels/ngram.hpp b/engine/include/strata/kernels/ngram.hpp
+index c72a2c5ec..c719d8a0a 100644
+--- a/engine/include/strata/kernels/ngram.hpp
++++ b/engine/include/strata/kernels/ngram.hpp
+@@ -208,6 +208,10 @@ public:
+     /// table: scale 0 and code 8 everywhere, which decode to the +0.0f gather_batch writes) for ple_iq4nl_dequant on the device.  False (nothing
+     /// written) unless the table is in memory (--ple-io ram / mmap) and IQ4_NL.
+     bool gather_raw_iq4nl(const uint32_t* rows, size_t n_tokens, uint8_t* out) const;
++    /// Lossless BF16 prompt upload: n_tokens * 16 * 320 raw bytes, including Direct mode.
++    /// Uses the same bounded row cache and batched reader as gather_batch; out-of-range rows are +0.
++    /// Returns false on a wrong format, pending single-token request, or I/O failure.
++    bool gather_raw_bf16(const uint32_t* rows, size_t n_tokens, uint8_t* out, std::string& err);
+ 
+     /// Fault injection (Direct mode): every row read completes no earlier than `us` after issue.
+     void set_injected_delay_us(double us);
+diff --git a/engine/include/strata/kernels/ple.hpp b/engine/include/strata/kernels/ple.hpp
+index a558e1e27..b9ad04c47 100644
+--- a/engine/include/strata/kernels/ple.hpp
++++ b/engine/include/strata/kernels/ple.hpp
+@@ -128,5 +128,8 @@ bool ple_block_available();
+ /// STRATA_PLE_COMPACT: `rows` raw IQ4_NL PLE rows (PleTable::gather_raw_iq4nl, PLE_ROW_BYTES each) to 160 floats each,
+ /// the floats iq4nl_dequant_row writes (d times the code's value, one multiply), on `stream`.
+ void ple_iq4nl_dequant(const uint8_t* raw, int64_t rows, float* out, void* stream);
++/// Bit-preserving BF16 -> FP32 widening (uint16 << 16), including subnormals, signed zero and NaN payloads.
++/// No tensor conversion or arithmetic rounding; asynchronous on stream.
++void ple_bf16_widen(const uint8_t* raw, int64_t rows, float* out, void* stream);
+ 
+ }  // namespace strata::kernels
+diff --git a/engine/src/kernels/cuda/ple.cu b/engine/src/kernels/cuda/ple.cu
+index 551490b38..de440e6fa 100644
+--- a/engine/src/kernels/cuda/ple.cu
++++ b/engine/src/kernels/cuda/ple.cu
+@@ -412,4 +412,19 @@ void ple_iq4nl_dequant(const uint8_t* raw, int64_t rows, float* out, void* strea
+     ple_iq4nl_dequant_kernel<<<(unsigned) ((n + 255) / 256), 256, 0, (cudaStream_t) stream>>>(raw, n, out);
+ }
+ 
++namespace {
++__global__ void ple_bf16_widen_kernel(const uint8_t* __restrict__ raw, int64_t n, float* __restrict__ out) {
++    const int64_t i = (int64_t) blockIdx.x * blockDim.x + threadIdx.x;
++    if (i < n) {
++        const uint32_t bits = (uint32_t(raw[2 * i]) | (uint32_t(raw[2 * i + 1]) << 8)) << 16;
++        out[i] = __uint_as_float(bits);
++    }
++}
++}
++void ple_bf16_widen(const uint8_t* raw, int64_t rows, float* out, void* stream) {
++    if (rows <= 0) return;
++    const int64_t n = rows * PLE_HEAD_DIM;
++    ple_bf16_widen_kernel<<<(unsigned) ((n + 255) / 256), 256, 0, (cudaStream_t) stream>>>(raw, n, out);
++}
++
+ }  // namespace strata::kernels
+diff --git a/engine/src/kernels/ngram.cpp b/engine/src/kernels/ngram.cpp
+index 8a008d933..791ce5b2f 100644
+--- a/engine/src/kernels/ngram.cpp
++++ b/engine/src/kernels/ngram.cpp
+@@ -840,6 +840,36 @@ bool PleTable::gather_batch(const uint32_t* rows, size_t n_tokens, float* out, s
+     return true;
+ }
+ 
++bool PleTable::gather_raw_bf16(const uint32_t* rows, size_t n_tokens, uint8_t* out, std::string& err) {
++    std::lock_guard<std::recursive_mutex> lk(impl_->mu);
++    if (impl_->pending || impl_->fmt->id != PleFormat::BF16 || !is_open()) {
++        err = "raw BF16 gather requires an open BF16 table without a pending token";
++        return false;
++    }
++    if (n_tokens > SIZE_MAX / ((size_t) PLE_N_HEADS * PLE_ROW_BYTES_BF16) ||
++        (n_tokens && (!rows || !out))) {
++        err = "invalid raw BF16 gather extent or buffer";
++        return false;
++    }
++    if (!n_tokens) return true;
++    wait_prefetches();
++    const size_t n = n_tokens * (size_t) PLE_N_HEADS;
++    if (impl_->mode == PleIo::Direct) {
++        const auto ticket = impl_->reader.issue(rows, n, out);
++        if (!impl_->reader.collect(ticket, err)) return false;
++    } else {
++        // A bounded walk keeps mmap page faults visible to the watchdog too.
++        for (size_t i = 0; i < n; ++i) {
++            uint8_t* dst = out + i * PLE_ROW_BYTES_BF16;
++            if (rows[i] >= impl_->n_rows) std::memset(dst, 0, PLE_ROW_BYTES_BF16);
++            else std::memcpy(dst, impl_->data + (size_t) rows[i] * PLE_ROW_BYTES_BF16, PLE_ROW_BYTES_BF16);
++            if ((i & 255) == 255) strata::core::progress_beat();
++        }
++    }
++    impl_->bytes_read += (uint64_t) n * PLE_ROW_BYTES_BF16;
++    return true;
++}
++
+ bool PleTable::gather_raw_iq4nl(const uint32_t* rows, size_t n_tokens, uint8_t* out) const {
+     std::lock_guard<std::recursive_mutex> lk(impl_->mu);
+     if (impl_->data == nullptr || impl_->fmt->id != PleFormat::IQ4_NL || impl_->rb != PLE_ROW_BYTES) return false;
+diff --git a/engine/src/kernels/ple_bf16_widen_test.cpp b/engine/src/kernels/ple_bf16_widen_test.cpp
+new file mode 100644
+index 000000000..f6f4a29b1
+--- /dev/null
++++ b/engine/src/kernels/ple_bf16_widen_test.cpp
+@@ -0,0 +1,36 @@
++#include "strata/kernels/ple.hpp"
++#include "strata/kernels/ngram.hpp"
++#include <cuda_runtime.h>
++#include <cstdint>
++#include <cstdio>
++#include <cstring>
++#include <vector>
++using namespace strata::kernels;
++int main() {
++    int devices = 0;
++    if (cudaGetDeviceCount(&devices) != cudaSuccess || devices < 1) return 77;
++    constexpr int rows = 411; // 65760 values: every encoding and an odd final block
++    const size_t n = rows * PLE_HEAD_DIM;
++    std::vector<uint8_t> raw(n*2);
++    for (size_t i=0;i<n;++i) { raw[2*i]=uint8_t(i); raw[2*i+1]=uint8_t(i>>8); }
++    uint8_t* d = nullptr; float* out = nullptr;
++    if (cudaMalloc((void**)&d,raw.size()) != cudaSuccess || cudaMalloc((void**)&out,n*4) != cudaSuccess) return 1;
++    cudaStream_t upload, compute; cudaEvent_t copied, used;
++    cudaStreamCreateWithFlags(&upload,cudaStreamNonBlocking); cudaStreamCreateWithFlags(&compute,cudaStreamNonBlocking);
++    cudaEventCreateWithFlags(&copied,cudaEventDisableTiming); cudaEventCreateWithFlags(&used,cudaEventDisableTiming);
++    std::vector<uint32_t> got(n);
++    for (int pass=0;pass<5;++pass) {
++        cudaStreamWaitEvent(upload,used,0);
++        cudaMemcpyAsync(d,raw.data(),raw.size(),cudaMemcpyHostToDevice,upload);
++        cudaEventRecord(copied,upload); cudaStreamWaitEvent(compute,copied,0);
++        ple_bf16_widen(d,rows,out,compute); cudaEventRecord(used,compute);
++        if (cudaStreamSynchronize(compute) != cudaSuccess) return 1;
++        if (cudaMemcpy(got.data(),out,n*4,cudaMemcpyDeviceToHost) != cudaSuccess) return 1;
++        for (size_t i=0;i<n;++i) {
++            const uint32_t want=(uint32_t(raw[2*i]) | uint32_t(raw[2*i+1])<<8)<<16;
++            if (got[i]!=want) { std::fprintf(stderr,"BF16 bits differ at %zu: %08x != %08x\n",i,got[i],want);return 1; }
++        }
++    }
++    cudaFree(d);cudaFree(out);cudaStreamDestroy(upload);cudaStreamDestroy(compute);cudaEventDestroy(copied);cudaEventDestroy(used);
++    std::printf("ple_bf16_widen_test: all 65536 encodings exact, 5 cross-stream passes\n");return 0;
++}
+diff --git a/engine/src/ngram/ple_reader_test.cpp b/engine/src/ngram/ple_reader_test.cpp
+index d709e7484..34b813d57 100644
+--- a/engine/src/ngram/ple_reader_test.cpp
++++ b/engine/src/ngram/ple_reader_test.cpp
+@@ -548,7 +548,44 @@ void ple_files_are_told_from_model_shards(const std::string& dir) {
+     std::printf("ple_gguf_table_only: %zu files checked\n", cases.size());
+ }
+ 
++void raw_bf16_round_trip(const std::string& dir) {
++    const auto& f = k::ple_format_info(k::PleFormat::BF16);
++    const uint32_t count = 4096;
++    const std::string path = write_format_table(dir, f, count);
++    for (auto mode : {k::PleIo::Direct, k::PleIo::Mmap}) for (bool threaded : {false, true}) {
++        k::PleTable t;
++        k::PleIoOptions io; io.mode = mode; io.io_thread = threaded;
++        io.cache_rows = 32; io.max_inflight = 8;
++        std::string err;
++        CHECK(t.open(path, err, io), "raw BF16 open: %s", err.c_str());
++        for (size_t tokens : {size_t(1), size_t(17), size_t(259)}) {
++            const size_t nr = tokens * k::PLE_N_HEADS;
++            std::vector<uint32_t> ids(nr);
++            for (size_t i = 0; i < nr; ++i) ids[i] = (uint32_t)((i * 193) % (count + 3));
++            ids[0] = count; ids[1] = count - 1; ids[2] = 0; ids[3] = count - 1;
++            std::vector<uint8_t> raw(nr * f.row_bytes, 0xcc), want(f.row_bytes);
++            t.prefetch_rows(ids.data());
++            CHECK(t.gather_raw_bf16(ids.data(), tokens, raw.data(), err), "raw BF16 gather: %s", err.c_str());
++            for (size_t i = 0; i < nr; ++i) {
++                if (ids[i] >= count) std::fill(want.begin(), want.end(), 0);
++                else expected_row(ids[i], f.row_bytes, want.data());
++                CHECK(std::memcmp(raw.data()+i*f.row_bytes, want.data(), want.size())==0,
++                      "raw BF16 bytes differ at row %zu", i);
++            }
++        }
++        CHECK(t.gather_raw_bf16(nullptr, 0, nullptr, err), "empty raw BF16");
++        CHECK(!t.gather_raw_bf16(nullptr, SIZE_MAX, nullptr, err), "BF16 extent overflow refused");
++        uint32_t ids[16] = {}; uint8_t raw[16 * k::PLE_ROW_BYTES_BF16];
++        CHECK(t.issue(ids), "pending BF16 token issue");
++        CHECK(!t.gather_raw_bf16(ids, 1, raw, err), "pending token refuses raw gather");
++        float values[16 * k::PLE_HEAD_DIM];
++        CHECK(t.collect(values, err), "pending token can still collect");
++    }
++    std::filesystem::remove(path);
++}
++
+ void all_formats_round_trip(const std::string& dir) {
++    raw_bf16_round_trip(dir);
+     ple_files_are_told_from_model_shards(dir);     // #6026: which --ple-gguf files stay out of the dense shard list
+     bf16_widening_is_exact();                      // BF16's own claim: a shift, exact for every pattern
+     bad_sizes_are_refused(dir);
+diff --git a/engine/src/prefill/prefill.cpp b/engine/src/prefill/prefill.cpp
+index ad14b800a..4f0105b0c 100644
+--- a/engine/src/prefill/prefill.cpp
++++ b/engine/src/prefill/prefill.cpp
+@@ -297,6 +297,10 @@ bool ple_compact_on() {
+ }
+ // STRATA_PLE_COPY_STREAM=1 (opt-in, with PLE_COMPACT): the raw rows go up on a stream of their own instead of the compute
+ // stream, which otherwise idles for the DMA (4.7 MB a 3K chunk = 2.9 ms on a Gen2 x4 link); the same bytes and kernels
++bool ple_bf16_compact_on() {
++    static const bool on = [] { const char* v = std::getenv("STRATA_PLE_BF16_COMPACT"); return v && v[0] == '1'; }();
++    return on;
++}
+ bool ple_copy_stream_on() {
+     static const bool on = [] { const char* v = std::getenv("STRATA_PLE_COPY_STREAM"); return v != nullptr && v[0] == '1'; }();
+     return on;
+@@ -1683,6 +1687,7 @@ struct Prefill::Impl {
+     float* ple_emb_host[2] = {};             // pinned, double-buffered: the next chunk's rows are read while this
+     cudaEvent_t ple_copied[2] = {};          // one runs; the event marks that buffer's upload done
+     std::vector<uint32_t> ple_rows[2];
++    bool ple_bf16 = false;                  // BF16 raw upload, separate from IQ4_NL compact support
+     bool ple_compact[2] = {false, false};    // STRATA_PLE_COMPACT: the pinned buffer holds raw IQ4_NL rows
+     uint8_t* ple_raw_dev = nullptr;          // their device copy (cudaMalloc'd, the chunk's 16 rows a token)
+     cudaStream_t ple_copy = nullptr;         // STRATA_PLE_COPY_STREAM: the raw rows' upload stream (null: on cs)
+@@ -2590,6 +2595,8 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
+         }
+     }
+     pf_mark("init: routing tables (pinned, mapped)", tr_last);
++    m.ple_bf16 = ple_bf16_compact_on() && ss.ple.ready() && ss.ple.table != nullptr &&
++                 std::strcmp(ss.ple.table->format(), "BF16") == 0;
+     for (int b = 0; b < 2; ++b) {
+         if (!m.ple_emb_host[b] &&
+             (force_pageable() || cudaHostAlloc((void**) &m.ple_emb_host[b], (size_t) T * N * 4, cudaHostAllocDefault) != cudaSuccess)) {
+@@ -2600,8 +2607,9 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
+         if (!m.ple_copied[b] && cudaEventCreateWithFlags(&m.ple_copied[b], cudaEventDisableTiming) != cudaSuccess)
+             ok = false;
+         m.ple_rows[b].resize(T * strata::kernels::PLE_N_HEADS);
+-        if (ple_compact_on() && m.ple_raw_dev == nullptr &&
+-            cudaMalloc((void**) &m.ple_raw_dev, (size_t) T * strata::kernels::PLE_N_HEADS * strata::kernels::PLE_ROW_BYTES) != cudaSuccess) {
++        if ((ple_compact_on() || m.ple_bf16) && m.ple_raw_dev == nullptr &&
++            cudaMalloc((void**) &m.ple_raw_dev, (size_t) T * strata::kernels::PLE_N_HEADS *
++                       (m.ple_bf16 ? strata::kernels::PLE_ROW_BYTES_BF16 : strata::kernels::PLE_ROW_BYTES)) != cudaSuccess) {
+             m.ple_raw_dev = nullptr;
+             (void) cudaGetLastError();
+         }
+@@ -4334,6 +4342,11 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+         }
+         // STRATA_PLE_COMPACT=1: the raw rows (1,440 bytes a token instead of 10,240 floats' bytes) into the same pinned
+         // buffer; ple_land uploads them and dequantizes on the device
++        if (m.ple_bf16 && m.ple_pageable[buf].empty() && m.ple_raw_dev != nullptr) {
++            m.ple_compact[buf] = true;
++            return ss.ple.table->gather_raw_bf16(m.ple_rows[buf].data(), (size_t) T,
++                                                (uint8_t*) m.ple_emb_host[buf], e);
++        }
+         if (ple_compact_on() && m.ple_pageable[buf].empty() && m.ple_raw_dev != nullptr &&
+             ss.ple.table->gather_raw_iq4nl(m.ple_rows[buf].data(), (size_t) T, (uint8_t*) m.ple_emb_host[buf])) {
+             m.ple_compact[buf] = true;
+@@ -4531,7 +4544,8 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+                 return false;
+             }
+             // #1996: the pageable fallback (no RAM to pin) goes up through a pinned slot; the pinned buffers as before
+-            const size_t raw_bytes = (size_t) T * strata::kernels::PLE_N_HEADS * strata::kernels::PLE_ROW_BYTES;
++            const size_t raw_bytes = (size_t) T * strata::kernels::PLE_N_HEADS *
++                                     (m.ple_bf16 ? strata::kernels::PLE_ROW_BYTES_BF16 : strata::kernels::PLE_ROW_BYTES);
+             // STRATA_PLE_COPY_STREAM: the raw rows go up on their own stream once the previous chunk's dequant has read
+             // the buffer (ple_raw_free), and the compute stream waits for them (ple_copied) only at the dequant - the
+             // DMA overlaps layer 0 instead of idling the compute queue.  ple_copied still marks that buffer's upload
+@@ -4551,7 +4565,16 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+                 return false;
+             }
+             if (m.ple_compact[ple_buf]) {
+-                strata::kernels::ple_iq4nl_dequant(m.ple_raw_dev, T * strata::kernels::PLE_N_HEADS, m.ple_emb, m.cs);
++                if (m.ple_bf16)
++                    strata::kernels::ple_bf16_widen(m.ple_raw_dev, T * strata::kernels::PLE_N_HEADS, m.ple_emb, m.cs);
++                else
++                    strata::kernels::ple_iq4nl_dequant(m.ple_raw_dev, T * strata::kernels::PLE_N_HEADS, m.ple_emb, m.cs);
++                if (m.ple_bf16) {
++                    static std::atomic<bool> said{false};
++                    if (!said.exchange(true))
++                        std::fprintf(stderr, "prefill: lossless BF16 PLE raw upload: 5120 instead of 10240 bytes/token, %s stream\n",
++                                     ple_side ? "independent copy" : "compute");
++                }
+                 if (ple_side && cudaEventRecord(m.ple_raw_free, m.cs) != cudaSuccess) {
+                     err = std::string("prefill: the PLE rows' upload failed: ") + cudaGetErrorString(cudaGetLastError());
+                     return false;

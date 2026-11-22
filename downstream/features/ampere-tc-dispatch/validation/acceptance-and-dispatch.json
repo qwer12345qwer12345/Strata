@@ -1,0 +1,350 @@
+[
+  {
+    "arm": "reference",
+    "requests": [
+      {
+        "case": "warmup",
+        "round_count": 23,
+        "window_histogram": {
+          "1": 10,
+          "4": 6,
+          "3": 5,
+          "2": 2
+        },
+        "mean_committed_per_timed_round": 2.0434782608695654,
+        "sources": {
+          "neural": {
+            "rounds": 23,
+            "offered": 30,
+            "accepted": 24,
+            "acceptance": 0.8,
+            "fully_accepted_rounds": 19
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "acceptance": null,
+            "fully_accepted_rounds": 0
+          }
+        }
+      },
+      {
+        "case": "long_output",
+        "round_count": 208,
+        "window_histogram": {
+          "4": 5,
+          "3": 75,
+          "5": 2,
+          "6": 2,
+          "2": 7,
+          "1": 10,
+          "7": 107
+        },
+        "mean_committed_per_timed_round": 4.918269230769231,
+        "sources": {
+          "neural": {
+            "rounds": 57,
+            "offered": 102,
+            "accepted": 89,
+            "acceptance": 0.8725490196078431,
+            "fully_accepted_rounds": 51
+          },
+          "lookup": {
+            "rounds": 151,
+            "offered": 730,
+            "accepted": 726,
+            "acceptance": 0.9945205479452055,
+            "fully_accepted_rounds": 149
+          }
+        }
+      },
+      {
+        "case": "context",
+        "round_count": 114,
+        "window_histogram": {
+          "3": 23,
+          "1": 40,
+          "2": 30,
+          "4": 12,
+          "6": 7,
+          "5": 1,
+          "7": 1
+        },
+        "mean_committed_per_timed_round": 2.236842105263158,
+        "sources": {
+          "neural": {
+            "rounds": 110,
+            "offered": 145,
+            "accepted": 133,
+            "acceptance": 0.9172413793103448,
+            "fully_accepted_rounds": 100
+          },
+          "lookup": {
+            "rounds": 4,
+            "offered": 12,
+            "accepted": 8,
+            "acceptance": 0.6666666666666666,
+            "fully_accepted_rounds": 3
+          }
+        }
+      }
+    ],
+    "dense_tc_captures": [],
+    "launches": {
+      "T1/k1": 63,
+      "T2/k1": 39,
+      "T3/k1": 103,
+      "T4/k1": 23,
+      "T5/k1": 3,
+      "T6/k1": 12,
+      "T7/k1": 109,
+      "T8/k1": 1
+    }
+  },
+  {
+    "arm": "compact",
+    "requests": [
+      {
+        "case": "warmup",
+        "round_count": 23,
+        "window_histogram": {
+          "1": 10,
+          "4": 6,
+          "3": 5,
+          "2": 2
+        },
+        "mean_committed_per_timed_round": 2.0434782608695654,
+        "sources": {
+          "neural": {
+            "rounds": 23,
+            "offered": 30,
+            "accepted": 24,
+            "acceptance": 0.8,
+            "fully_accepted_rounds": 19
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "acceptance": null,
+            "fully_accepted_rounds": 0
+          }
+        }
+      },
+      {
+        "case": "long_output",
+        "round_count": 205,
+        "window_histogram": {
+          "4": 5,
+          "3": 33,
+          "5": 2,
+          "6": 148,
+          "2": 7,
+          "1": 10
+        },
+        "mean_committed_per_timed_round": 4.990243902439024,
+        "sources": {
+          "neural": {
+            "rounds": 57,
+            "offered": 102,
+            "accepted": 89,
+            "acceptance": 0.8725490196078431,
+            "fully_accepted_rounds": 51
+          },
+          "lookup": {
+            "rounds": 148,
+            "offered": 734,
+            "accepted": 729,
+            "acceptance": 0.9931880108991825,
+            "fully_accepted_rounds": 146
+          }
+        }
+      },
+      {
+        "case": "context",
+        "round_count": 112,
+        "window_histogram": {
+          "3": 19,
+          "1": 40,
+          "2": 30,
+          "4": 12,
+          "6": 10,
+          "5": 1
+        },
+        "mean_committed_per_timed_round": 2.2767857142857144,
+        "sources": {
+          "neural": {
+            "rounds": 112,
+            "offered": 158,
+            "accepted": 143,
+            "acceptance": 0.9050632911392406,
+            "fully_accepted_rounds": 100
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "acceptance": null,
+            "fully_accepted_rounds": 0
+          }
+        }
+      }
+    ],
+    "dense_tc_captures": [],
+    "launches": {
+      "T1/k1": 63,
+      "T2/k1": 39,
+      "T3/k1": 57,
+      "T4/k1": 23,
+      "T5/k1": 3,
+      "T6/k1": 161,
+      "T7/k1": 1,
+      "T8/k1": 1
+    }
+  },
+  {
+    "arm": "compact-tuned",
+    "requests": [
+      {
+        "case": "warmup",
+        "round_count": 21,
+        "window_histogram": {
+          "1": 9,
+          "4": 4,
+          "3": 4,
+          "2": 1,
+          "6": 2,
+          "5": 1
+        },
+        "mean_committed_per_timed_round": 2.238095238095238,
+        "sources": {
+          "neural": {
+            "rounds": 21,
+            "offered": 35,
+            "accepted": 26,
+            "acceptance": 0.7428571428571429,
+            "fully_accepted_rounds": 17
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "acceptance": null,
+            "fully_accepted_rounds": 0
+          }
+        }
+      },
+      {
+        "case": "long_output",
+        "round_count": 269,
+        "window_histogram": {
+          "4": 22,
+          "3": 41,
+          "6": 116,
+          "2": 27,
+          "1": 37,
+          "5": 23,
+          "8": 3
+        },
+        "mean_committed_per_timed_round": 3.802973977695167,
+        "sources": {
+          "neural": {
+            "rounds": 248,
+            "offered": 792,
+            "accepted": 695,
+            "acceptance": 0.8775252525252525,
+            "fully_accepted_rounds": 203
+          },
+          "lookup": {
+            "rounds": 21,
+            "offered": 76,
+            "accepted": 59,
+            "acceptance": 0.7763157894736842,
+            "fully_accepted_rounds": 12
+          }
+        }
+      },
+      {
+        "case": "context",
+        "round_count": 116,
+        "window_histogram": {
+          "3": 25,
+          "1": 39,
+          "2": 30,
+          "4": 9,
+          "5": 3,
+          "6": 10
+        },
+        "mean_committed_per_timed_round": 2.1982758620689653,
+        "sources": {
+          "neural": {
+            "rounds": 115,
+            "offered": 164,
+            "accepted": 138,
+            "acceptance": 0.8414634146341463,
+            "fully_accepted_rounds": 103
+          },
+          "lookup": {
+            "rounds": 1,
+            "offered": 5,
+            "accepted": 1,
+            "acceptance": 0.2,
+            "fully_accepted_rounds": 0
+          }
+        }
+      }
+    ],
+    "dense_tc_captures": [
+      {
+        "scope": [
+          8,
+          1
+        ],
+        "cat": 1,
+        "var": 30,
+        "type": 13,
+        "ncols": 8,
+        "n_in": 2560,
+        "n_out": 10240,
+        "n": 36
+      },
+      {
+        "scope": [
+          6,
+          1
+        ],
+        "cat": 1,
+        "var": 30,
+        "type": 13,
+        "ncols": 6,
+        "n_in": 2560,
+        "n_out": 10240,
+        "n": 36
+      },
+      {
+        "scope": [
+          7,
+          1
+        ],
+        "cat": 1,
+        "var": 30,
+        "type": 13,
+        "ncols": 7,
+        "n_in": 2560,
+        "n_out": 10240,
+        "n": 36
+      }
+    ],
+    "launches": {
+      "T1/k1": 88,
+      "T2/k1": 58,
+      "T3/k1": 70,
+      "T4/k1": 35,
+      "T5/k1": 27,
+      "T6/k1": 131,
+      "T7/k1": 1,
+      "T8/k1": 4
+    }
+  }
+]

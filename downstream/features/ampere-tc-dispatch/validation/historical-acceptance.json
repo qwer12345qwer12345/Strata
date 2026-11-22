@@ -1,0 +1,130 @@
+[
+  {
+    "case": "warmup",
+    "accepted": 23,
+    "offered": 25,
+    "tokens": 64,
+    "rounds": 41,
+    "decode": 67.8
+  },
+  {
+    "case": "long_output",
+    "accepted": 2232,
+    "offered": 2460,
+    "tokens": 3072,
+    "rounds": 840,
+    "decode": 109.6
+  },
+  {
+    "case": "long_context",
+    "accepted": 858,
+    "offered": 1016,
+    "tokens": 1536,
+    "rounds": 678,
+    "decode": 87.5
+  },
+  {
+    "case": "second_output",
+    "accepted": 2182,
+    "offered": 2396,
+    "tokens": 3072,
+    "rounds": 890,
+    "decode": 109.7
+  },
+  {
+    "case": "warmup",
+    "accepted": 23,
+    "offered": 25,
+    "tokens": 64,
+    "rounds": 41,
+    "decode": 68.8
+  },
+  {
+    "case": "long_output",
+    "accepted": 2247,
+    "offered": 2530,
+    "tokens": 3072,
+    "rounds": 825,
+    "decode": 108.3
+  },
+  {
+    "case": "long_context",
+    "accepted": 896,
+    "offered": 1034,
+    "tokens": 1536,
+    "rounds": 640,
+    "decode": 89.2
+  },
+  {
+    "case": "second_output",
+    "accepted": 2135,
+    "offered": 2378,
+    "tokens": 3072,
+    "rounds": 937,
+    "decode": 107.2
+  },
+  {
+    "case": "warmup",
+    "accepted": 23,
+    "offered": 25,
+    "tokens": 64,
+    "rounds": 41,
+    "decode": 68.9
+  },
+  {
+    "case": "long_output",
+    "accepted": 2219,
+    "offered": 2492,
+    "tokens": 3072,
+    "rounds": 853,
+    "decode": 107.1
+  },
+  {
+    "case": "long_context",
+    "accepted": 962,
+    "offered": 1082,
+    "tokens": 1536,
+    "rounds": 574,
+    "decode": 93.2
+  },
+  {
+    "case": "second_output",
+    "accepted": 2193,
+    "offered": 2456,
+    "tokens": 3072,
+    "rounds": 879,
+    "decode": 109.2
+  },
+  {
+    "case": "warmup",
+    "accepted": 23,
+    "offered": 25,
+    "tokens": 64,
+    "rounds": 41,
+    "decode": 69.0
+  },
+  {
+    "case": "long_output",
+    "accepted": 2283,
+    "offered": 2527,
+    "tokens": 3072,
+    "rounds": 789,
+    "decode": 112.3
+  },
+  {
+    "case": "long_context",
+    "accepted": 909,
+    "offered": 1040,
+    "tokens": 1536,
+    "rounds": 627,
+    "decode": 91.0
+  },
+  {
+    "case": "second_output",
+    "accepted": 2188,
+    "offered": 2497,
+    "tokens": 3072,
+    "rounds": 884,
+    "decode": 107.9
+  }
+]

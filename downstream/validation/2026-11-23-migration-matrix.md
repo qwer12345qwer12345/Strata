@@ -36,3 +36,7 @@
 用户选择旧方案作为一个大补丁直接使用，已完成迁移。完整存档包取代 Live Memory、实验性 Runtime KV Storage 和旧 Shutdown 包的活动地位。工具保护保持独立。
 
 [存档包的实际验收](../features/legacy-session-archive/validation/README.md)覆盖 Host、GPU 及真实模型跨重启。文件后备也保留旧 RAM 准入估算；256K 下的捕获峰值、写回脏页和专家驻留需要无头验收，不能由当前 6K 提示的结果推断。
+
+## 新增且已采用的路径
+
+独立BF16 PLE已接入实际启动选择器；`ple-bf16-compact` 提供 Direct raw row、GPU逐位展开与独立流。`ampere-tc-dispatch` 借用其他GPU测得的整数点积变体，在SM86重新按形状验证；当前只启用DFlash2分派，主模型Dense短窗口候选保留但关闭。原有prior=.5、spec6/conf=.8、成对行不变。

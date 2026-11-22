@@ -49,6 +49,8 @@ downstream/features/<feature-id>/
 | `qsa-imma` | K8V4 Q*K split-INT8 IMMA | 关闭，环境变量 opt-in |
 | `chatml-tool-guard` | Chat Completions 角色边界与完整工具调用发布 | 关闭，配置 `chatml_tool_guard=true` |
 | `legacy-session-archive` | 完整旧 PR5500 V2/V3、Linux 文件后备停放、自动 Chat Completions 保存与正常退出等待（单一大补丁） | 活动；由 managed_server 启用 V2/V3 与同步保存 |
+| `ple-bf16-compact` | Direct BF16 PLE 原始行上传、GPU 无损展开、独立复制流 | opt-in，5120 bytes/token |
+| `ampere-tc-dispatch` | SM86 DFlash2 按形状选 scalar/TC，部分 Dense 短窗口 INT8 TC | opt-in，保留9行全局门槛 |
 
 `live-memory`、`runtime-kv-storage`、`shutdown-persistent-cache` 已从默认活动栈移除，原目录保留作参考，不能与完整存档包叠加使用。
 
@@ -257,4 +259,4 @@ python downstream/scripts/test.py --feature example \
 
 ## 6. 当前验证边界
 
-活动栈目前包含三个计算优化包、一个完整存档包和一个工具边界保护包。独立包与完整栈的 Git tree、SHA256 均校验；硬件与真实模型验收范围见各包 validation。存档迁移依据用户选定的旧方案，未启用 Live Memory 或未完成的 Runtime KV Storage。CI 的补丁校验不能替代真实 GPU、跨重启恢复与无头长上下文峰值验收。
+活动栈目前包含三个原有计算优化包、一个完整存档包、一个工具边界保护包，以及 BF16 PLE 和 SM86 分派两项新包。独立包与完整栈的 Git tree、SHA256 均校验；硬件与真实模型验收范围见各包 validation。存档迁移依据用户选定的旧方案，未启用 Live Memory 或未完成的 Runtime KV Storage。CI 的补丁校验不能替代真实 GPU、跨重启恢复与无头长上下文峰值验收。

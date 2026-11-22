@@ -1,0 +1,109 @@
+diff --git a/engine/cmake/strata_gpu_engine.cmake b/engine/cmake/strata_gpu_engine.cmake
+index 120ebaf87..df232a0a8 100644
+--- a/engine/cmake/strata_gpu_engine.cmake
++++ b/engine/cmake/strata_gpu_engine.cmake
+@@ -526,6 +526,10 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+   add_executable(dflash2_ring_test EXCLUDE_FROM_ALL src/core/dflash2_ring_test.cpp)   # the drafter's ring log and rebuild against an uninterrupted update sequence
+   target_include_directories(dflash2_ring_test PRIVATE ${_strata_gpu_include_directories})
+   target_link_libraries(dflash2_ring_test PRIVATE strata_engine strata_kernels ${_strata_gpu_runtime_target})
++  add_test(NAME dflash2_q4_parity_ampere COMMAND dflash2_q4_parity)
++  set_tests_properties(dflash2_q4_parity_ampere PROPERTIES SKIP_RETURN_CODE 77
++      ENVIRONMENT "STRATA_DF2_AMPERE_TUNING=1;STRATA_DF2_GEMM_TC=2")
++
+   add_executable(dflash2_gemm_bench EXCLUDE_FROM_ALL src/core/dflash2_gemm_bench.cpp)
+   target_include_directories(dflash2_gemm_bench PRIVATE ${_strata_gpu_include_directories})
+   target_link_libraries(dflash2_gemm_bench PRIVATE strata_kernels ${_strata_gpu_runtime_target})
+diff --git a/engine/src/kernels/cuda/dflash2.cu b/engine/src/kernels/cuda/dflash2.cu
+index 2b6014a1f..ad367fe9f 100644
+--- a/engine/src/kernels/cuda/dflash2.cu
++++ b/engine/src/kernels/cuda/dflash2.cu
+@@ -1766,6 +1766,23 @@ void df2_attention_variant(int v) { g_attn_variant = v; }
+ // 110 SMs) for every matrix, within 0-2 us of the best on a 188-SM RTX PRO 6000.  gfx12 (R9700, gfx1201, p620, 8 columns, cold weights, two bench runs): the same shape with unroll 1
+ // (26) is 25-45% faster on every matrix of 1000 rows and more (gate+up 56 -> 44.5 us, down 39 -> 23.4, qkv 26.8 -> 21.4, o 23.6 -> 14.9, fc 61.5 -> 35.2, kv 15.2 -> 10.0), and one
+ // warp a row with unroll 1 (31) is 2x faster on the 256 and 640 row matrices (akp / mkp 12.1 -> 6.3 us, selector 11.1 -> 5.2); all bitwise the same results.
++// Reuse the exact integer-dot row variants measured on AMD, with an SM86-specific shape table.
++// Opt-in: the original auto table and forced variants retain their meanings.
++static bool df2_ampere_tuning() {
++#if !defined(__HIPCC__)
++    static const bool on = [] {
++        const char* e = std::getenv("STRATA_DF2_AMPERE_TUNING");
++        if (!e || e[0] != '1') return false;
++        int dev=0,major=0,minor=0;
++        return cudaGetDevice(&dev)==cudaSuccess &&
++               cudaDeviceGetAttribute(&major,cudaDevAttrComputeCapabilityMajor,dev)==cudaSuccess &&
++               cudaDeviceGetAttribute(&minor,cudaDevAttrComputeCapabilityMinor,dev)==cudaSuccess && major==8 && minor==6;
++    }();
++    return on;
++#else
++    return false;
++#endif
++}
+ static int df2_q4_auto(int rows) {
+ #if defined(STRATA_USE_HIP)
+     static strata::core::PerDeviceFlag<> rdna34_dev;   // per card (#4431): RDNA3 (gfx1100..gfx1151) + RDNA4 (gfx12) Wave32 tuning
+@@ -1845,7 +1862,12 @@ void df2_gemm(const Df2Mat* mats, int n, const void* xq, const float* xd, int n_
+         }
+         return major >= 8;
+     }();
+-    if (tc_gemm_ok && g_gemm_variant == 0 && ncols >= 2 && rows >= 1024 && (rows & 15) == 0) {
++    static const bool shape_tc = [] { const char* e=std::getenv("STRATA_DF2_GEMM_TC"); return e && e[0]=='2'; }();
++    // Mode 2 uses TC only on the measured QKV shape; all other matrices keep their scalar choice.
++    // Mode 1 is the upstream unrestricted opt-in. Mode 2 requires the measured SM86 tuning flag.
++    const bool qkv_tc = df2_ampere_tuning() && mats[0].q4 && n_in==2560 && n==3 &&
++                        mats[0].n_out==4096 && mats[1].n_out==1024 && mats[2].n_out==1024;
++    if (tc_gemm_ok && (!shape_tc || qkv_tc) && g_gemm_variant == 0 && ncols >= 2 && rows >= 1024 && (rows & 15) == 0) {
+         if (mats[0].q4) {
+             gemm_tc_kernel<true><<<rows / 16, 128, 0, st>>>(segs, xqp, xd, n_in, ncols);
+             check("gemm4_tc");
+@@ -1858,7 +1880,13 @@ void df2_gemm(const Df2Mat* mats, int n, const void* xq, const float* xd, int n_
+ #endif
+     if (mats[0].q4) {   // the Q4_0 pack: 4 warps a block when the rows allow, else 2; the rows-a-warp variants (bitwise the same results) by matrix size
+         static const int tune4 = [] { const char* e = std::getenv("STRATA_DF2_GEMM4"); return e ? std::atoi(e) : 0; }();   // 0: the table; 1: 8 rows a warp as before; 10 and up: that variant for every matrix (bench / A/B)
+-        int v4 = g_gemm_variant != 0 ? g_gemm_variant : tune4 >= 10 ? tune4 : tune4 != 0 ? 1 : DF2_Q4_AUTO(rows);
++        int auto4 = DF2_Q4_AUTO(rows);
++        if (df2_ampere_tuning()) {
++            if ((rows==2560 && (n_in==7680 || n_in==12800)) || (n_in==2560 && rows<=640)) auto4=31;
++            else if ((n_in==2560 && (rows==15360 || rows==6144 || rows==2048)) ||
++                     (n_in==4096 && rows==2560)) auto4=26;
++        }
++        int v4 = g_gemm_variant != 0 ? g_gemm_variant : tune4 >= 10 ? tune4 : tune4 != 0 ? 1 : auto4;
+ #define DF2_ROWS4_CASE(V, W, R, U) case V: gemm4_rows_kernel<W, R, U><<<(rows / 8) * (8 / R) / W, W * 32, 0, st>>>(segs, xqp, xd, n_in, ncols); break;
+         switch (v4) {
+             DF2_ROWS4_CASE(10, 4, 4, 2)
+diff --git a/engine/src/kernels/cuda/native_mmvq.cu b/engine/src/kernels/cuda/native_mmvq.cu
+index ea3a1d8bc..699c0c318 100644
+--- a/engine/src/kernels/cuda/native_mmvq.cu
++++ b/engine/src/kernels/cuda/native_mmvq.cu
+@@ -3583,12 +3583,30 @@ static int dense_i8_tc_min_t() {
+     return v;
+ }
+ 
++// Allow only independently measured short-window shapes, without lowering the global 9-row threshold.
++// These are dense projections, not the TQ experts; tiny matrices and Q8_0 keep the original path.
++static bool ampere_dense_i8_shape(int type, int K, int N, int T) {
++#if !defined(__HIPCC__)
++    static const bool on = [] {
++        const char* e=std::getenv("STRATA_DENSE_I8_AMPERE_SHAPES");
++        if (!e || e[0]!='1') return false;
++        int dev=0,major=0,minor=0;
++        return cudaGetDevice(&dev)==cudaSuccess &&
++               cudaDeviceGetAttribute(&major,cudaDevAttrComputeCapabilityMajor,dev)==cudaSuccess &&
++               cudaDeviceGetAttribute(&minor,cudaDevAttrComputeCapabilityMinor,dev)==cudaSuccess && major==8 && minor==6;
++    }();
++    return on && K==2560 && N==10240 &&
++           (((type==12 || type==13) && T>=6 && T<=8) || (type==14 && T==8));
++#else
++    return false;
++#endif
++}
+ void native_mmvq(int ggml_type, const void* weights, const void* x_q8_1, float* y,
+                  int n_in, int n_out, int ncols, void* stream) {
+     // Clean-room MIT coalesced INT8 Tensor Core path (sm_80+: RTX 3090 & RTX 5090):
+-    // Evaluates T >= min_t (default 3; STRATA_DENSE_I8_TC=0 disables; STRATA_DENSE_I8_TC_MIN_T overrides)
++    // Evaluates T >= min_t (default 9; STRATA_DENSE_I8_TC=0 disables; STRATA_DENSE_I8_TC_MIN_T overrides)
+     // up to T=16 in a single coalesced smem-staged weight pass using mma.m16n8k32/k16.
+-    if (n_out >= 1024 && ncols >= dense_i8_tc_min_t() && ncols <= 16 &&
++    if (n_out >= 1024 && (ncols >= dense_i8_tc_min_t() || ampere_dense_i8_shape(ggml_type,n_in,n_out,ncols)) && ncols <= 16 &&
+         dense_i8_tc_type_ok(ggml_type) && dense_i8_tc_decode_enabled()) {
+         if (dense_i8_tc_mmvq(ggml_type, weights, x_q8_1, y, n_in, n_out, ncols, stream)) {
+             strata::dispatch::kernel(strata::dispatch::kDense, 30, ggml_type, n_in, n_out, ncols);

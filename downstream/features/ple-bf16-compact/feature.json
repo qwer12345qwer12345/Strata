@@ -1,0 +1,21 @@
+{
+  "id": "ple-bf16-compact",
+  "name": "Lossless BF16 PLE raw upload and independent copy stream",
+  "version": "0.1.0",
+  "status": "active",
+  "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
+  "patched_tree": "04641572eea2801f852b4066bce6f772be42ec44",
+  "requires": [],
+  "patches": [
+    {
+      "id": "ple-bf16-compact",
+      "path": "patches/0001-ple-bf16-compact.patch",
+      "sha256": "7a5ebe56b189c9de155d0db5a8b49b5f90bdbf3f2b23b68ab273c8b3ef37e7c4"
+    }
+  ],
+  "tests": "tests/test.json",
+  "environment": {
+    "STRATA_PLE_BF16_COMPACT": "1",
+    "STRATA_PLE_COPY_STREAM": "1"
+  }
+}

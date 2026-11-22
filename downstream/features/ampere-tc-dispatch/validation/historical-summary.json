@@ -1,0 +1,29 @@
+[
+  {
+    "case": "long_output",
+    "accepted": 8981,
+    "offered": 10009,
+    "acceptance": 0.8972924368068738,
+    "rounds": 3307,
+    "tokens_per_round": 3.715754460235863,
+    "offered_per_round": 3.0266102207438768
+  },
+  {
+    "case": "long_context",
+    "accepted": 3625,
+    "offered": 4172,
+    "acceptance": 0.8688878235858102,
+    "rounds": 2519,
+    "tokens_per_round": 2.4390631202858275,
+    "offered_per_round": 1.6562127828503375
+  },
+  {
+    "case": "second_output",
+    "accepted": 8698,
+    "offered": 9727,
+    "acceptance": 0.894211987251979,
+    "rounds": 3590,
+    "tokens_per_round": 3.422841225626741,
+    "offered_per_round": 2.7094707520891363
+  }
+]

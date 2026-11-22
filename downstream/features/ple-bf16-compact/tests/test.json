@@ -1,0 +1,16 @@
+{
+  "cmake_args": [],
+  "targets": [],
+  "ctest_regex": "",
+  "optional_targets": {
+    "cuda": [
+      "ple_bf16_widen_test",
+      "ple_reader_test"
+    ]
+  },
+  "optional_ctest_regex": {
+    "cuda": "^(ple_bf16_widen_test|ple_reader_selftest)$"
+  },
+  "overlays": [],
+  "settings_generation": false
+}
