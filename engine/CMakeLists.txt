@@ -665,7 +665,7 @@ if(STRATA_NATIVE_EXPERTS)
   # TQK6/TQK7 and TQ2_T CPU rows: run the same parity suite with the opt-in VEX AVX-VNNI path enabled.
   # On CPUs without AVX-VNNI the dispatcher safely retains the AVX2 implementation.
   add_executable(tq_cpu_parity src/kernels/cpu/tq_cpu_parity.cpp)
-  target_link_libraries(tq_cpu_parity PRIVATE strata_kernels_cpu)
+  target_link_libraries(tq_cpu_parity PRIVATE strata_kernels_cpu ggml-cpu ggml-base)
   add_test(NAME tq_cpu_parity COMMAND tq_cpu_parity)
   add_test(NAME tq_cpu_parity_avxvnni COMMAND tq_cpu_parity)
   set_tests_properties(tq_cpu_parity tq_cpu_parity_avxvnni PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
