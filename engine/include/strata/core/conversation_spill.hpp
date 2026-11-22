@@ -17,6 +17,7 @@
 #include "strata/core/conversation_file.hpp"
 
 #include <condition_variable>
+#include <charconv>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -183,19 +184,55 @@ public:
         dir_ = dir;
         return true;
     }
+
+    // Persistent namespace: one locked directory per model/config identity. Unlike the process-scoped spill
+    // namespace, it survives close/restart and never cleans another identity's files.
+    bool open_persistent(const std::filesystem::path& root, uint64_t model, uint64_t config, std::string& error) {
+        close();
+        std::error_code ec;
+        const auto persistent_root = root / "persistent";
+        std::filesystem::create_directories(persistent_root, ec);
+        if (ec || !std::filesystem::is_directory(root, ec) || std::filesystem::is_symlink(root, ec) ||
+            !std::filesystem::is_directory(persistent_root, ec) || std::filesystem::is_symlink(persistent_root, ec)) {
+            error = "persistent spill folder " + persistent_root.string() + " cannot be used" +
+                    (ec ? ": " + ec.message() : std::string());
+            return false;
+        }
+        const auto dir = persistent_root / (std::to_string(model) + "-" + std::to_string(config));
+        std::filesystem::create_directories(dir, ec);
+        if (ec || !std::filesystem::is_directory(dir, ec) || std::filesystem::is_symlink(dir, ec)) {
+            error = "persistent spill folder " + dir.string() + " cannot be used" +
+                    (ec ? ": " + ec.message() : std::string());
+            return false;
+        }
+        lock_ = spill_detail::try_lock(dir / ".lock");
+        if (lock_ == spill_detail::no_lock()) {
+            error = "persistent spill folder " + dir.string() + ": another engine holds its lock";
+            return false;
+        }
+        root_ = root;
+        dir_ = dir;
+        persistent_ = true;
+        return true;
+    }
+
     void close() {
         if (dir_.empty()) return;
         spill_detail::unlock(lock_);
         lock_ = spill_detail::no_lock();
         std::error_code ec;
-        std::filesystem::remove_all(dir_, ec);
+        if (!persistent_) std::filesystem::remove_all(dir_, ec);
         dir_.clear();
+        persistent_ = false;
     }
     bool is_open() const { return !dir_.empty(); }
     const std::filesystem::path& dir() const { return dir_; }
     /// the file of parked conversation `serial` (a session file; written to a temporary name first by session_file_write)
     std::filesystem::path file_for(uint64_t serial) const {
         return dir_ / ("conv-" + std::to_string(serial) + ".session");
+    }
+    std::filesystem::path meta_for(uint64_t serial) const {
+        return dir_ / ("conv-" + std::to_string(serial) + ".meta");
     }
 
     /// Removes the folders under `root` that are named like a namespace, are real folders (not links) and whose lock can be
@@ -219,6 +256,7 @@ public:
 private:
     std::filesystem::path root_, dir_;
     spill_detail::LockHandle lock_ = spill_detail::no_lock();
+    bool persistent_ = false;
 };
 
 /// The SSD tier's entries: parked conversations written as session files into this process's namespace, oldest first.
@@ -244,8 +282,99 @@ public:
         std::lock_guard<std::mutex> lk(mu_);
         entries_.clear();
         budget_ = SpillBudget{cap, 0, 0};
+        next_serial_ = 1;
+        persistent_ = false;
         return ns_.open(root, error, cleaned);
     }
+    // Persistent L2 mode: rebuild only the small matching index from metadata sidecars; K/V payloads stay on disk.
+    bool open_persistent(const std::filesystem::path& root, uint64_t cap, const SessionFileIdentity& id,
+                         std::string& error, size_t* cleaned = nullptr) {
+        std::lock_guard<std::mutex> lk(mu_);
+        entries_.clear();
+        budget_ = SpillBudget{cap, 0, 0};
+        next_serial_ = 1;
+        persistent_ = false;
+        if (!ns_.open_persistent(root, id.model, id.config, error)) return false;
+        persistent_ = true;
+        size_t removed = 0;
+        if (cap > 0) {
+            std::error_code ec;
+            for (std::filesystem::directory_iterator it(ns_.dir(), ec), end; !ec && it != end; it.increment(ec)) {
+                const auto meta_path = it->path();
+                const std::string name = meta_path.filename().string();
+                if (name.rfind("conv-", 0) != 0 || name.size() <= 10 ||
+                    name.substr(name.size() - 5) != ".meta" || it->is_symlink(ec) || !it->is_regular_file(ec)) continue;
+                const std::string digits = name.substr(5, name.size() - 10);
+                uint64_t serial = 0;
+                const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), serial);
+                if (parsed.ec != std::errc{} || parsed.ptr != digits.data() + digits.size() || serial == 0) {
+                    std::filesystem::remove(meta_path, ec);
+                    ++removed;
+                    continue;
+                }
+                const auto session_path = ns_.file_for(serial);
+                std::error_code e2;
+                if (!std::filesystem::is_regular_file(session_path, e2) || std::filesystem::is_symlink(session_path, e2)) {
+                    std::filesystem::remove(meta_path, e2);
+                    ++removed;
+                    continue;
+                }
+                SavedConversation meta;
+                size_t read = 0;
+                std::string why;
+                SessionReadLimits limits;
+                if (!session_file_read(meta_path.string(), id, meta, read, why, limits)) {
+                    std::filesystem::remove(meta_path, e2);
+                    std::filesystem::remove(session_path, e2);
+                    ++removed;
+                    continue;
+                }
+                const uint64_t file_bytes = std::filesystem::file_size(session_path, e2);
+                if (e2) {
+                    std::filesystem::remove(meta_path, e2);
+                    ++removed;
+                    continue;
+                }
+                const uint64_t meta_bytes = std::filesystem::file_size(meta_path, e2);
+                if (e2 || file_bytes > UINT64_MAX - meta_bytes || file_bytes + meta_bytes > UINT64_MAX - budget_.used) {
+                    std::filesystem::remove(meta_path, e2);
+                    std::filesystem::remove(session_path, e2);
+                    ++removed;
+                    continue;
+                }
+                Entry entry;
+                entry.serial = serial;
+                entry.file = session_path;
+                entry.bytes = file_bytes + meta_bytes;
+                entry.cvec = meta.cvec;
+                entry.live = stub(meta.live);
+                for (const auto& cp : meta.checkpoints) entry.checkpoints.push_back(stub(cp));
+                entries_.push_back(std::move(entry));
+                budget_.used += file_bytes + meta_bytes;
+                if (serial >= next_serial_ && serial != UINT64_MAX) next_serial_ = serial + 1;
+            }
+            // Remove session files left by a crash between the payload publish and metadata publish.
+            for (std::filesystem::directory_iterator it(ns_.dir(), ec), end; !ec && it != end; it.increment(ec)) {
+                const auto p = it->path();
+                const std::string name = p.filename().string();
+                if (name.rfind("conv-", 0) != 0 || name.size() <= 13 ||
+                    name.substr(name.size() - 8) != ".session" || it->is_symlink(ec) || !it->is_regular_file(ec)) continue;
+                const std::string digits = name.substr(5, name.size() - 13);
+                uint64_t serial = 0;
+                const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), serial);
+                if (parsed.ec != std::errc{} || parsed.ptr != digits.data() + digits.size() ||
+                    !std::filesystem::exists(ns_.meta_for(serial), ec)) {
+                    std::filesystem::remove(p, ec);
+                    ++removed;
+                }
+            }
+            std::sort(entries_.begin(), entries_.end(), [](const Entry& a, const Entry& b) { return a.serial < b.serial; });
+            while (budget_.over() && !entries_.empty()) drop_locked(0);
+        }
+        if (cleaned) *cleaned = removed;
+        return true;
+    }
+
     bool enabled() const { std::lock_guard<std::mutex> lk(mu_); return enabled_locked(); }
     size_t size() const { std::lock_guard<std::mutex> lk(mu_); return entries_.size(); }
     uint64_t bytes() const { std::lock_guard<std::mutex> lk(mu_); return budget_.used; }
@@ -265,7 +394,8 @@ public:
     bool put(const SavedConversation& image, const SessionFileIdentity& id, std::string& error, uint64_t* serial_out = nullptr) {
         const uint64_t need = (uint64_t) image.bytes() + (uint64_t(1) << 20);   // the payload and the file's own tables
         uint64_t serial = 0;
-        std::filesystem::path f;
+        std::filesystem::path f, mf;
+        bool persistent = false;
         {
             std::lock_guard<std::mutex> lk(mu_);
             if (!enabled_locked()) { error = "the SSD tier is off"; return false; }
@@ -276,21 +406,34 @@ public:
             }
             serial = next_serial_++;
             f = ns_.file_for(serial);
+            persistent = persistent_;
+            if (persistent) mf = ns_.meta_for(serial);
         }
-        size_t written = 0;
-        const bool ok = session_file_write(f.string(), image, id, written, error);
+        size_t written = 0, meta_written = 0;
+        bool ok = session_file_write(f.string(), image, id, written, error);
+        if (ok && persistent) {
+            SavedConversation meta;
+            meta.geometry = image.geometry;
+            meta.layer_lo = image.layer_lo;
+            meta.layer_hi = image.layer_hi;
+            meta.cvec = image.cvec;
+            meta.live = stub(image.live);
+            for (const auto& c : image.checkpoints) meta.checkpoints.push_back(stub(c));
+            ok = session_file_write(mf.string(), meta, id, meta_written, error);
+        }
         if (!ok) {
             std::error_code ec;
             std::filesystem::remove(f, ec);
+            if (persistent) std::filesystem::remove(mf, ec);
         }
         Entry e;
         if (ok) {
-            e.serial = serial; e.file = f; e.bytes = written; e.cvec = image.cvec;
+            e.serial = serial; e.file = f; e.bytes = written + meta_written; e.cvec = image.cvec;
             e.live = stub(image.live);
             for (const auto& c : image.checkpoints) e.checkpoints.push_back(stub(c));
         }
         std::lock_guard<std::mutex> lk(mu_);
-        budget_.finish(need, ok ? written : 0);
+        budget_.finish(need, ok ? e.bytes : 0);
         if (!ok) return false;
         entries_.push_back(std::move(e));
         while (budget_.over() && entries_.size() > 1) drop_locked(0);   // (a file larger than its estimate)
@@ -327,6 +470,10 @@ public:
             const size_t i = index_locked(serial);
             if (i == SIZE_MAX) { error = "no such SSD entry"; return false; }
             f = entries_[i].file;
+            if (persistent_) {
+                std::error_code ec;
+                std::filesystem::remove(ns_.meta_for(serial), ec);
+            }
             budget_.drop(entries_[i].bytes);
             entries_.erase(entries_.begin() + (std::ptrdiff_t) i);
         }
@@ -366,8 +513,14 @@ public:
     }
     void close() {
         std::lock_guard<std::mutex> lk(mu_);
-        while (!entries_.empty()) drop_locked(entries_.size() - 1);
+        if (!persistent_) {
+            while (!entries_.empty()) drop_locked(entries_.size() - 1);
+        } else {
+            entries_.clear();
+            budget_ = SpillBudget{budget_.cap, 0, 0};
+        }
         ns_.close();
+        persistent_ = false;
     }
 
 private:
@@ -380,6 +533,7 @@ private:
     void drop_locked(size_t i) {
         std::error_code ec;
         std::filesystem::remove(entries_.at(i).file, ec);
+        if (persistent_) std::filesystem::remove(ns_.meta_for(entries_[i].serial), ec);
         budget_.drop(entries_[i].bytes);
         entries_.erase(entries_.begin() + (std::ptrdiff_t) i);
     }
@@ -394,6 +548,7 @@ private:
     SpillBudget budget_;
     std::vector<Entry> entries_;
     uint64_t next_serial_ = 1;
+    bool persistent_ = false;
 };
 
 /// The best prefix a parked image gives `prompt`, by the RAM cache's rule (its live state or a checkpoint, same pictures, same
