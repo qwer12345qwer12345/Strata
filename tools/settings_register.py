@@ -223,7 +223,7 @@ def _backend_of(path: str, flavours: set[str]) -> list[str]:
     return res
 
 
-_INT_RE = re.compile(r"\b(atoi|stoi|strtol|strtoll|strtoul|strtoull|atol|atoll|stoll|stoul|stoull)\b")
+_INT_RE = re.compile(r"\b(atoi|stoi|strtol|strtoll|strtoul|strtoull|atol|atoll|stoll|stoul|stoull|from_chars)\b")
 _FLOAT_RE = re.compile(r"\b(atof|strtod|strtof|stof|stod)\b")
 _NUM = r"-?(?:0x[0-9a-fA-F]+|\d[\d.']*(?:e[+-]?\d+)?)[fFuUlL]*"
 
