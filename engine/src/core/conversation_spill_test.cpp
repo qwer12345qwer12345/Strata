@@ -280,6 +280,10 @@ int main() {
         ConversationSpill first;
         std::string err;
         check(first.open_persistent(root, uint64_t(64) << 20, id, err), "persistent tier opens");
+        ConversationSpill contender;
+        std::string lock_error;
+        check(!contender.open_persistent(root, uint64_t(64) << 20, id, lock_error) &&
+              lock_error.find("lock") != std::string::npos, "persistent namespace lock is exclusive");
         uint64_t serial = 0;
         check(first.put(img({10, 11, 12}, 0x5a), id, err, &serial), "persistent entry written");
         const auto dir = first.dir();
@@ -289,9 +293,14 @@ int main() {
               "payload and metadata sidecar are both published");
         first.close();
         check(fs::is_directory(dir) && fs::is_regular_file(meta), "persistent close keeps the files");
+        { std::ofstream(dir / "conv-999.session") << "orphan payload"; }
+        { std::ofstream(dir / "conv-1000.meta") << "orphan metadata"; }
 
         ConversationSpill second;
-        check(second.open_persistent(root, uint64_t(64) << 20, id, err), "persistent tier reopens");
+        size_t cleaned = 0;
+        check(second.open_persistent(root, uint64_t(64) << 20, id, err, &cleaned), "persistent tier reopens");
+        check(cleaned >= 2 && !fs::exists(dir / "conv-999.session") && !fs::exists(dir / "conv-1000.meta"),
+              "restart removes interrupted payload/metadata orphans");
         check(second.size() == 1 && second.bytes() > 0, "metadata index is rebuilt without loading K/V");
         const auto match = second.best(std::vector<int32_t>{10, 11, 12, 99}, {}, true);
         check(match.tokens == 3 && match.serial == serial, "reopened entry participates in prefix matching");
