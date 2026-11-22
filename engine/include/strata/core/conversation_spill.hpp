@@ -393,7 +393,7 @@ public:
                 entries_.push_back(std::move(entry));
                 budget_.used += file_bytes + meta_bytes;
                 if (serial == UINT64_MAX) next_serial_ = 0;
-                else if (serial >= next_serial_) next_serial_ = serial + 1;
+                else if (next_serial_ != 0 && serial >= next_serial_) next_serial_ = serial + 1;
             }
             // Remove payloads left by a crash before the metadata sidecar was published.
             for (const auto& session_path : session_paths) {
