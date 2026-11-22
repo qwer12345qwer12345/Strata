@@ -8642,10 +8642,10 @@ index 000000000..c803d09c7
 +    return False
 diff --git a/terminal/l2/managed_server.py b/terminal/l2/managed_server.py
 new file mode 100644
-index 000000000..f00f79314
+index 000000000..a7794bebe
 --- /dev/null
 +++ b/terminal/l2/managed_server.py
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,95 @@
 +#!/usr/bin/env python3
 +"""Supervise the single-slot upstream and streaming L2 adapter together."""
 +import argparse,json,os,signal,subprocess,sys,tempfile,threading,time,urllib.request
@@ -8674,6 +8674,14 @@ index 000000000..f00f79314
 + root=Path(__file__).resolve().parents[1]
 + def stop(signum,frame):raise KeyboardInterrupt
 + signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
++ if benchmark and (Path(benchmark['output_dir'])/'spec-shape-lookup.request.json').is_file():
++  try:
++   from l2 import headless_experiments
++   headless_experiments.run_queued(root,cfg,Path(benchmark['output_dir']),backend_port)
++  except KeyboardInterrupt:
++   return
++  except Exception as exc:
++   print(f'Strata spec/形状/lookup 对比结束，继续日常基线启动。{exc}',flush=True)
 + seed=startup_benchmark.profile_seed(cfg) if benchmark else None
 + if benchmark:cfg['env']['STRATA_DRAFT_LOG']='1'
 + backend=dict(cfg,host='127.0.0.1',port=backend_port)

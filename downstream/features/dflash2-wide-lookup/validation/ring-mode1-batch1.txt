@@ -1,0 +1,21 @@
+dflash2_ring_test
+1 rewind (fed to 4227 + 600, rewound to 4227, prompt 4232)
+    rebuilt 578 rows in 4.5 ms, missing 0, slots wrong 578 (wrong tag 0), cold 0
+  every slot of [n - 2047, resume) holds its row, bitwise the original update's                        FAIL
+  only the overwritten slots were rebuilt (the others were already right)                              ok
+  not cold                                                                                             ok
+2 parked (A to 4227, B to 3000, A resumed at 4227)
+    stash hits 1, rebuilt 2042 rows in 15.4 ms (swap 1), slots wrong 2039 (wrong tag 0), stash 8.5 MiB
+  the parked lineage came back from the stash                                                          ok
+  every slot of [n - 2047, resume) holds its row, bitwise the original update's                        FAIL
+  the whole window below resume was rebuilt (a new epoch)                                              ok
+  not cold                                                                                             ok
+3 branch (A to 4927, a request at 3927 with other tokens, the old branch resumed at 4227)
+    stash hits 1, rebuilt 2042 rows, missing 0, slots wrong 2042 (wrong tag 0)
+  the old branch was kept (copy on write) and came back                                                ok
+  the old branch's rows are bitwise the original update's, not the new branch's                        FAIL
+  not cold                                                                                             ok
+5 evicted (stash budget 0)
+    stash hits 0, rebuilt 0, missing 2042, cold 1
+  no log of the lineage: cold, the missing rows are reported                                           ok
+dflash2_ring_test: FAILED

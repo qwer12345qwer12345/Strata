@@ -1,0 +1,1244 @@
+{
+  "kind": "Desktop limited-memory wide lookup correctness/acceptance; 5600 GPU expert slots, 6 GiB RAM, frozen adaptation; NOT headless throughput",
+  "cases": [
+    {
+      "arm": "reference8",
+      "compact": 1,
+      "df2_tc": 2,
+      "shape": 1,
+      "lookup_max_t": 8,
+      "requests": [
+        {
+          "case": "warmup",
+          "seconds": 5.260806363001393,
+          "usage": {
+            "prompt_tokens": 22,
+            "completion_tokens": 48,
+            "total_tokens": 70,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 22,
+            "prompt_ms": 3075.4,
+            "prompt_per_token_ms": 139.791,
+            "prompt_per_second": 7.2,
+            "predicted_n": 48,
+            "predicted_ms": 1767.0,
+            "predicted_per_token_ms": 36.812,
+            "predicted_per_second": 27.2,
+            "draft_n": 33,
+            "draft_n_accepted": 24
+          },
+          "finish": "length",
+          "content_sha256": "f76fb24430c655882adce074dea33091d8f3083a046709fee5f799671ce7b8a6"
+        },
+        {
+          "case": "long_output",
+          "seconds": 26.877340319000723,
+          "usage": {
+            "prompt_tokens": 89,
+            "completion_tokens": 1024,
+            "total_tokens": 1113,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 89,
+            "prompt_ms": 11602.5,
+            "prompt_per_token_ms": 130.365,
+            "prompt_per_second": 7.7,
+            "predicted_n": 1024,
+            "predicted_ms": 14809.0,
+            "predicted_per_token_ms": 14.462,
+            "predicted_per_second": 69.1,
+            "draft_n": 804,
+            "draft_n_accepted": 789
+          },
+          "finish": "length",
+          "content_sha256": "db91c4defd70d7471121764f505159bd6d1a6075cc082ec51e835e7e0a27184b"
+        },
+        {
+          "case": "context",
+          "seconds": 19.833626102999915,
+          "usage": {
+            "prompt_tokens": 6027,
+            "completion_tokens": 384,
+            "total_tokens": 6411,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 6027,
+            "prompt_ms": 12345.3,
+            "prompt_per_token_ms": 2.048,
+            "prompt_per_second": 488.2,
+            "predicted_n": 384,
+            "predicted_ms": 6549.8,
+            "predicted_per_token_ms": 17.057,
+            "predicted_per_second": 58.6,
+            "draft_n": 243,
+            "draft_n_accepted": 218
+          },
+          "finish": "length",
+          "content_sha256": "d71f046e7171ec4b8b42c068cef401f572779cf1947f62197d1efafa8be27da7"
+        }
+      ],
+      "trace": [
+        {
+          "neural": {
+            "rounds": 23,
+            "offered": 33,
+            "accepted": 24,
+            "round_latency_ms": {
+              "samples": 23,
+              "p50": 63.457,
+              "p95": 125.137,
+              "p99": 188.072
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "1": 9,
+            "4": 5,
+            "3": 5,
+            "2": 3,
+            "6": 1
+          },
+          "round_latency_ms_by_width": {
+            "1": {
+              "samples": 9,
+              "p50": 53.393,
+              "p95": 62.607,
+              "p99": 62.607
+            },
+            "4": {
+              "samples": 5,
+              "p50": 118.003,
+              "p95": 188.072,
+              "p99": 188.072
+            },
+            "3": {
+              "samples": 5,
+              "p50": 86.43,
+              "p95": 91.762,
+              "p99": 91.762
+            },
+            "2": {
+              "samples": 3,
+              "p50": 55.579,
+              "p95": 63.457,
+              "p99": 63.457
+            },
+            "6": {
+              "samples": 1,
+              "p50": 89.308,
+              "p95": 89.308,
+              "p99": 89.308
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 57,
+            "offered": 101,
+            "accepted": 89,
+            "round_latency_ms": {
+              "samples": 57,
+              "p50": 45.806,
+              "p95": 75.107,
+              "p99": 95.059
+            }
+          },
+          "lookup": {
+            "rounds": 177,
+            "offered": 703,
+            "accepted": 700,
+            "round_latency_ms": {
+              "samples": 177,
+              "p50": 66.915,
+              "p95": 81.118,
+              "p99": 106.326
+            }
+          },
+          "widths": {
+            "4": 6,
+            "3": 36,
+            "6": 7,
+            "2": 7,
+            "1": 10,
+            "5": 168
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 6,
+              "p50": 56.293,
+              "p95": 95.059,
+              "p99": 95.059
+            },
+            "3": {
+              "samples": 36,
+              "p50": 46.754,
+              "p95": 64.86,
+              "p99": 73.094
+            },
+            "6": {
+              "samples": 7,
+              "p50": 84.624,
+              "p95": 119.321,
+              "p99": 119.321
+            },
+            "2": {
+              "samples": 7,
+              "p50": 41.509,
+              "p95": 47.69,
+              "p99": 47.69
+            },
+            "1": {
+              "samples": 10,
+              "p50": 24.545,
+              "p95": 32.235,
+              "p99": 32.235
+            },
+            "5": {
+              "samples": 168,
+              "p50": 66.915,
+              "p95": 77.236,
+              "p99": 86.031
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 161,
+            "offered": 233,
+            "accepted": 211,
+            "round_latency_ms": {
+              "samples": 161,
+              "p50": 35.949,
+              "p95": 69.263,
+              "p99": 76.055
+            }
+          },
+          "lookup": {
+            "rounds": 4,
+            "offered": 10,
+            "accepted": 7,
+            "round_latency_ms": {
+              "samples": 4,
+              "p50": 42.098,
+              "p95": 65.378,
+              "p99": 65.378
+            }
+          },
+          "widths": {
+            "3": 33,
+            "1": 61,
+            "2": 36,
+            "4": 15,
+            "6": 16,
+            "5": 4
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 33,
+              "p50": 44.825,
+              "p95": 48.695,
+              "p99": 49.315
+            },
+            "1": {
+              "samples": 61,
+              "p50": 26.539,
+              "p95": 29.376,
+              "p99": 30.677
+            },
+            "2": {
+              "samples": 36,
+              "p50": 35.697,
+              "p95": 39.492,
+              "p99": 42.042
+            },
+            "4": {
+              "samples": 15,
+              "p50": 50.751,
+              "p95": 61.78,
+              "p99": 61.78
+            },
+            "6": {
+              "samples": 16,
+              "p50": 69.263,
+              "p95": 76.785,
+              "p99": 76.785
+            },
+            "5": {
+              "samples": 4,
+              "p50": 61.747,
+              "p95": 65.378,
+              "p99": 65.378
+            }
+          }
+        }
+      ],
+      "wide_bridge_exercised": false,
+      "expert_file_blob_read_counts": [
+        11282,
+        161001,
+        207100
+      ],
+      "maximum_observed_window": 6
+    },
+    {
+      "arm": "shape8",
+      "compact": 1,
+      "df2_tc": 2,
+      "shape": 2,
+      "lookup_max_t": 8,
+      "requests": [
+        {
+          "case": "warmup",
+          "seconds": 5.674217994001083,
+          "usage": {
+            "prompt_tokens": 22,
+            "completion_tokens": 48,
+            "total_tokens": 70,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 22,
+            "prompt_ms": 2901.1,
+            "prompt_per_token_ms": 131.868,
+            "prompt_per_second": 7.6,
+            "predicted_n": 48,
+            "predicted_ms": 1816.5,
+            "predicted_per_token_ms": 37.844,
+            "predicted_per_second": 26.4,
+            "draft_n": 33,
+            "draft_n_accepted": 24
+          },
+          "finish": "length",
+          "content_sha256": "f76fb24430c655882adce074dea33091d8f3083a046709fee5f799671ce7b8a6"
+        },
+        {
+          "case": "long_output",
+          "seconds": 23.98037917900001,
+          "usage": {
+            "prompt_tokens": 89,
+            "completion_tokens": 1024,
+            "total_tokens": 1113,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 89,
+            "prompt_ms": 3594.9,
+            "prompt_per_token_ms": 40.392,
+            "prompt_per_second": 24.8,
+            "predicted_n": 1024,
+            "predicted_ms": 19869.4,
+            "predicted_per_token_ms": 19.404,
+            "predicted_per_second": 51.5,
+            "draft_n": 903,
+            "draft_n_accepted": 745
+          },
+          "finish": "length",
+          "content_sha256": "c827ed301ced9b7b4d73e402cefdb2317dc0f8ee461482bad3d654fad269f1bb"
+        },
+        {
+          "case": "context",
+          "seconds": 26.267184549000376,
+          "usage": {
+            "prompt_tokens": 6027,
+            "completion_tokens": 384,
+            "total_tokens": 6411,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 6027,
+            "prompt_ms": 15469.2,
+            "prompt_per_token_ms": 2.567,
+            "prompt_per_second": 389.6,
+            "predicted_n": 384,
+            "predicted_ms": 8549.8,
+            "predicted_per_token_ms": 22.265,
+            "predicted_per_second": 44.9,
+            "draft_n": 264,
+            "draft_n_accepted": 220
+          },
+          "finish": "length",
+          "content_sha256": "18de659d8ff5e0c177a53b380e5f2b0a687319108a522984158cb776aca64a6f"
+        }
+      ],
+      "trace": [
+        {
+          "neural": {
+            "rounds": 23,
+            "offered": 33,
+            "accepted": 24,
+            "round_latency_ms": {
+              "samples": 23,
+              "p50": 60.36,
+              "p95": 192.908,
+              "p99": 229.017
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "1": 9,
+            "4": 5,
+            "3": 5,
+            "2": 3,
+            "6": 1
+          },
+          "round_latency_ms_by_width": {
+            "1": {
+              "samples": 9,
+              "p50": 46.412,
+              "p95": 60.36,
+              "p99": 60.36
+            },
+            "4": {
+              "samples": 5,
+              "p50": 106.737,
+              "p95": 229.017,
+              "p99": 229.017
+            },
+            "3": {
+              "samples": 5,
+              "p50": 77.493,
+              "p95": 100.498,
+              "p99": 100.498
+            },
+            "2": {
+              "samples": 3,
+              "p50": 53.045,
+              "p95": 55.205,
+              "p99": 55.205
+            },
+            "6": {
+              "samples": 1,
+              "p50": 103.274,
+              "p95": 103.274,
+              "p99": 103.274
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 273,
+            "offered": 874,
+            "accepted": 732,
+            "round_latency_ms": {
+              "samples": 273,
+              "p50": 72.874,
+              "p95": 116.926,
+              "p99": 139.486
+            }
+          },
+          "lookup": {
+            "rounds": 5,
+            "offered": 29,
+            "accepted": 13,
+            "round_latency_ms": {
+              "samples": 5,
+              "p50": 98.115,
+              "p95": 111.454,
+              "p99": 111.454
+            }
+          },
+          "widths": {
+            "4": 27,
+            "3": 39,
+            "2": 33,
+            "1": 34,
+            "5": 18,
+            "6": 125,
+            "8": 2
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 27,
+              "p50": 62.575,
+              "p95": 111.56,
+              "p99": 115.037
+            },
+            "3": {
+              "samples": 39,
+              "p50": 54.496,
+              "p95": 95.426,
+              "p99": 109.403
+            },
+            "2": {
+              "samples": 33,
+              "p50": 44.891,
+              "p95": 69.639,
+              "p99": 86.755
+            },
+            "1": {
+              "samples": 34,
+              "p50": 29.726,
+              "p95": 64.457,
+              "p99": 66.702
+            },
+            "5": {
+              "samples": 18,
+              "p50": 72.874,
+              "p95": 139.486,
+              "p99": 139.486
+            },
+            "6": {
+              "samples": 125,
+              "p50": 83.393,
+              "p95": 124.99,
+              "p99": 148.632
+            },
+            "8": {
+              "samples": 2,
+              "p50": 82.868,
+              "p95": 101.325,
+              "p99": 101.325
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 161,
+            "offered": 250,
+            "accepted": 213,
+            "round_latency_ms": {
+              "samples": 161,
+              "p50": 45.867,
+              "p95": 95.049,
+              "p99": 114.229
+            }
+          },
+          "lookup": {
+            "rounds": 2,
+            "offered": 14,
+            "accepted": 7,
+            "round_latency_ms": {
+              "samples": 2,
+              "p50": 94.178,
+              "p95": 118.392,
+              "p99": 118.392
+            }
+          },
+          "widths": {
+            "3": 34,
+            "1": 60,
+            "2": 32,
+            "5": 9,
+            "6": 18,
+            "4": 8,
+            "8": 2
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 34,
+              "p50": 50.094,
+              "p95": 91.038,
+              "p99": 114.229
+            },
+            "1": {
+              "samples": 60,
+              "p50": 30.487,
+              "p95": 58.58,
+              "p99": 122.542
+            },
+            "2": {
+              "samples": 32,
+              "p50": 39.551,
+              "p95": 67.172,
+              "p99": 104.864
+            },
+            "5": {
+              "samples": 9,
+              "p50": 71.961,
+              "p95": 105.178,
+              "p99": 105.178
+            },
+            "6": {
+              "samples": 18,
+              "p50": 78.66,
+              "p95": 106.57,
+              "p99": 106.57
+            },
+            "4": {
+              "samples": 8,
+              "p50": 60.975,
+              "p95": 77.581,
+              "p99": 77.581
+            },
+            "8": {
+              "samples": 2,
+              "p50": 94.178,
+              "p95": 118.392,
+              "p99": 118.392
+            }
+          }
+        }
+      ],
+      "wide_bridge_exercised": false,
+      "expert_file_blob_read_counts": [
+        11282,
+        115109,
+        162261
+      ],
+      "maximum_observed_window": 8
+    },
+    {
+      "arm": "wide12",
+      "compact": 1,
+      "df2_tc": 2,
+      "shape": 2,
+      "lookup_max_t": 12,
+      "requests": [
+        {
+          "case": "warmup",
+          "seconds": 5.325645732000339,
+          "usage": {
+            "prompt_tokens": 22,
+            "completion_tokens": 48,
+            "total_tokens": 70,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 22,
+            "prompt_ms": 2987.6,
+            "prompt_per_token_ms": 135.8,
+            "prompt_per_second": 7.4,
+            "predicted_n": 48,
+            "predicted_ms": 1873.3,
+            "predicted_per_token_ms": 39.027,
+            "predicted_per_second": 25.6,
+            "draft_n": 33,
+            "draft_n_accepted": 24
+          },
+          "finish": "length",
+          "content_sha256": "f76fb24430c655882adce074dea33091d8f3083a046709fee5f799671ce7b8a6"
+        },
+        {
+          "case": "long_output",
+          "seconds": 18.417061879999892,
+          "usage": {
+            "prompt_tokens": 89,
+            "completion_tokens": 1024,
+            "total_tokens": 1113,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 89,
+            "prompt_ms": 3617.0,
+            "prompt_per_token_ms": 40.64,
+            "prompt_per_second": 24.6,
+            "predicted_n": 1024,
+            "predicted_ms": 14365.9,
+            "predicted_per_token_ms": 14.029,
+            "predicted_per_second": 71.3,
+            "draft_n": 850,
+            "draft_n_accepted": 806
+          },
+          "finish": "length",
+          "content_sha256": "8e1e29fd356aea65a8acb6173b23c5d0e5d3527afeb22f460a92cb2729367f4e"
+        },
+        {
+          "case": "context",
+          "seconds": 23.314021742999103,
+          "usage": {
+            "prompt_tokens": 6027,
+            "completion_tokens": 384,
+            "total_tokens": 6411,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 6027,
+            "prompt_ms": 15052.3,
+            "prompt_per_token_ms": 2.497,
+            "prompt_per_second": 400.4,
+            "predicted_n": 384,
+            "predicted_ms": 7705.8,
+            "predicted_per_token_ms": 20.067,
+            "predicted_per_second": 49.8,
+            "draft_n": 296,
+            "draft_n_accepted": 220
+          },
+          "finish": "length",
+          "content_sha256": "2b7706fb12443a62f15db1b925ebeaf022c3f3425530c972452cf83d7d321bba"
+        }
+      ],
+      "trace": [
+        {
+          "neural": {
+            "rounds": 23,
+            "offered": 33,
+            "accepted": 24,
+            "round_latency_ms": {
+              "samples": 23,
+              "p50": 73.852,
+              "p95": 161.242,
+              "p99": 233.341
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "1": 9,
+            "4": 5,
+            "3": 5,
+            "2": 3,
+            "6": 1
+          },
+          "round_latency_ms_by_width": {
+            "1": {
+              "samples": 9,
+              "p50": 46.2,
+              "p95": 66.79,
+              "p99": 66.79
+            },
+            "4": {
+              "samples": 5,
+              "p50": 111.771,
+              "p95": 233.341,
+              "p99": 233.341
+            },
+            "3": {
+              "samples": 5,
+              "p50": 89.867,
+              "p95": 103.223,
+              "p99": 103.223
+            },
+            "2": {
+              "samples": 3,
+              "p50": 55.517,
+              "p95": 75.013,
+              "p99": 75.013
+            },
+            "6": {
+              "samples": 1,
+              "p50": 104.15,
+              "p95": 104.15,
+              "p99": 104.15
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 128,
+            "offered": 258,
+            "accepted": 228,
+            "round_latency_ms": {
+              "samples": 128,
+              "p50": 44.999,
+              "p95": 73.701,
+              "p99": 101.394
+            }
+          },
+          "lookup": {
+            "rounds": 89,
+            "offered": 592,
+            "accepted": 578,
+            "round_latency_ms": {
+              "samples": 89,
+              "p50": 93.838,
+              "p95": 105.403,
+              "p99": 162.278
+            }
+          },
+          "widths": {
+            "4": 19,
+            "3": 55,
+            "2": 16,
+            "1": 25,
+            "6": 14,
+            "5": 7,
+            "10": 1,
+            "8": 80
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 19,
+              "p50": 51.123,
+              "p95": 93.215,
+              "p99": 93.215
+            },
+            "3": {
+              "samples": 55,
+              "p50": 44.099,
+              "p95": 55.734,
+              "p99": 100.54
+            },
+            "2": {
+              "samples": 16,
+              "p50": 35.197,
+              "p95": 54.726,
+              "p99": 54.726
+            },
+            "1": {
+              "samples": 25,
+              "p50": 27.572,
+              "p95": 31.35,
+              "p99": 33.88
+            },
+            "6": {
+              "samples": 14,
+              "p50": 71.358,
+              "p95": 167.888,
+              "p99": 167.888
+            },
+            "5": {
+              "samples": 7,
+              "p50": 70.257,
+              "p95": 94.056,
+              "p99": 94.056
+            },
+            "10": {
+              "samples": 1,
+              "p50": 162.278,
+              "p95": 162.278,
+              "p99": 162.278
+            },
+            "8": {
+              "samples": 80,
+              "p50": 93.869,
+              "p95": 104.757,
+              "p99": 107.033
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 162,
+            "offered": 289,
+            "accepted": 217,
+            "round_latency_ms": {
+              "samples": 162,
+              "p50": 43.128,
+              "p95": 77.745,
+              "p99": 90.121
+            }
+          },
+          "lookup": {
+            "rounds": 1,
+            "offered": 7,
+            "accepted": 3,
+            "round_latency_ms": {
+              "samples": 1,
+              "p50": 87.529,
+              "p95": 87.529,
+              "p99": 87.529
+            }
+          },
+          "widths": {
+            "3": 26,
+            "1": 50,
+            "2": 37,
+            "5": 11,
+            "4": 17,
+            "6": 21,
+            "8": 1
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 26,
+              "p50": 46.507,
+              "p95": 74.009,
+              "p99": 86.359
+            },
+            "1": {
+              "samples": 50,
+              "p50": 28.029,
+              "p95": 41.112,
+              "p99": 84.954
+            },
+            "2": {
+              "samples": 37,
+              "p50": 37.941,
+              "p95": 48.646,
+              "p99": 49.986
+            },
+            "5": {
+              "samples": 11,
+              "p50": 68.65,
+              "p95": 86.748,
+              "p99": 86.748
+            },
+            "4": {
+              "samples": 17,
+              "p50": 54.532,
+              "p95": 75.25,
+              "p99": 75.25
+            },
+            "6": {
+              "samples": 21,
+              "p50": 75.033,
+              "p95": 90.121,
+              "p99": 113.57
+            },
+            "8": {
+              "samples": 1,
+              "p50": 87.529,
+              "p95": 87.529,
+              "p99": 87.529
+            }
+          }
+        }
+      ],
+      "wide_bridge_exercised": true,
+      "expert_file_blob_read_counts": [
+        11445,
+        138519,
+        188646
+      ],
+      "maximum_observed_window": 10
+    },
+    {
+      "arm": "wide16",
+      "compact": 1,
+      "df2_tc": 2,
+      "shape": 2,
+      "lookup_max_t": 16,
+      "requests": [
+        {
+          "case": "warmup",
+          "seconds": 5.03178049500093,
+          "usage": {
+            "prompt_tokens": 22,
+            "completion_tokens": 48,
+            "total_tokens": 70,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 22,
+            "prompt_ms": 2895.4,
+            "prompt_per_token_ms": 131.609,
+            "prompt_per_second": 7.6,
+            "predicted_n": 48,
+            "predicted_ms": 1700.1,
+            "predicted_per_token_ms": 35.419,
+            "predicted_per_second": 28.2,
+            "draft_n": 33,
+            "draft_n_accepted": 24
+          },
+          "finish": "length",
+          "content_sha256": "f76fb24430c655882adce074dea33091d8f3083a046709fee5f799671ce7b8a6"
+        },
+        {
+          "case": "long_output",
+          "seconds": 25.528928986999745,
+          "usage": {
+            "prompt_tokens": 89,
+            "completion_tokens": 1024,
+            "total_tokens": 1113,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 89,
+            "prompt_ms": 9715.2,
+            "prompt_per_token_ms": 109.16,
+            "prompt_per_second": 9.2,
+            "predicted_n": 1024,
+            "predicted_ms": 14902.8,
+            "predicted_per_token_ms": 14.554,
+            "predicted_per_second": 68.7,
+            "draft_n": 742,
+            "draft_n_accepted": 725
+          },
+          "finish": "length",
+          "content_sha256": "db91c4defd70d7471121764f505159bd6d1a6075cc082ec51e835e7e0a27184b"
+        },
+        {
+          "case": "context",
+          "seconds": 20.55517411099936,
+          "usage": {
+            "prompt_tokens": 6027,
+            "completion_tokens": 384,
+            "total_tokens": 6411,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 6027,
+            "prompt_ms": 13280.2,
+            "prompt_per_token_ms": 2.203,
+            "prompt_per_second": 453.8,
+            "predicted_n": 384,
+            "predicted_ms": 6740.8,
+            "predicted_per_token_ms": 17.554,
+            "predicted_per_second": 57.0,
+            "draft_n": 240,
+            "draft_n_accepted": 218
+          },
+          "finish": "length",
+          "content_sha256": "d71f046e7171ec4b8b42c068cef401f572779cf1947f62197d1efafa8be27da7"
+        }
+      ],
+      "trace": [
+        {
+          "neural": {
+            "rounds": 23,
+            "offered": 33,
+            "accepted": 24,
+            "round_latency_ms": {
+              "samples": 23,
+              "p50": 60.865,
+              "p95": 153.905,
+              "p99": 195.879
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "1": 9,
+            "4": 5,
+            "3": 5,
+            "2": 3,
+            "6": 1
+          },
+          "round_latency_ms_by_width": {
+            "1": {
+              "samples": 9,
+              "p50": 37.572,
+              "p95": 55.842,
+              "p99": 55.842
+            },
+            "4": {
+              "samples": 5,
+              "p50": 114.857,
+              "p95": 195.879,
+              "p99": 195.879
+            },
+            "3": {
+              "samples": 5,
+              "p50": 75.521,
+              "p95": 86.779,
+              "p99": 86.779
+            },
+            "2": {
+              "samples": 3,
+              "p50": 49.304,
+              "p95": 60.865,
+              "p99": 60.865
+            },
+            "6": {
+              "samples": 1,
+              "p50": 104.318,
+              "p95": 104.318,
+              "p99": 104.318
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 57,
+            "offered": 101,
+            "accepted": 89,
+            "round_latency_ms": {
+              "samples": 57,
+              "p50": 43.703,
+              "p95": 63.744,
+              "p99": 92.911
+            }
+          },
+          "lookup": {
+            "rounds": 241,
+            "offered": 641,
+            "accepted": 636,
+            "round_latency_ms": {
+              "samples": 241,
+              "p50": 44.534,
+              "p95": 79.06,
+              "p99": 86.177
+            }
+          },
+          "widths": {
+            "4": 6,
+            "3": 219,
+            "6": 55,
+            "2": 7,
+            "1": 10,
+            "5": 1
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 6,
+              "p50": 54.99,
+              "p95": 92.911,
+              "p99": 92.911
+            },
+            "3": {
+              "samples": 219,
+              "p50": 43.743,
+              "p95": 48.99,
+              "p99": 54.577
+            },
+            "6": {
+              "samples": 55,
+              "p50": 75.441,
+              "p95": 86.177,
+              "p99": 93.324
+            },
+            "2": {
+              "samples": 7,
+              "p50": 35.087,
+              "p95": 43.703,
+              "p99": 43.703
+            },
+            "1": {
+              "samples": 10,
+              "p50": 22.896,
+              "p95": 32.6,
+              "p99": 32.6
+            },
+            "5": {
+              "samples": 1,
+              "p50": 81.66,
+              "p95": 81.66,
+              "p99": 81.66
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 161,
+            "offered": 229,
+            "accepted": 210,
+            "round_latency_ms": {
+              "samples": 161,
+              "p50": 37.027,
+              "p95": 69.035,
+              "p99": 78.523
+            }
+          },
+          "lookup": {
+            "rounds": 4,
+            "offered": 11,
+            "accepted": 8,
+            "round_latency_ms": {
+              "samples": 4,
+              "p50": 41.045,
+              "p95": 75.055,
+              "p99": 75.055
+            }
+          },
+          "widths": {
+            "3": 34,
+            "1": 60,
+            "2": 38,
+            "4": 14,
+            "6": 16,
+            "5": 3
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 34,
+              "p50": 43.502,
+              "p95": 56.785,
+              "p99": 64.897
+            },
+            "1": {
+              "samples": 60,
+              "p50": 26.506,
+              "p95": 34.422,
+              "p99": 67.141
+            },
+            "2": {
+              "samples": 38,
+              "p50": 36.331,
+              "p95": 48.741,
+              "p99": 54.622
+            },
+            "4": {
+              "samples": 14,
+              "p50": 52.288,
+              "p95": 62.565,
+              "p99": 62.565
+            },
+            "6": {
+              "samples": 16,
+              "p50": 69.608,
+              "p95": 79.348,
+              "p99": 79.348
+            },
+            "5": {
+              "samples": 3,
+              "p50": 56.716,
+              "p95": 57.827,
+              "p99": 57.827
+            }
+          }
+        }
+      ],
+      "wide_bridge_exercised": false,
+      "expert_file_blob_read_counts": [
+        11445,
+        164618,
+        210567
+      ],
+      "maximum_observed_window": 6
+    }
+  ],
+  "min_mem_available_kib": 14727160,
+  "status": "passed",
+  "limitations": [
+    "Desktop correctness/coverage only; expert file reads exist. Do not rank kernel latency from these whole-request speeds.",
+    "Long code outputs are 1024 tokens; the queued headless comparisons use 3072 and 1536 tokens.",
+    "Shape8 and wide12 emitted different text; the cause of whole-model divergence is not isolated. Fixed-input real drafter states match between shape modes.",
+    "The 16 cap did not exercise a >8 lookup in this short run; it is not an API T16 coverage claim."
+  ]
+}

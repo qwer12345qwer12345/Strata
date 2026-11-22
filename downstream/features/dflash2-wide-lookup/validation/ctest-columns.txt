@@ -1,0 +1,9 @@
+Test project <build>
+    Start 116: dflash2_q4_parity_ampere
+1/2 Test #116: dflash2_q4_parity_ampere ...........   Passed    1.71 sec
+    Start 117: dflash2_q4_parity_ampere_columns
+2/2 Test #117: dflash2_q4_parity_ampere_columns ...   Passed    1.58 sec
+
+100% tests passed out of 2
+
+Total Test time (real) =   3.29 sec

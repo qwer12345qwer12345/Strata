@@ -1,0 +1,14 @@
+[
+  {
+    "label": "ring-mode0-batch1",
+    "returncode": 1
+  },
+  {
+    "label": "ring-mode1-batch1",
+    "returncode": 1
+  },
+  {
+    "label": "ring-mode2-batch0",
+    "returncode": 0
+  }
+]

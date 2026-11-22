@@ -1,0 +1,828 @@
+diff --git a/engine/cmake/strata_gpu_engine.cmake b/engine/cmake/strata_gpu_engine.cmake
+index 120ebaf87..6f534f422 100644
+--- a/engine/cmake/strata_gpu_engine.cmake
++++ b/engine/cmake/strata_gpu_engine.cmake
+@@ -1365,6 +1365,12 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+     add_test(NAME pinned_capture COMMAND pinned_capture)
+   endif()
+ 
++  if(STRATA_ENABLE_CUDA)
++    add_executable(dflash2_wide_test EXCLUDE_FROM_ALL src/core/dflash2_wide_test.cpp)
++    target_include_directories(dflash2_wide_test PRIVATE ${_strata_gpu_include_directories})
++    target_link_libraries(dflash2_wide_test PRIVATE strata_engine strata_kernels ${_strata_gpu_runtime_target})
++  endif()
++
+   # Tells tests/CMakeLists.txt to add the CUDA-dependent Catch2 target.  It cannot be declared there
+   # unconditionally: tests/ is added at the end of this file, but the flag has to be known before it runs.
+   if(STRATA_ENABLE_CUDA)
+diff --git a/engine/include/strata/core/dflash2.hpp b/engine/include/strata/core/dflash2.hpp
+index 92a864914..fce839f54 100644
+--- a/engine/include/strata/core/dflash2.hpp
++++ b/engine/include/strata/core/dflash2.hpp
+@@ -137,6 +137,12 @@ public:
+     /// selector's pick and its probability).  The taps pointer must be the same device buffer on every call (graphs are captured on it).
+     bool draft(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err);
+ 
++    /// Opt-in solo serve bridge for lookup windows of 9..16 rows. Prefix rows enter the
++    /// existing context ring; only the final row launches the unchanged eight-row block.
++    /// Synchronous: the caller owns the taps until return. Normal 1..8 calls are unchanged.
++    bool draft_extended(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err);
++    uint64_t wide_rounds = 0, wide_rows = 0;
++
+     /// draft() in two halves: draft_launch queues the round's graph and returns, draft_finish waits and reads the picks.  Several drafters (batch slots, each on its
+     /// own stream) can launch first and finish after, so their graphs run at the same time.
+     bool draft_launch(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, std::string& err);
+@@ -235,6 +241,7 @@ private:
+     int32_t *toptok_ = nullptr, *out_tok_ = nullptr;
+     uint32_t* topscratch_ = nullptr;
+     cudaGraphExec_t exec_[kRows + 1] = {};
++    cudaGraphExec_t wide_exec_ = nullptr;   ///< one-row graph bound to the existing landing buffer
+     const float* graph_taps_ = nullptr;
+     int ndraft_ = kDrafts;          ///< drafts a window can use (set_max_drafts)
+     int64_t have_ctx_ = 0;
+diff --git a/engine/src/core/dflash2.cpp b/engine/src/core/dflash2.cpp
+index 4d4d2f443..c37d2546b 100644
+--- a/engine/src/core/dflash2.cpp
++++ b/engine/src/core/dflash2.cpp
+@@ -45,6 +45,7 @@ Dflash2Drafter::~Dflash2Drafter() {
+     if (cs_) cudaStreamSynchronize(cs_);
+     for (cudaGraphExec_t& e : exec_)
+         if (e) cudaGraphExecDestroy(e);
++    if (wide_exec_) cudaGraphExecDestroy(wide_exec_);
+     auto fr = [](void* p) { if (p) cudaFree(p); };
+     if (h_logq_) cudaFreeHost(h_logq_);
+     if (h_logd_) cudaFreeHost(h_logd_);
+@@ -731,6 +732,7 @@ void Dflash2Drafter::set_max_drafts(int n) {
+     cudaDeviceSynchronize();
+     for (auto& e : exec_)
+         if (e) { cudaGraphExecDestroy(e); e = nullptr; }
++    if (wide_exec_) { cudaGraphExecDestroy(wide_exec_); wide_exec_ = nullptr; }
+     graph_taps_ = nullptr;
+     ndraft_ = n;
+ }
+@@ -1157,6 +1159,48 @@ bool Dflash2Drafter::draft(const float* taps, int n_new, int64_t pos0, int32_t a
+     return draft_launch(taps, n_new, pos0, anchor, err) && draft_finish(drafts, probs, err);
+ }
+ 
++bool Dflash2Drafter::draft_extended(const float* taps, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err) {
++    if (n_new >= 1 && n_new <= kRows) return draft(taps, n_new, pos0, anchor, drafts, probs, err);
++    const char* enabled = std::getenv("STRATA_DF2_WIDE_CONTEXT");
++    if (!enabled || std::strcmp(enabled, "1") != 0 || n_new <= kRows || n_new > 16 ||
++        !bound_ || !taps || !landing_ || launched_ || (graph_taps_ && graph_taps_ != taps)) {
++        err = "dflash2: wide context requires STRATA_DF2_WIDE_CONTEXT=1, stable taps and 9..16 committed rows";
++        return false;
++    }
++    const OnDevice on_device(device_);
++    const auto t0 = Clock::now();
++    // Reuse the narrow context scratch. A 9..16-row lookup must not allocate the
++    // large prompt-context batch arena. Chunking also matches ring-log rebuild GEMMs.
++    const size_t row = taps_.size() * (size_t) N_;
++    for (int from = 0; from < n_new - 1; from += kRows) {
++        const int count = std::min(kRows, n_new - 1 - from);
++        if (!context(taps + (size_t) from * row, count, pos0 + from, err)) return false;
++    }
++    if (cudaMemcpyAsync(landing_, taps + (size_t) (n_new - 1) * row, row * sizeof(float), cudaMemcpyDeviceToDevice, cs_) != cudaSuccess) {
++        err = "dflash2: wide context landing copy failed";
++        return false;
++    }
++    const double prefix_ms = ms_since(t0);
++    // Keep all normal graphs bound to their original buffer. The synchronous bridge
++    // borrows slot 1 only while using its own graph, so subsequent narrow calls replay
++    // exactly the original graph. Restore on every return, including capture failures.
++    struct Restore {
++        cudaGraphExec_t &slot, &wide;
++        const float*& taps;
++        cudaGraphExec_t old;
++        const float* old_taps;
++        ~Restore() { wide = slot; slot = old; taps = old_taps; }
++    } restore{exec_[1], wide_exec_, graph_taps_, exec_[1], graph_taps_};
++    exec_[1] = wide_exec_;
++    graph_taps_ = landing_;
++    if (!draft(landing_, 1, pos0 + n_new - 1, anchor, drafts, probs, err)) return false;
++    ms_draft += prefix_ms;
++    ++wide_rounds;
++    wide_rows += n_new;
++    if (wide_rounds == 1) std::fprintf(stderr, "dflash2: wide context bridge active (%d committed rows, unchanged 8-row block)\n", n_new);
++    return true;
++}
++
+ bool Dflash2Drafter::draft_launch(const float* taps, int n_new, int64_t pos0, int32_t anchor, std::string& err) {
+     if (!bound_) { err = "dflash2: not bound"; return false; }
+     if (!context_wait(err)) return false;
+diff --git a/engine/src/core/dflash2_wide_test.cpp b/engine/src/core/dflash2_wide_test.cpp
+new file mode 100644
+index 000000000..460c23da1
+--- /dev/null
++++ b/engine/src/core/dflash2_wide_test.cpp
+@@ -0,0 +1,68 @@
++// Real Q4 drafter: wide bridge versus explicit context + unchanged one-row draft.
++#include "strata/core/dflash2.hpp"
++#include <cuda_runtime.h>
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <stdexcept>
++#include <vector>
++using strata::core::Dflash2Drafter;
++int main(int argc,char**argv) {
++ if(argc!=2){std::fprintf(stderr,"usage: dflash2_wide_test PACK\n");return 2;}
++ try {
++  auto ck=[](bool b,const std::string&s){if(!b)throw std::runtime_error(s);};
++  auto cu=[&](cudaError_t e){ck(e==cudaSuccess,cudaGetErrorString(e));};
++  constexpr int H=2560,T=12800,V=64;
++  float *tap,*last,*emb; uint8_t*head;
++  cu(cudaMalloc(&tap,16*T*4));cu(cudaMalloc(&last,8*T*4));cu(cudaMalloc(&emb,8*H*4));
++  std::vector<float> e(8*H);for(size_t i=0;i<e.size();++i)e[i]=std::sin(float(i)*.013f)*.25f;
++  cu(cudaMemcpy(emb,e.data(),e.size()*4,cudaMemcpyHostToDevice));
++  // Packed Q8_0 native head, nonuniform signed values and finite fp16 scales.
++  std::vector<uint8_t> hh(V*(H/32)*34);uint32_t rs=349;
++  for(size_t b=0;b<hh.size();b+=34){hh[b]=0x1f;hh[b+1]=0x21;for(int j=2;j<34;++j){rs=rs*1664525+1013904223;hh[b+j]=rs>>24;}}
++  cu(cudaMalloc(&head,hh.size()));cu(cudaMemcpy(head,hh.data(),hh.size(),cudaMemcpyHostToDevice));
++  std::vector<int32_t> vocab(V);for(int i=0;i<V;++i)vocab[i]=i+10;
++  auto embed=[&](const int32_t*,int n,float*out,cudaStream_t st){cu(cudaMemcpyAsync(out,emb,n*H*4,cudaMemcpyDeviceToDevice,st));};
++  Dflash2Drafter ref,wide;std::string err;
++  for(auto*d:{&ref,&wide}){ck(d->load(argv[1],0,err),err);ck(d->bind_raw(embed,head,8,V,vocab,err),err);d->set_max_drafts(5);}
++  ck(ref.prepare(last,err),err);ck(wide.prepare(tap,err),err);
++  const uint64_t initial=wide.vram_bytes();
++  int64_t pos=2040;
++  auto equal=[&](){std::vector<float>a,b;std::vector<int64_t>ta,tb;ck(ref.debug_ring(a,ta,err),err);ck(wide.debug_ring(b,tb,err),err);ck(a.size()==b.size()&&memcmp(a.data(),b.data(),a.size()*4)==0&&ta==tb,"ring or epoch tags differ");};
++  int32_t a[7],b[7];float pa[7],pb[7];
++  // Off and invalid calls must reject before modifying the context ring.
++  unsetenv("STRATA_DF2_WIDE_CONTEXT");
++  ck(!wide.draft_extended(tap,9,pos,4,b,pb,err),"wide unexpectedly enabled");equal();
++  setenv("STRATA_DF2_WIDE_CONTEXT","1",1);
++  for(int invalid:{0,17,-1}) { ck(!wide.draft_extended(tap,invalid,pos,4,b,pb,err),"invalid width accepted"); }
++  equal();
++  for(int rows:{9,1,12,4,16,8,9,12,16}) {
++   std::vector<float> ht(rows*T);for(size_t i=0;i<ht.size();++i){rs=rs*1664525+1013904223;ht[i]=(int(rs>>16)-32768)/32768.f;}
++   cu(cudaMemcpy(tap,ht.data(),ht.size()*4,cudaMemcpyHostToDevice));
++   cu(cudaDeviceSynchronize()); // pageable H2D must complete before either nonblocking stream reads taps
++   if(rows>8){for(int from=0;from<rows-1;from+=8)ck(ref.context(tap+from*T,std::min(8,rows-1-from),pos+from,err),err);cu(cudaMemcpyAsync(last,tap+(rows-1)*T,T*4,cudaMemcpyDeviceToDevice,ref.stream()));ck(ref.draft(last,1,pos+rows-1,4,a,pa,err),err);}
++   else {cu(cudaMemcpyAsync(last,tap,rows*T*4,cudaMemcpyDeviceToDevice,ref.stream()));ck(ref.draft(last,rows,pos,4,a,pa,err),err);}
++   ck(wide.draft_extended(tap,rows,pos,4,b,pb,err),err);
++   bool same=memcmp(a,b,sizeof(a))==0&&memcmp(pa,pb,sizeof(pa))==0;
++   if(!same)for(int j=0;j<7;++j)std::fprintf(stderr,"rows=%d pick %d ref=%d %.9g wide=%d %.9g\n",rows,j,a[j],pa[j],b[j],pb[j]);
++   equal();ck(same,"draft tokens or probabilities differ");
++   std::vector<float> fn;ck(wide.debug_rows(fn,err),err);
++   uint64_t hash=1469598103934665603ull;
++   auto mix=[&](const void* data,size_t n){auto*p=static_cast<const unsigned char*>(data);for(size_t i=0;i<n;++i){hash^=p[i];hash*=1099511628211ull;}};
++   mix(b,sizeof(b));mix(pb,sizeof(pb));mix(fn.data(),fn.size()*sizeof(float));
++   std::printf("state rows=%d hash=%016llx\n",rows,(unsigned long long)hash);
++   std::vector<int32_t> ids(rows);for(int i=0;i<rows;++i)ids[i]=int(pos+i)%V;
++   ref.note_rows(ids.data(),rows,pos);wide.note_rows(ids.data(),rows,pos);
++   std::printf("rows=%d pos=%lld tokens/probabilities/ring/tags bitwise equal\n",rows,(long long)pos);pos+=rows;
++   // Changing spec invalidates both the normal and landing graph caches.
++   if(rows==16){ref.set_max_drafts(3);wide.set_max_drafts(3);ck(ref.prepare(last,err),err);ck(wide.prepare(tap,err),err);}
++  }
++  ck(wide.wide_rounds==6&&wide.wide_rows==74,"wide counters differ");
++  ck(initial==wide.vram_bytes(),"bridge allocated model or scratch VRAM");
++  std::printf("dflash2_wide_test: PASS (6 wide + 3 narrow, ring wrap, graph invalidation, no extra arena)\n");
++  // Drafters die before their bound buffers are released by CUDA process teardown.
++  return 0;
++ }catch(const std::exception&e){std::fprintf(stderr,"FAIL: %s\n",e.what());return 1;}
++}
+diff --git a/engine/src/program/generate.cpp b/engine/src/program/generate.cpp
+index 9d57f2b40..07b209a62 100644
+--- a/engine/src/program/generate.cpp
++++ b/engine/src/program/generate.cpp
+@@ -21784,7 +21784,7 @@ int main(int argc, char** argv) {
+                 int32_t dd[strata::core::Dflash2Drafter::kDrafts];
+                 float pp[strata::core::Dflash2Drafter::kDrafts];
+                 const float* tp = df2_win_taps(a_ + 1, err);
+-                if (tp == nullptr || !df2.draft(tp, a_ + 1, p, outv[(size_t) a_], dd, pp, err)) return false;
++                if (tp == nullptr || !df2.draft_extended(tp, a_ + 1, p, outv[(size_t) a_], dd, pp, err)) return false;
+                 for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
+                 if (ss.ple.ready() && ss.ple.table != nullptr) {   // the PLE rows of the next window's tokens, read ahead (as the MTP's draft does)
+                     int n_pf = 0;
+@@ -21828,7 +21828,7 @@ int main(int argc, char** argv) {
+                     } else {
+                         int32_t dd[strata::core::Dflash2Drafter::kDrafts];
+                         float pp[strata::core::Dflash2Drafter::kDrafts];
+-                        if (!df2.draft(ver.tap_dev(), dfr_n, dfr_pos, dfr_anchor, dd, pp, err)) { std::printf("ERR %s\n", err.c_str()); return 1; }
++                        if (!df2.draft_extended(ver.tap_dev(), dfr_n, dfr_pos, dfr_anchor, dd, pp, err)) { std::printf("ERR %s\n", err.c_str()); return 1; }
+                         for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
+                     }
+                 }
+@@ -24061,7 +24061,7 @@ int main(int argc, char** argv) {
+                 if (wait_commit_first && !ver.wait_commit(err)) return false;
+                 int32_t dd[strata::core::Dflash2Drafter::kDrafts];
+                 float pp[strata::core::Dflash2Drafter::kDrafts];
+-                if (!df2.draft(ver.tap_dev(), a_ + 1, p, outv[(size_t) a_], dd, pp, err)) return false;
++                if (!df2.draft_extended(ver.tap_dev(), a_ + 1, p, outv[(size_t) a_], dd, pp, err)) return false;
+                 for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
+                 // what the MTP does while it drafts: the PLE rows of the tokens the next window will hold are read ahead
+                 // (the window's gather would otherwise wait for them: 1.8 ms a round on strix)
+@@ -24108,7 +24108,7 @@ int main(int argc, char** argv) {
+                 } else {
+                     int32_t dd[strata::core::Dflash2Drafter::kDrafts];
+                     float pp[strata::core::Dflash2Drafter::kDrafts];
+-                    if (!df2.draft(ver.tap_dev(), dfr_n, dfr_pos, dfr_anchor, dd, pp, err)) { std::fprintf(stderr, "strata generate: %s\n", err.c_str()); return 1; }
++                    if (!df2.draft_extended(ver.tap_dev(), dfr_n, dfr_pos, dfr_anchor, dd, pp, err)) { std::fprintf(stderr, "strata generate: %s\n", err.c_str()); return 1; }
+                     for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
+                 }
+             }
+diff --git a/terminal/l2/chat_latency.py b/terminal/l2/chat_latency.py
+new file mode 100644
+index 000000000..95e38a2e7
+--- /dev/null
++++ b/terminal/l2/chat_latency.py
+@@ -0,0 +1,121 @@
++#!/usr/bin/env python3
++"""Measure local Strata Chat Completions with synthetic prompts."""
++import argparse
++import hashlib
++import json
++import math
++from pathlib import Path
++import time
++import urllib.request
++
++TIMING_FIELDS = ('prompt_n', 'prompt_ms', 'predicted_n', 'predicted_ms',
++                 'predicted_per_token_ms', 'predicted_per_second', 'prompt_per_token_ms',
++                 'prompt_per_second', 'draft_n', 'draft_n_accepted', 'cache_n')
++
++
++def workloads():
++    faults = ('checksum mismatch', 'stale index', 'clock skew', 'orphaned segment')
++    records = '\n'.join(
++        f'Record {10000 + i}, shard {(i * 223) % 81817}: detected {faults[i % len(faults)]}; '
++        f'restored journal offset {(i * 3817) % 2750089}; '
++        f'operator {i % 17} verified page {i * 9 % 6101} and reopened the shard.'
++        for i in range(600)
++    )
++    return (
++        ('warmup', 'Explain idempotent log replay in one paragraph.', 64),
++        ('long_output', 'Write Python source for an extensive pytest suite for a journaled key-value store. '
++         'Include fixtures, helper implementations, and at least sixty distinct fully implemented '
++         'tests for crash recovery, concurrency, truncated records, corrupt checksums, model-based '
++         'sequences, and idempotent replays. Write out every test body and assertion. '
++         'Keep going through the full suite. Do not summarize or abbreviate.', 3072),
++        ('long_context', 'Use these database incident records as the basis for your answer.\n' + records + '\n\n'
++         'Write a numbered incident response procedure and a decision table.\n'
++         'Write out a complete operational handbook with at least 30 numbered procedures. '
++         'For each procedure give a trigger, diagnosis, detailed actions, recovery verification, '
++         'and a failure example. Keep the procedures fully written out.', 1536),
++        ('second_output', 'Write a complete Rust integration test suite for a message queue that is durable '
++         'across process restarts. Include mocks, fixtures and at least 40 implemented tests for delayed delivery, '
++         'requeue, backpressure and recovery. Give full code bodies without placeholders.', 3072),
++    )
++
++
++def content_gaps(times):
++    gaps = sorted(b - a for a, b in zip(times, times[1:]))
++    result = {'content_events': len(times)}
++    if gaps:
++        for percent in (50, 90, 95, 99):
++            result[f'gap_p{percent}_ms'] = round(gaps[math.ceil(len(gaps) * percent / 100) - 1] * 1000, 3)
++        result['gap_max_ms'] = round(gaps[-1] * 1000, 3)
++    return result
++
++
++def measure(upstream, name, prompt, limit, timeout):
++    body = {
++        'messages': [{'role': 'user', 'content': prompt}],
++        'max_tokens': limit, 'temperature': 0.0, 'seed': 123, 'stream': True,
++        'stream_options': {'include_usage': True}, 'reasoning_effort': 'none',
++        'chat_template_kwargs': {'enable_thinking': False},
++    }
++    req = urllib.request.Request(upstream + '/v1/chat/completions', data=json.dumps(body).encode(),
++                                 headers={'Content-Type': 'application/json'})
++    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
++    started = time.monotonic()
++    content_times = []
++    timings = {}
++    finish = None
++    done = False
++    output_hash = hashlib.sha256()
++    with opener.open(req, timeout=timeout) as response:
++        if response.headers.get_content_type() != 'text/event-stream':
++            raise RuntimeError(f'{name}: backend did not stream SSE')
++        for line in response:
++            elapsed = time.monotonic() - started
++            if elapsed > timeout:
++                raise TimeoutError(f'{name}: benchmark request exceeded {timeout}s')
++            if not line.startswith(b'data:'):
++                continue
++            payload = line[5:].strip()
++            if payload == b'[DONE]':
++                done = True
++                break
++            item = json.loads(payload)
++            if item.get('error'):
++                raise RuntimeError(f'{name}: benchmark request returned an error')
++            if item.get('timings'):
++                timings = item['timings']
++            has_content = False
++            for choice in item.get('choices') or []:
++                delta = choice.get('delta') or {}
++                if delta.get('content'):
++                    output_hash.update(delta['content'].encode())
++                has_content = has_content or bool(delta.get('content') or delta.get('reasoning_content'))
++                finish = choice.get('finish_reason') or finish
++            if has_content:
++                content_times.append(elapsed)
++    if not done or not content_times or finish not in ('stop', 'length'):
++        raise RuntimeError(f'{name}: benchmark stream did not finish normally')
++    if not isinstance(timings, dict) or any(
++        not isinstance(timings.get(key), (int, float)) or not math.isfinite(timings[key]) or timings[key] <= 0
++        for key in ('prompt_ms', 'predicted_ms', 'predicted_per_second', 'predicted_n')
++    ) or timings['predicted_n'] < 2:
++        raise RuntimeError(f'{name}: too few tokens or invalid engine timings')
++    return {'case': name, 'target_tokens': limit, 'first_content_ms': round(content_times[0] * 1000, 3),
++            'wall_ms': round((time.monotonic() - started) * 1000, 3), 'finish': finish,
++            'stream': content_gaps(content_times),
++            'timings': {key: timings[key] for key in TIMING_FIELDS if type(timings.get(key)) in (int, float)},
++            'output_sha256': output_hash.hexdigest()}
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--port', type=int, default=8095)
++    parser.add_argument('--mode', choices=('single', 'pair'), required=True, help='label for the running engine')
++    parser.add_argument('--output', type=Path, required=True)
++    args = parser.parse_args()
++    upstream = f'http://127.0.0.1:{args.port}'
++    cases = [measure(upstream, name, prompt, limit, 210) for name, prompt, limit in workloads()]
++    args.output.write_text(json.dumps({'mode': args.mode, 'cases': cases}, indent=2) + '\n')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/terminal/l2/headless_experiments.py b/terminal/l2/headless_experiments.py
+new file mode 100644
+index 000000000..0dc14ca77
+--- /dev/null
++++ b/terminal/l2/headless_experiments.py
+@@ -0,0 +1,350 @@
++"""One-shot headless spec, SM86 shape and wide lookup comparisons. Never select a winner automatically."""
++import datetime
++import hashlib
++import json
++import math
++import os
++import re
++import signal
++import statistics
++import subprocess
++import sys
++import threading
++import time
++from collections import defaultdict
++from pathlib import Path
++from l2.chat_latency import measure, workloads
++REQUEST = 'spec-shape-lookup.request.json'
++WINDOW = re.compile(r'strata decode timing: (\d+) windows, avg T ([\d.]+), ([\d.]+) tokens/window, ([\d.]+) ms/window')
++
++def meminfo():
++    lines = Path('/proc/meminfo').read_text()
++    return {k: int(v) // 1024 for k, v in re.findall(r'^(\w+):\s+(\d+) kB', lines, re.M)}
++
++def check_environment():
++    desktop = subprocess.check_output(
++        ['systemctl', 'show', '-p', 'ActiveState', '--value', 'sddm.service'], text=True
++    ).strip()
++    if desktop != 'inactive':
++        raise RuntimeError(f'SDDM state is {desktop}')
++    for path in Path('/proc').glob('[0-9]*/comm'):
++        try:
++            name = path.read_text().strip()
++        except OSError:
++            continue
++        if name in {'strata', 'ninja', 'make', 'cc1plus', 'nvcc', 'ptxas', 'cicc'} or name.startswith('strata-pr5500-'):
++            raise RuntimeError(f'{name} is already running')
++
++def stop_trial(proc):
++    # The upstream server puts its engine in a separate process group.
++    # Keep PID handles in case the server cannot reap them after SIGINT.
++    handles = []
++    for path in Path(f'/proc/{proc.pid}/task').glob('*/children'):
++        try:
++            children = path.read_text().split()
++        except OSError:
++            continue
++        for child in children:
++            try:
++                handles.append(os.pidfd_open(int(child)))
++            except ProcessLookupError:
++                pass
++    try:
++        if proc.poll() is None:
++            proc.send_signal(signal.SIGINT)
++            try:
++                proc.wait(timeout=15)
++            except subprocess.TimeoutExpired:
++                proc.kill()
++                proc.wait(timeout=5)
++        for handle in handles:
++            try:
++                signal.pidfd_send_signal(handle, signal.SIGKILL)
++            except ProcessLookupError:
++                pass
++    finally:
++        for handle in handles:
++            os.close(handle)
++
++def run_phase(root, cfg, phase, folder, seed, port, deadline, candidate=None, *,
++              workloads=None, launch_profile=None, stream_latency=False):
++    report = {'phase': phase, 'status': 'failed', 'cases': []}
++    if time.monotonic() >= deadline:
++        report['error'] = 'startup comparison time budget was exhausted'
++        return report
++    folder.mkdir()
++    ready, profile, log = (folder / 'ready.json', folder / 'profile.json', folder / 'engine.log')
++    if launch_profile is None:
++        raise ValueError('explicit experiment profile required')
++    launch_cfg = dict(launch_profile, host='127.0.0.1', port=port, log=str(log), engine_ready_s=180)
++    residency_trial = phase == 'gyro-m-32k'
++    (folder / 'parked').mkdir()
++    profile.write_text(json.dumps(launch_cfg, indent=2) + '\n')
++    cmd = [sys.executable, str(root / 'strata.py'), 'serve', '--profile', str(profile),
++           '--ready-file', str(ready), '--shutdown-timeout', '8']
++    stop = threading.Event()
++    mem = meminfo()
++    start_swap = mem['SwapTotal'] - mem['SwapFree']
++    resources = {'min_available_mib': mem['MemAvailable'], 'max_new_swap_mib': 0}
++    report['memory'] = resources
++    watcher = None
++    proc = None
++    try:
++        check_environment()
++        with (folder / 'server.log').open('wb') as journal:
++            proc = subprocess.Popen(cmd, cwd=root, stdin=subprocess.DEVNULL, stdout=journal,
++                                    stderr=subprocess.STDOUT, start_new_session=True,
++                                    env={**os.environ, 'STRATA_NO_ACQUIRE': '1'})
++        def watch():
++            while not stop.wait(.4):
++                sample = meminfo()
++                resources['min_available_mib'] = min(resources['min_available_mib'], sample['MemAvailable'])
++                resources['max_new_swap_mib'] = max(
++                    resources['max_new_swap_mib'], sample['SwapTotal'] - sample['SwapFree'] - start_swap
++                )
++                if time.monotonic() >= deadline or sample['MemAvailable'] < 1024 or resources['max_new_swap_mib'] > 1024:
++                    report['error'] = 'startup comparison reached its time or memory limit'
++                    if proc.poll() is None:
++                        proc.send_signal(signal.SIGINT)
++                    break
++        watcher = threading.Thread(target=watch, daemon=True)
++        watcher.start()
++        ready_limit = min(deadline, time.monotonic() + 180)
++        while not ready.exists():
++            if proc.poll() is not None:
++                lines = log.read_text(errors='replace').strip().splitlines() if log.is_file() else []
++                reason = lines[-1] if lines else 'engine log is empty'
++                raise RuntimeError(f'trial exited before ready (status {proc.returncode}): {reason}')
++            if time.monotonic() >= ready_limit:
++                raise RuntimeError('trial readiness timed out')
++            time.sleep(.2)
++        health = json.loads(ready.read_text())
++        if health.get('api_state') != 'ready' or health.get('pid') != proc.pid:
++            raise RuntimeError('trial readiness belongs to another process')
++        startup = log.read_text(errors='replace')
++        report['effective_engine_command'] = next(
++            (line.split('engine started:', 1)[1].strip() for line in startup.splitlines() if 'engine started:' in line), None
++        )
++        report['resources'] = [line for line in startup.splitlines() if any(s in line for s in (
++            'expert cache auto:', 'resident RAM mode:', 'lendable slots', 'DFlash2 drafter on',
++            'draft layer loaded', 'PCIe probe:', 'VRAM free with everything loaded',
++            'fused', 'prompt chunk auto', 'whole resident RAM mode does not fit',
++            'room for the complement:', 'file tier', 'pinned RAM',
++        ))]
++        if not re.search(r'resident RAM mode:[^\n]*page-locked', startup):
++            raise RuntimeError('trial did not page-lock the RAM expert complement')
++        if residency_trial:
++            if any(flag in report['effective_engine_command'].split() for flag in ('--mtp', '--draft')):
++                raise RuntimeError('Gyro-M residency trial unexpectedly loaded a drafter')
++            if 'whole resident RAM mode does not fit' in startup or 'FileExpertSource: RAM budget ' in startup:
++                raise RuntimeError('the full Gyro-M decode expert complement did not fit')
++        else:
++            expected = 'strata mtp: draft layer loaded' if phase == 'mtp4' else 'DFlash2 drafter on'
++            if expected not in startup:
++                raise RuntimeError('trial did not enable the requested drafter')
++        if candidate is not None and not any(
++            'strata: prompt kernels:' in line and 'fused' in line for line in startup.splitlines()
++        ):
++            raise RuntimeError('candidate did not report fused prompt kernels')
++        for label, prompt, limit in (workloads or ()):
++            offset = log.stat().st_size
++            remaining = deadline - time.monotonic()
++            if remaining <= 0 or 'error' in report:
++                raise RuntimeError('trial interrupted')
++            endpoint = f'http://127.0.0.1:{port}'
++            timeout = min(300, remaining)
++            row = measure(endpoint, label, prompt, limit, timeout)
++            # The engine flushes DONE before appending these expert counters.
++            log_deadline = min(deadline, time.monotonic() + 1.0)
++            while True:
++                with log.open('rb') as source:
++                    source.seek(offset)
++                    detail = source.read().decode(errors='replace')
++                reads = re.findall(r'(\d+) blob reads from the file', detail)
++                expert_mb = re.findall(r'([\d.]+) MB of expert reads', detail)
++                if (reads and (not residency_trial or expert_mb)) or time.monotonic() >= log_deadline:
++                    break
++                time.sleep(.02)
++            m = WINDOW.search(detail)
++            if m:
++                row.update(verify_rounds=int(m[1]), verify_width_mean=float(m[2]),
++                           tokens_per_round=float(m[3]), ms_per_round=float(m[4]))
++            if reads:
++                row['expert_file_reads'] = max(map(int, reads))
++            gpu_line = next((line for line in detail.splitlines()
++                             if 'strata decode GPU stages (ms/window):' in line), '')
++            if gpu_line:
++                row['gpu_resident_expert_ms_per_round'] = round(
++                    sum(map(float, re.findall(r'VRAM hits ([\d.]+)', gpu_line))), 3
++                )
++            if expert_mb:
++                row['expert_mb_accounted'] = float(expert_mb[-1])
++            report['cases'].append(row)
++            t = row['timings']
++            print(f"Strata 无头对照 {phase}/{label} 预填充 {t['prompt_ms']:.0f} ms，"
++                  f"解码 {t['predicted_per_second']:.1f} token/s，输出 {t['predicted_n']} token。", flush=True)
++        if 'error' not in report:
++            if stream_latency:
++                activated = 'TQ Ampere paired-row GU enabled' in log.read_text(errors='replace')
++                if activated != (launch_cfg['env'].get('STRATA_TQ_AMPERE_ROWS') == '2'):
++                    raise RuntimeError('logged Ampere CUDA path differs from the requested mode')
++            if not all(row.get('expert_file_reads') == 0 for row in report['cases']):
++                raise RuntimeError('zero decode expert file reads could not be confirmed')
++            if residency_trial and not all(row.get('expert_mb_accounted') == 0
++                                           for row in report['cases'] if row['case'] != 'warmup'):
++                raise RuntimeError('zero request-time expert file MB could not be confirmed')
++            report['status'] = 'passed'
++    except Exception as exc:
++        report.setdefault('error', str(exc))
++    finally:
++        stop.set()
++        if watcher is not None:
++            watcher.join(timeout=1)
++        if proc is not None:
++            stop_trial(proc)
++        (folder / 'result.json').write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n')
++    return report
++
++def arms():
++    # Palindromic ordering balances clock, temperature and startup order.
++    specs = [(f'spec{v}', v, 1, 8) for v in (6, 4, 3, 3, 4, 6)]
++    shapes = [(f'shape{v}', 6, v, 8) for v in (1, 2, 2, 1)]
++    wide = [(f'lookup{v}', 6, 2, v) for v in (8, 12, 16, 16, 12, 8)]
++    return specs + shapes + wide
++
++
++def configure(base, arm, folder, seed, port):
++    label, spec, shape, lookup = arm
++    cfg = json.loads(json.dumps(base))
++    args = cfg['args']
++    for flag in ('--expert-profile-save', '--expert-profile', '--conversation-cache-mib',
++                 '--conversation-cache-slots', '--spec', '--draft-conf', '--lookup-max-t',
++                 '--lookup-sizes', '--spec-min-p'):
++        while flag in args:
++            at = args.index(flag)
++            del args[at:at + 2]
++    sizes = list(range(2, 9)) + ([10, 12] if lookup >= 12 else []) + ([16] if lookup == 16 else [])
++    options = ['--spec', str(spec), '--draft-conf', '0.8', '--lookup-max-t', str(lookup),
++               '--lookup-sizes', ','.join(map(str, sizes))]
++    args += ['--expert-profile', str(seed), '--conversation-cache-mib', '0',
++             '--conversation-cache-slots', '0'] + options
++    for key in ('startup_benchmark', 'slot_save_path', 'l2_backend_port', 'l2_disk_budget_mib'):
++        cfg.pop(key, None)
++    cfg.update(host='127.0.0.1', port=port, log=str(folder / 'engine.log'),
++               drafting='dflash2', mtp=False, user_args=options, engine_ready_s=180)
++    if str(cfg['env'].get('STRATA_ROUTE_PRIOR')) != '0.5':
++        raise ValueError('prior=0.5 is required')
++    cfg['env'].update(STRATA_TQ_AMPERE_ROWS='2', STRATA_DRAFT_LOG='1', STRATA_DECODE_TIMING='1',
++                      STRATA_DF2_AMPERE_TUNING=str(shape), STRATA_DENSE_I8_AMPERE_SHAPES='0',
++                      STRATA_DF2_GEMM_TC='2', STRATA_DF2_WIDE_CONTEXT='1' if lookup > 8 else '0',
++                      STRATA_SPEC_TRACE=str(folder / 'spec.trace'),
++                      STRATA_CONV_DISK_DIR=str(folder / 'parked'))
++    return cfg
++
++
++def summarize(runs):
++    grouped = defaultdict(list)
++    for run in runs:
++        if run['status'] == 'passed':
++            for row in run['cases']:
++                if row['case'] != 'warmup':
++                    grouped[run['phase'], row['case']].append(row)
++    result = {}
++    for (phase, case), rows in grouped.items():
++        result.setdefault(phase, {})[case] = {
++            'runs': len(rows),
++            'median_decode_tps': statistics.median(r['timings']['predicted_per_second'] for r in rows),
++            'median_prefill_ms': statistics.median(r['timings']['prompt_ms'] for r in rows),
++            'median_first_content_ms': statistics.median(r['first_content_ms'] for r in rows),
++            'median_gap_p99_ms': statistics.median(r['stream'].get('gap_p99_ms', 0) for r in rows),
++            'outputs_sha256': sorted(set(r['output_sha256'] for r in rows)),
++        }
++    return result
++
++
++def trace_summary(path):
++    result = []
++    for line in path.read_text().splitlines() if path.is_file() else []:
++        if line.startswith('# request'):
++            result.append({'neural': {'rounds': 0, 'offered': 0, 'accepted': 0, '_ms': []},
++                           'lookup': {'rounds': 0, 'offered': 0, 'accepted': 0, '_ms': []},
++                           'widths': {}, '_width_ms': {}})
++        elif line.startswith('R ') and result:
++            fields = line.split('|', 1)[0].split()
++            width, accepted, lookup = map(int, fields[2:5])
++            elapsed = float(fields[5])
++            row = result[-1]
++            source = row['lookup' if lookup else 'neural']
++            source['rounds'] += 1
++            source['offered'] += width - 1
++            source['accepted'] += accepted
++            source['_ms'].append(elapsed)
++            row['widths'][str(width)] = row['widths'].get(str(width), 0) + 1
++            row['_width_ms'].setdefault(str(width), []).append(elapsed)
++    def percentiles(samples):
++        values = sorted(samples)
++        return {'samples': len(values), **{
++            f'p{p}': values[math.ceil(len(values) * p / 100) - 1] for p in (50, 95, 99)
++        }} if values else {'samples': 0}
++    for row in result:
++        for source in ('neural', 'lookup'):
++            row[source]['round_latency_ms'] = percentiles(row[source].pop('_ms'))
++        row['round_latency_ms_by_width'] = {width: percentiles(samples)
++                                           for width, samples in row.pop('_width_ms').items()}
++    return result
++
++
++def run_queued(root, cfg, directory, port):
++    queued = directory / REQUEST
++    if not queued.is_file():
++        return
++    work = directory / ('spec-shape-lookup-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
++    work.mkdir(mode=0o700, parents=True)
++    # Claim once before launching: an interrupted run never loops at every boot.
++    queued.rename(work / 'request.json')
++    report = {'status': 'failed', 'runs': [], 'sequence': arms(), 'suite': 'spec-shape-lookup-v1'}
++    try:
++        request = json.loads((work / 'request.json').read_text())
++        check_environment()
++        exe = Path(cfg['exe'])
++        digest = hashlib.sha256(exe.read_bytes()).hexdigest()
++        if request['engine_sha256'] != digest:
++            raise ValueError('queued engine hash differs from the selected baseline')
++        report['engine_sha256'] = digest
++        args = cfg['args']
++        seed = work / 'expert-profile.bin'
++        seed.write_bytes(Path(args[args.index('--expert-profile') + 1]).read_bytes())
++        report['seed_sha256'] = hashlib.sha256(seed.read_bytes()).hexdigest()
++        deadline = time.monotonic() + min(3600, max(60, int(request.get('budget_s', 2700))))
++        # Warmup plus 3072-token output and 1536-token long-context output.
++        cases = workloads()[:3]
++        print(f'Strata 开始 spec/形状/宽 lookup 无头对比，共 {len(arms())} 组；完成后开放服务。报告 {work}', flush=True)
++        for i, arm in enumerate(arms(), 1):
++            folder = work / f'{i:02d}-{arm[0]}'
++            trial_cfg = configure(cfg, arm, folder, seed, port)
++            # run_phase owns every child and closes it before the next arm.
++            result = run_phase(root, trial_cfg, arm[0], folder, seed, port, deadline,
++                               workloads=cases, launch_profile=trial_cfg, stream_latency=True)
++            result['settings'] = dict(spec=arm[1], shapes=arm[2], lookup_max_t=arm[3])
++            if result['status'] == 'passed' and any(
++                r['timings']['predicted_n'] < r['target_tokens'] * .75
++                for r in result['cases'] if r['case'] != 'warmup'
++            ):
++                result.update(status='invalid', error='long output ended before 75% of the requested length')
++            # Never mistake enabling wide lookup for evidence that it actually ran.
++            text = (folder / 'engine.log').read_text(errors='replace')
++            result['wide_bridge_exercised'] = 'wide context bridge active' in text
++            result['trace'] = trace_summary(folder / 'spec.trace')
++            report['runs'].append(result)
++            (work / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
++            print(f'Strata 对比进度 {i}/{len(arms())}: {arm[0]} {result["status"]}', flush=True)
++            if result['status'] == 'failed' or time.monotonic() >= deadline:
++                break
++        report['summary'] = summarize(report['runs'])
++        report['status'] = 'passed' if len(report['runs']) == len(arms()) and all(
++            r['status'] == 'passed' for r in report['runs']) else 'incomplete'
++    except Exception as exc:
++        report['error'] = str(exc)
++    finally:
++        (work / 'results.json').write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n')
++        print(f'Strata 无头对比 {report["status"]}，继续日常基线启动。报告 {work / "results.json"}', flush=True)
+diff --git a/terminal/l2/test_headless_experiments.py b/terminal/l2/test_headless_experiments.py
+new file mode 100644
+index 000000000..55c120716
+--- /dev/null
++++ b/terminal/l2/test_headless_experiments.py
+@@ -0,0 +1,114 @@
++import copy
++import hashlib
++import json
++from pathlib import Path
++import tempfile
++import socket
++import time
++import unittest
++from unittest.mock import patch
++from l2 import headless_experiments as h
++
++FAKE_ENGINE = r'''import argparse,json,os
++from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
++from pathlib import Path
++p=argparse.ArgumentParser();p.add_argument('command');p.add_argument('--profile');p.add_argument('--ready-file');p.add_argument('--shutdown-timeout')
++a=p.parse_args();c=json.loads(Path(a.profile).read_text());log=Path(c['log'])
++log.write_text('resident RAM mode: fake page-locked\nDFlash2 drafter on\nTQ Ampere paired-row GU enabled\n')
++class API(BaseHTTPRequestHandler):
++ def log_message(self,*a):pass
++ def do_POST(self):
++  self.rfile.read(int(self.headers['Content-Length']))
++  self.send_response(200);self.send_header('content-type','text/event-stream');self.end_headers()
++  for i in range(4):self.wfile.write(b'data: {"choices":[{"delta":{"content":"x"}}]}\n\n');self.wfile.flush()
++  self.wfile.write(b'data: {"choices":[{"finish_reason":"length"}],"timings":{"prompt_ms":10,"predicted_ms":100,"predicted_n":8,"predicted_per_second":80}}\n\n')
++  with log.open('a') as f:f.write('0 blob reads from the file\nstrata decode timing: 4 windows, avg T 2.0, 2.0 tokens/window, 25.0 ms/window\n')
++  self.wfile.write(b'data: [DONE]\n\n');self.wfile.flush()
++s=ThreadingHTTPServer(('127.0.0.1',c['port']),API)
++Path(a.ready_file).write_text(json.dumps({'api_state':'ready','pid':os.getpid()}))
++try:s.serve_forever()
++except KeyboardInterrupt:pass
++finally:s.server_close()
++'''
++
++class Experiments(unittest.TestCase):
++ def base(self, root):
++  (root/'engine').write_bytes(b'engine')
++  (root/'seed').write_bytes(b'fixed-seed')
++  return {'exe':str(root/'engine'),'args':['--expert-profile',str(root/'seed'),
++          '--expert-profile-save',str(root/'seed'),'--spec','6','--resident-experts',
++          '--max-context','262144','--pool-workers','15'],
++          'env':{'STRATA_ROUTE_PRIOR':'0.5'}, 'startup_benchmark':{'x':1}}
++ def test_one_variable_and_immutable_profile(self):
++  with tempfile.TemporaryDirectory() as t:
++   root=Path(t);base=self.base(root);old=copy.deepcopy(base)
++   for arm in h.arms():
++    cfg=h.configure(base,arm,root/'arm',root/'seed',18001)
++    args=cfg['args'];val=lambda k:args[args.index(k)+1]
++    self.assertNotIn('--expert-profile-save',args)
++    self.assertEqual(val('--spec'),str(arm[1]))
++    self.assertEqual(val('--lookup-max-t'),str(arm[3]))
++    self.assertEqual(val('--draft-conf'),'0.8')
++    self.assertEqual(val('--pool-workers'),'15')
++    self.assertEqual(val('--max-context'),'262144')
++    self.assertIn('--resident-experts',args)
++    self.assertEqual(cfg['env']['STRATA_TQ_AMPERE_ROWS'],'2')
++    self.assertEqual(cfg['env']['STRATA_DF2_WIDE_CONTEXT'],'1' if arm[3]>8 else '0')
++    if arm[0].startswith('spec'):
++     self.assertEqual(val('--lookup-sizes'),'2,3,4,5,6,7,8')
++     self.assertEqual(arm[3],8)
++   self.assertEqual(base,old)
++ def test_claim_once_hash_mismatch_never_runs(self):
++  with tempfile.TemporaryDirectory() as t:
++   root=Path(t);base=self.base(root);request=root/h.REQUEST
++   request.write_text(json.dumps({'engine_sha256':'wrong'}))
++   with patch.object(h,'check_environment'),patch.object(h,'run_phase') as run:
++    h.run_queued(root,base,root,18001)
++    h.run_queued(root,base,root,18001)
++   run.assert_not_called();self.assertFalse(request.exists())
++   result=json.loads(next(root.glob('spec-shape-lookup-*/results.json')).read_text())
++   self.assertIn('hash differs',result['error'])
++ def test_interrupt_claimed_queue_leaves_no_auto_replay(self):
++  with tempfile.TemporaryDirectory() as t:
++   root=Path(t);base=self.base(root);request=root/h.REQUEST
++   request.write_text(json.dumps({'engine_sha256':hashlib.sha256(b'engine').hexdigest()}))
++   def interrupt(*a,**kw):
++    self.assertFalse(request.exists())
++    raise KeyboardInterrupt
++   with patch.object(h,'check_environment'),patch.object(h,'run_phase',side_effect=interrupt):
++    with self.assertRaises(KeyboardInterrupt):h.run_queued(root,base,root,18001)
++   self.assertTrue(next(root.glob('spec-shape-lookup-*/results.json')).exists())
++ def test_trace_sources_widths_and_no_tokens(self):
++  with tempfile.TemporaryDirectory() as t:
++   p=Path(t)/'trace';p.write_text('# request prompt 3 df2 1 spec 6\nR 3 4 2 0 1.2 4 0 | 0.9 | 789 | 123 | 456\nR 6 12 11 1 2.5 12 32 | 0.9 | 789 | 123 | 456\n')
++   data=h.trace_summary(p)
++   self.assertEqual(data[0]['neural']['accepted'],2)
++   self.assertEqual(data[0]['lookup']['accepted'],11)
++   self.assertEqual(data[0]['lookup']['round_latency_ms']['p99'],2.5)
++   self.assertEqual(data[0]['widths'],{'4':1,'12':1})
++   self.assertNotIn('789',json.dumps(data))
++ def test_trial_stream_metrics_and_cleanup(self):
++  with tempfile.TemporaryDirectory() as t:
++   root=Path(t);base=self.base(root)
++   with socket.socket() as sock:
++    sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
++   (root/'strata.py').write_text(FAKE_ENGINE)
++   folder=root/'trial';cfg=h.configure(base,('shape2',6,2,8),folder,root/'seed',port)
++   with patch.object(h,'check_environment'),patch.object(h,'meminfo',return_value={'MemAvailable':12000,'SwapTotal':1000,'SwapFree':1000}):
++    result=h.run_phase(root,cfg,'shape2',folder,root/'seed',port,time.monotonic()+15,
++                       workloads=[('fixture','fixed test prompt',8)],launch_profile=cfg,stream_latency=True)
++   self.assertEqual(result['status'],'passed',result)
++   row=result['cases'][0]
++   self.assertEqual(row['expert_file_reads'],0)
++   self.assertEqual(row['timings']['predicted_n'],8)
++   self.assertEqual(row['stream']['content_events'],4)
++   self.assertIn('gap_p99_ms',row['stream'])
++   # The trial's listening port must be reusable before the next arm begins.
++   with socket.socket() as probe:self.assertNotEqual(probe.connect_ex(('127.0.0.1',port)),0)
++
++ def test_queue_balanced(self):
++  seq=h.arms()
++  for group in [seq[:6],seq[6:10],seq[10:]]:self.assertEqual(group,group[::-1])
++  self.assertEqual(len(seq),16)
++
++if __name__=='__main__':unittest.main()

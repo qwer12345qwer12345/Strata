@@ -1,16 +1,16 @@
 {
   "id": "legacy-session-archive",
   "name": "Complete PR5500 V2/V3 archive and automatic Chat Completions cache",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "status": "active",
   "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
-  "patched_tree": "76e47be7dc45bf4d65055c153383d8dc4772320e",
+  "patched_tree": "c35b3a14dc4430e0ad60b790e27143336ace772f",
   "requires": [],
   "patches": [
     {
       "id": "legacy-v2-v3-archive",
       "path": "patches/0001-legacy-v2-v3-archive.patch",
-      "sha256": "3a91a51466baee2e7faa806085d6dd21a70534e4ef2ffbbd2d2a22988069af94"
+      "sha256": "c100eab4c49b533c756ea4eb12b399c7ac71849a50aab13ff5e7c544260117fe"
     }
   ],
   "tests": "tests/test.json",

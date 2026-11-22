@@ -1,0 +1,16 @@
+{
+  "cmake_args": [],
+  "targets": [],
+  "ctest_regex": "",
+  "optional_targets": {
+    "cuda": [
+      "dflash2_wide_test",
+      "dflash2_ring_test"
+    ]
+  },
+  "overlays": [],
+  "python_modules": [
+    "l2.test_headless_experiments"
+  ],
+  "settings_generation": false
+}

@@ -30,3 +30,17 @@ bench 目录包含从上游 benchmark 适配的源文件与运行器；验证数
 ## 当前本机选择
 
 已启用 `STRATA_DF2_AMPERE_TUNING=1` 与 `STRATA_DF2_GEMM_TC=2`；Dense候选保持 `STRATA_DENSE_I8_AMPERE_SHAPES=0`。该候选有GPU形状收益，但主模型舍入变化导致长输出和lookup分布改变，需更充分的同机质量/延迟对照后再作为默认。没有全面打开TC或全局降低9行门槛。
+
+## 进一步形状特调：mode 2
+
+`STRATA_DF2_AMPERE_TUNING=2` 是新的候选表。仍限定SM86/Q4_0和测过的8种矩阵，保持mode1与上游默认不变：
+
+- 1..2列使用variant51；3..4列的大矩阵用47、小矩阵用46，编译期只计算1/2/4个列槽，减少无效DP4A和累加器。
+- 5..8列的大矩阵用variant41（一warp四行、unroll1），提高每次激活读取的复用；256/640行的小矩阵继续31，避免并行度过低。
+- QKV限定TC仍由 `STRATA_DF2_GEMM_TC=2` 控制，与旧表相同。其他未测形状保持原有选择。
+
+[全扫描](validation/shape-sweep.jsonl)覆盖8形状×8列×43变体×3次，共8256条，scalar均与variant1逐位一致。使用非均匀随机权重/有限尺度，循环约128MiB地址，CUDA graph计时，排除CPU专家/磁盘因素。[复测汇总](validation/shape-summary.json)来自旧/新/新/旧四进程，每形状/列数/模式8次样本：8列gate/up 41.04→32.53µs，down28.96→19.59µs，output14.54→11.58µs；1列FC45.49→23.04µs。QKV TC未改变，8列18.49→18.43µs；TC路径本身未改。
+
+真实Q4 drafter包、固定taps/head的四进程检查也逐位一致，见 [pack检查](validation/real-pack-parity.json)。主模型长输出存在未隔离的分叉，不能从独立kernel收益推出端到端同比收益，因此本机日常仍用mode1，新表进入无头对照。新增 [宽lookup独立包](../dflash2-wide-lookup/README.md)解决上文所述同步draft的8行上下文边界，不改变DFlash2的8行神经草稿块。
+
+复现源为 `bench/shape_bench.cpp` 与 `bench/shape_abba.cpp`；完成引擎构建后，运行 `python bench/compile_shape_bench.py SOURCE_ROOT BUILD_DIR OUTPUT_DIR CUDA_INCLUDE` 链接。扫描程序参数为重复次数、每张图的调用数（本次3/128）；ABBA程序本次每进程4/128，环境分别设置tuning=1/2/2/1、GEMM_TC=2。每次编译全部结束后再测试。

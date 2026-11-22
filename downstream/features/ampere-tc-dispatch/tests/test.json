@@ -9,7 +9,7 @@
     ]
   },
   "optional_ctest_regex": {
-    "cuda": "^dflash2_q4_parity_ampere$"
+    "cuda": "^dflash2_q4_parity_ampere(_columns)?$"
   },
   "overlays": [],
   "settings_generation": false

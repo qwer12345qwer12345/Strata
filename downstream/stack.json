@@ -6,7 +6,7 @@
     "branch": "main"
   },
   "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
-  "patched_tree": "57f862c1ed1b426055a2aae529b101921d4e4dab",
+  "patched_tree": "13def40bb997430740c2f39d9f8a8bb7abda6004",
   "feature_order": [
     "tq-cpu",
     "tq-ampere",
@@ -14,7 +14,8 @@
     "legacy-session-archive",
     "chatml-tool-guard",
     "ple-bf16-compact",
-    "ampere-tc-dispatch"
+    "ampere-tc-dispatch",
+    "dflash2-wide-lookup"
   ],
   "features": [
     {
@@ -56,6 +57,10 @@
     {
       "id": "ampere-tc-dispatch",
       "path": "features/ampere-tc-dispatch/feature.json"
+    },
+    {
+      "id": "dflash2-wide-lookup",
+      "path": "features/dflash2-wide-lookup/feature.json"
     }
   ]
 }

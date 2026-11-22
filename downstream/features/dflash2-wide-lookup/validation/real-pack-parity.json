@@ -1,0 +1,66 @@
+{
+  "runs": [
+    {
+      "mode": 1,
+      "returncode": 0,
+      "states": [
+        "state rows=9 hash=90591884f7801fed",
+        "state rows=1 hash=d236e60dcc1b3785",
+        "state rows=12 hash=6779590ff74b9404",
+        "state rows=4 hash=0221e756b41615f9",
+        "state rows=16 hash=6374a4551e3a64cb",
+        "state rows=8 hash=f931025234b3ef2c",
+        "state rows=9 hash=eed2af0aa2a35c15",
+        "state rows=12 hash=a3106d3296ac41fd",
+        "state rows=16 hash=847ce607a0e662b7"
+      ]
+    },
+    {
+      "mode": 2,
+      "returncode": 0,
+      "states": [
+        "state rows=9 hash=90591884f7801fed",
+        "state rows=1 hash=d236e60dcc1b3785",
+        "state rows=12 hash=6779590ff74b9404",
+        "state rows=4 hash=0221e756b41615f9",
+        "state rows=16 hash=6374a4551e3a64cb",
+        "state rows=8 hash=f931025234b3ef2c",
+        "state rows=9 hash=eed2af0aa2a35c15",
+        "state rows=12 hash=a3106d3296ac41fd",
+        "state rows=16 hash=847ce607a0e662b7"
+      ]
+    },
+    {
+      "mode": 2,
+      "returncode": 0,
+      "states": [
+        "state rows=9 hash=90591884f7801fed",
+        "state rows=1 hash=d236e60dcc1b3785",
+        "state rows=12 hash=6779590ff74b9404",
+        "state rows=4 hash=0221e756b41615f9",
+        "state rows=16 hash=6374a4551e3a64cb",
+        "state rows=8 hash=f931025234b3ef2c",
+        "state rows=9 hash=eed2af0aa2a35c15",
+        "state rows=12 hash=a3106d3296ac41fd",
+        "state rows=16 hash=847ce607a0e662b7"
+      ]
+    },
+    {
+      "mode": 1,
+      "returncode": 0,
+      "states": [
+        "state rows=9 hash=90591884f7801fed",
+        "state rows=1 hash=d236e60dcc1b3785",
+        "state rows=12 hash=6779590ff74b9404",
+        "state rows=4 hash=0221e756b41615f9",
+        "state rows=16 hash=6374a4551e3a64cb",
+        "state rows=8 hash=f931025234b3ef2c",
+        "state rows=9 hash=eed2af0aa2a35c15",
+        "state rows=12 hash=a3106d3296ac41fd",
+        "state rows=16 hash=847ce607a0e662b7"
+      ]
+    }
+  ],
+  "all_state_hashes_equal": true,
+  "what_is_hashed": "Real Q4 drafter pack with synthetic head and fixed taps: all 8 final normalized rows, draft token IDs and float probabilities; 9 mixed widths including ring wrap and spec change."
+}

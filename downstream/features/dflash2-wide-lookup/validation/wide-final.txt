@@ -1,0 +1,11 @@
+dflash2: wide context bridge active (9 committed rows, unchanged 8-row block)
+rows=9 pos=2040 tokens/probabilities/ring/tags bitwise equal
+rows=1 pos=2049 tokens/probabilities/ring/tags bitwise equal
+rows=12 pos=2050 tokens/probabilities/ring/tags bitwise equal
+rows=4 pos=2062 tokens/probabilities/ring/tags bitwise equal
+rows=16 pos=2066 tokens/probabilities/ring/tags bitwise equal
+rows=8 pos=2082 tokens/probabilities/ring/tags bitwise equal
+rows=9 pos=2090 tokens/probabilities/ring/tags bitwise equal
+rows=12 pos=2099 tokens/probabilities/ring/tags bitwise equal
+rows=16 pos=2111 tokens/probabilities/ring/tags bitwise equal
+dflash2_wide_test: PASS (6 wide + 3 narrow, ring wrap, graph invalidation, no extra arena)
