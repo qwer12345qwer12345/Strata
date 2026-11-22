@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "upstream": {
+    "repository": "Niko1221/Strata",
+    "url": "https://github.com/Niko1221/Strata.git",
+    "branch": "main"
+  },
+  "base_commit": "6e38f588a646c0ee6948a74afbe670eb75896106",
+  "patched_tree": "424bde3201fbe911be0adb1a664a2f76fb0cdcaf",
+  "feature_order": [
+    "tq-cpu",
+    "tq-ampere",
+    "qsa-imma",
+    "l2-session",
+    "live-memory"
+  ],
+  "features": [
+    {
+      "id": "tq-cpu",
+      "path": "features/tq-cpu/feature.json"
+    },
+    {
+      "id": "tq-ampere",
+      "path": "features/tq-ampere/feature.json"
+    },
+    {
+      "id": "qsa-imma",
+      "path": "features/qsa-imma/feature.json"
+    },
+    {
+      "id": "l2-session",
+      "path": "features/l2-session/feature.json"
+    },
+    {
+      "id": "live-memory",
+      "path": "features/live-memory/feature.json"
+    }
+  ]
+}

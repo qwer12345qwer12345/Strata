@@ -1,0 +1,175 @@
+diff --git a/engine/src/kernels/cuda/iq_kernels.cu b/engine/src/kernels/cuda/iq_kernels.cu
+index fbf6c4d038a..c2d289504d1 100644
+--- a/engine/src/kernels/cuda/iq_kernels.cu
++++ b/engine/src/kernels/cuda/iq_kernels.cu
+@@ -1976,6 +1976,105 @@ __global__ void __launch_bounds__(256) native_gu_kernel(const unsigned long long
+ // has halves of <= 4), so 4 takes such windows in one pass; 8 would take ~64-80 registers against ~48 (ptxas -v).
+ constexpr int GRP_NC = 4;
+ 
++#if !defined(__HIPCC__)
++// Decode the gate and up trellis rows in the same pass.  Each row keeps the
++// original four partial sums and reduction order; only the two weight streams
++// are interleaved so their loads can overlap on SM86.
++template<int TG, int NC>
++__device__ __forceinline__ void tq_ampere_dot_pair(const uint8_t* ra, const uint8_t* rb,
++        const block_q8_1* x, const int (&off)[NC], int t, float (&a)[NC], float (&b)[NC],
++        const uint32_t* grid) {
++    float pa[4][NC], pb[4][NC];
++#pragma unroll
++    for (int v = 0; v < 4; ++v)
++#pragma unroll
++        for (int c = 0; c < NC; ++c) pa[v][c] = pb[v][c] = 0.0f;
++#pragma unroll
++    for (int j = 0; j < 5; ++j)
++#pragma unroll
++        for (int v = 0; v < 4; ++v) {
++            const int kbx = v + 4 * j, iqs = 4 * t;
++            const auto wa = Split<TG>::template load<true>(ra, kbx, iqs, grid);
++            const auto wb = Split<TG>::template load<true>(rb, kbx, iqs, grid);
++#pragma unroll
++            for (int c = 0; c < NC; ++c) {
++                const auto* q = x + off[c] + kbx * 4;
++                pa[v][c] += Split<TG>::apply(wa, q, iqs);
++                pb[v][c] += Split<TG>::apply(wb, q, iqs);
++            }
++        }
++#pragma unroll
++    for (int c = 0; c < NC; ++c) {
++        a[c] = __fadd_rn(__fadd_rn(pa[0][c], pa[2][c]), __fadd_rn(pa[1][c], pa[3][c]));
++        b[c] = __fadd_rn(__fadd_rn(pb[0][c], pb[2][c]), __fadd_rn(pb[1][c], pb[3][c]));
++#pragma unroll
++        for (int o = 4; o > 0; o >>= 1) {
++            a[c] += __shfl_xor_sync(0xffffffffu, a[c], o);
++            b[c] += __shfl_xor_sync(0xffffffffu, b[c], o);
++        }
++    }
++}
++
++template<int TG>
++__global__ void __launch_bounds__(256) tq_ampere_pair_gu_kernel(
++        const unsigned long long* __restrict__ grp_ptr, const int32_t* __restrict__ grp_start,
++        const int32_t* __restrict__ n_groups, const int32_t* __restrict__ ent_tok,
++        const block_q8_1* __restrict__ xq, NativeExpertLayout L,
++        float* __restrict__ gate, float* __restrict__ up) {
++    const int ng = *n_groups;
++    if (blockIdx.y >= ng) return;
++    STRATA_SHARED_ALIGN16_U32(s_grid_buf, IqGridWords<TG, true>::value);
++    const uint32_t* grid = stage_iq_grid<TG, true>(s_grid_buf, threadIdx.x, 256);
++    const int t = threadIdx.x & 7;
++    const int r = blockIdx.x * 32 + (threadIdx.x >> 3);
++    if (r >= L.n_ff) return;
++    for (int g = blockIdx.y; g < ng; g += gridDim.y) {
++        const auto* ra = (const uint8_t*) grp_ptr[g] + (size_t) r * L.gu_row;
++        const auto* rb = ra + L.up_off;
++        const float ga = L.tail_off ? ((const float*) (grp_ptr[g] + L.tail_off))[0] : 1.0f;
++        const float gb = L.tail_off ? ((const float*) (grp_ptr[g] + L.tail_off))[1] : 1.0f;
++        const int e0 = grp_start[g], e1 = grp_start[g + 1];
++        for (int e = e0; e < e1; e += GRP_NC) {
++            const int n = min(GRP_NC, e1 - e);
++            if (n == 1) {
++                const int off[1] = {ent_tok[e] * 80};
++                float a[1], b[1];
++                tq_ampere_dot_pair<TG, 1>(ra, rb, xq, off, t, a, b, grid);
++                if (t == 0) {
++                    gate[(size_t) e * L.n_ff + r] = a[0] * ga;
++                    up[(size_t) e * L.n_ff + r] = b[0] * gb;
++                }
++            } else if (n == 2) {
++                const int off[2] = {ent_tok[e] * 80, ent_tok[e + 1] * 80};
++                float a[2], b[2];
++                tq_ampere_dot_pair<TG, 2>(ra, rb, xq, off, t, a, b, grid);
++                if (t < 2) {
++                    gate[(size_t) (e + t) * L.n_ff + r] = a[t] * ga;
++                    up[(size_t) (e + t) * L.n_ff + r] = b[t] * gb;
++                }
++            } else if (n == 3) {
++                const int off[3] = {ent_tok[e] * 80, ent_tok[e + 1] * 80, ent_tok[e + 2] * 80};
++                float a[3], b[3];
++                tq_ampere_dot_pair<TG, 3>(ra, rb, xq, off, t, a, b, grid);
++                if (t < 3) {
++                    gate[(size_t) (e + t) * L.n_ff + r] = a[t] * ga;
++                    up[(size_t) (e + t) * L.n_ff + r] = b[t] * gb;
++                }
++            } else {
++                const int off[4] = {ent_tok[e] * 80, ent_tok[e + 1] * 80,
++                                    ent_tok[e + 2] * 80, ent_tok[e + 3] * 80};
++                float a[4], b[4];
++                tq_ampere_dot_pair<TG, 4>(ra, rb, xq, off, t, a, b, grid);
++                if (t < 4) {
++                    gate[(size_t) (e + t) * L.n_ff + r] = a[t] * ga;
++                    up[(size_t) (e + t) * L.n_ff + r] = b[t] * gb;
++                }
++            }
++        }
++    }
++}
++#endif
++
+ template<int TG, bool STAGE_GRID = kStageIqGrid<TG>, bool SUB16 = true>
+ __global__ void __launch_bounds__(256) native_gu_multi_kernel(const unsigned long long* __restrict__ grp_ptr,
+                                                               const int32_t* __restrict__ grp_start,
+@@ -3501,6 +3600,27 @@ bool tq_sub8_on() {
+     return on && g_stage_grid && !g_no_sub16_gu && !tq_stage_on();
+ #endif
+ }
++// Opt-in paired gate/up TQ rows for RTX 30 (SM86).  The default path remains unchanged.
++bool tq_ampere_pair_rows_on() {
++#if defined(__HIPCC__)
++    return false;
++#else
++    static const bool requested = [] {
++        const char* v = std::getenv("STRATA_TQ_AMPERE_ROWS");
++        return v != nullptr && std::strcmp(v, "2") == 0;
++    }();
++    if (!requested) return false;
++    int dev = 0, major = 0, minor = 0;
++    if (cudaGetDevice(&dev) != cudaSuccess ||
++        cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, dev) != cudaSuccess ||
++        cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, dev) != cudaSuccess) {
++        (void) cudaGetLastError();
++        return false;
++    }
++    return major == 8 && minor == 6;
++#endif
++}
++
+ // row chunks per block of the staged trellis gate/up and down kernels (STRATA_TQ_ROWCH, default 4)
+ int tq_row_chunks() {
+     static const int n = [] {
+@@ -4248,6 +4368,15 @@ void launch_gu(dim3 grid, cudaStream_t s, const unsigned long long* grp_ptr, con
+             if (tq_sub8_on() && (L.n_embd / Fmt<TG>::qk) * Fmt<TG>::ipb == 160) {
+                 dim3 g8 = grid;
+                 g8.x = (unsigned) ((2 * L.n_ff + 31) / 32);
++#if !defined(__HIPCC__)
++                if (tq_ampere_pair_rows_on()) {
++                    dim3 pair_grid = grid;
++                    pair_grid.x = (unsigned) ((L.n_ff + 31) / 32);
++                    tq_ampere_pair_gu_kernel<TG><<<pair_grid, 256, 0, s>>>(
++                        grp_ptr, grp_start, n_groups, ent_tok, X, L, gate, up);
++                    return;
++                }
++#endif
+                 native_gu_multi_kernel<TG, true, true><<<g8, 256, 0, s>>>(grp_ptr, grp_start, n_groups, ent_tok, X, L, gate, up);
+                 return;
+             }
+diff --git a/engine/CMakeLists.txt b/engine/CMakeLists.txt
+index 62382932c7b..16ac9189277 100644
+--- a/engine/CMakeLists.txt
++++ b/engine/CMakeLists.txt
+@@ -757,6 +767,15 @@ if(STRATA_NATIVE_EXPERTS)
+           add_test(NAME native_expert_parity_hadamard_${_name} COMMAND native_expert_parity --synthetic-hadamard ${_pair})
+           set_tests_properties(native_expert_parity_${_name} native_expert_parity_hadamard_${_name} PROPERTIES TIMEOUT 300)
+         endforeach()
++        # Exercise the paired gate/up TQ path when the active CUDA device is SM86 (RTX 30).
++        # Other devices use the unchanged native path, so the test remains portable.
++        add_test(NAME native_expert_parity_tqk6_tqk7_ampere_pair
++                 COMMAND native_expert_parity --synthetic tqk6/tqk7)
++        add_test(NAME native_expert_parity_tq2_t_ampere_pair
++                 COMMAND native_expert_parity --synthetic tq2_t/tq2_t)
++        set_tests_properties(native_expert_parity_tqk6_tqk7_ampere_pair
++                             native_expert_parity_tq2_t_ampere_pair
++                             PROPERTIES TIMEOUT 300 ENVIRONMENT "STRATA_TQ_AMPERE_ROWS=2")
+       endif()
+       # #290: the BF16 token embedding (--embd-gguf) gathered and dequantized bit for bit
+       add_test(NAME native_expert_parity_bf16_embd COMMAND native_expert_parity --bf16-embd)
+

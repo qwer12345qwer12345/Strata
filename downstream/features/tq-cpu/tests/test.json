@@ -1,0 +1,15 @@
+{
+  "cmake_args": [
+    "-DSTRATA_BUILD_TESTS=ON",
+    "-DSTRATA_NATIVE_EXPERTS=ON"
+  ],
+  "targets": [
+    "tq_cpu_parity"
+  ],
+  "optional_targets": {},
+  "ctest_regex": "^(tq_cpu_parity|tq_cpu_parity_avxvnni)$",
+  "optional_ctest_regex": {},
+  "overlays": [],
+  "python_tests": [],
+  "settings_generation": false
+}

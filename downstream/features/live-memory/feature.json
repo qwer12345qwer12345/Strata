@@ -1,0 +1,20 @@
+{
+  "id": "live-memory",
+  "name": "Live Memory initial VMM commit and policy helpers",
+  "version": "0.1.0",
+  "status": "active",
+  "base_commit": "6e38f588a646c0ee6948a74afbe670eb75896106",
+  "patched_tree": "c05f5d335e622cf94594c2143cf551ac96a333c6",
+  "requires": [],
+  "patches": [
+    {
+      "id": "live-memory-vmm",
+      "path": "patches/0001-live-memory-vmm.patch",
+      "sha256": "25bf69328242e79ee178ab30c765f9fdec5ab13c8f92b63728f6887afab760b9"
+    }
+  ],
+  "tests": "tests/test.json",
+  "environment": {
+    "STRATA_LIVE_MEMORY_INITIAL_MIB": "<positive whole MiB>"
+  }
+}

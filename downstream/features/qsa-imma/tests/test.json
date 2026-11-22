@@ -1,0 +1,17 @@
+{
+  "cmake_args": [
+    "-DSTRATA_BUILD_TESTS=ON",
+    "-DSTRATA_ENABLE_CUDA=ON"
+  ],
+  "targets": [
+    "qsa_prompt_attn_parity"
+  ],
+  "optional_targets": {},
+  "ctest_regex": "^qsa_prompt_attn_parity_k8v4$",
+  "optional_ctest_regex": {},
+  "overlays": [
+    "overlay/engine/src/kernels/qsa_prompt_attn_parity.cpp"
+  ],
+  "python_tests": [],
+  "settings_generation": false
+}

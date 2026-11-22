@@ -1,0 +1,16 @@
+{
+  "cmake_args": [
+    "-DSTRATA_BUILD_CONVERSATION_TESTS=ON"
+  ],
+  "targets": [
+    "conversation_spill_test"
+  ],
+  "optional_targets": {},
+  "ctest_regex": "^conversation_spill_test$",
+  "optional_ctest_regex": {},
+  "overlays": [
+    "overlay/engine/src/core/conversation_spill_test.cpp"
+  ],
+  "python_tests": [],
+  "settings_generation": false
+}

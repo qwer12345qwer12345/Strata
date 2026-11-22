@@ -1,0 +1,300 @@
+diff --git a/engine/include/strata/core/expert_cache.hpp b/engine/include/strata/core/expert_cache.hpp
+index 238c8594912..bfd044d01ff 100644
+--- a/engine/include/strata/core/expert_cache.hpp
++++ b/engine/include/strata/core/expert_cache.hpp
+@@ -124,6 +124,9 @@ class ExpertCache {
+     /// always.  CUDA only: a HIP build refuses it at open.  The slots past `slots()` after a shrink must hold no
+     /// resident expert and no loan: the CALLER evicts them first (they become CPU misses).
+     void set_segment_bytes(int64_t seg_bytes) { seg_req_ = seg_bytes > 0 ? seg_bytes : 0; }
++    /// Live Memory: reserve the full segmented address range but commit only this initial prefix.
++    /// 0 keeps the existing full-map behavior when the environment override is unset.
++    void set_initial_segment_bytes(int64_t bytes) { initial_seg_req_ = bytes > 0 ? bytes : 0; }
+     /// STRATA_MMQ_DIRECT: `open_sized` leaves at least `g` bytes of room after each slot's blob (the prompt MMQ
+     /// reads a little past a down matrix when it reads an expert in its slot).  Set before opening, like
+     /// `set_segment_bytes`; `close` keeps it.  0 (the default): no guard.  The uniform `open` ignores it, and so does
+@@ -255,6 +258,7 @@ class ExpertCache {
+     uint8_t* base_ = nullptr;
+     int64_t live_slots_ = 0;            ///< #533: slots() - all of them unless shrunk
+     int64_t seg_req_ = 0;               ///< #533: the segment size asked for (0: one cudaMalloc)
++    int64_t initial_seg_req_ = 0;       ///< Live Memory: initial mapped prefix (0: map the full arena)
+     int64_t guard_req_ = 0;             ///< STRATA_MMQ_DIRECT: bytes kept after each sized slot's blob (set_slot_guard)
+     int64_t guard_ = 0;                 ///< ...the guard open_sized applied to the open slots (0: none)
+     int64_t seg_ = 0;                   ///< #533: the segment size used (a multiple of the driver's granularity)
+diff --git a/engine/include/strata/core/live_memory.hpp b/engine/include/strata/core/live_memory.hpp
+new file mode 100644
+index 00000000000..ced32582417
+--- /dev/null
++++ b/engine/include/strata/core/live_memory.hpp
+@@ -0,0 +1,84 @@
++#pragma once
++
++#include <charconv>
++#include <cstdint>
++#include <limits>
++#include <sstream>
++#include <string>
++
++namespace strata::core {
++
++// A single acknowledged request to change the two expert-cache capacity limits.
++// Values on the control pipe are whole MiB; the engine reports actual rounded capacity.
++struct LiveMemoryRequest {
++    uint64_t id = 0;
++    uint64_t resident_mib = 0;
++    uint64_t vram_reserve_mib = 0;
++};
++
++// A newer request may replace a pending request only when it releases capacity in both
++// tiers. This prevents a pressure-relief request from being turned into a growth request.
++inline bool live_memory_supersedes(const LiveMemoryRequest& next, const LiveMemoryRequest& old,
++                                   uint64_t resident_bytes) {
++    return next.id != old.id && next.resident_mib <= old.resident_mib &&
++           next.resident_mib <= (resident_bytes >> 20) &&
++           next.vram_reserve_mib >= old.vram_reserve_mib &&
++           (next.resident_mib < old.resident_mib || next.vram_reserve_mib > old.vram_reserve_mib);
++}
++
++// Completion belongs to the whole request. A whole RAM block can take capacity below an
++// arbitrary MiB target; once that shrink is complete, later GPU steps must not refill the gap.
++template<class Resize>
++bool live_memory_ram_step(bool& done, Resize resize) {
++    if (done) return true;
++    bool reached = false;
++    if (!resize(reached)) return false;
++    done = reached;
++    return true;
++}
++
++// A RAM shrink or a higher VRAM reserve is pressure relief, not permission to grow the GPU
++// cache with VRAM that becomes free as a side effect of releasing RAM.
++inline bool live_memory_gpu_growth_allowed(const LiveMemoryRequest& request, uint64_t resident_bytes,
++                                           uint64_t previous_reserve_mib) {
++    return request.resident_mib >= (resident_bytes >> 20) &&
++           request.vram_reserve_mib <= previous_reserve_mib;
++}
++
++// Calculate target committed GPU bytes from a fresh free-memory sample. Growth leaves one
++// extra quantum of margin for allocator/driver accounting; shrink does not add that margin.
++inline uint64_t live_memory_gpu_budget(uint64_t free_bytes, uint64_t committed, uint64_t reserve,
++                                       uint64_t quantum, bool allow_growth) {
++    if (quantum == 0) return committed;
++    const uint64_t available = free_bytes > std::numeric_limits<uint64_t>::max() - committed
++        ? std::numeric_limits<uint64_t>::max() : free_bytes + committed;
++    const uint64_t target = available > reserve ? (available - reserve) / quantum * quantum : 0;
++    if (target <= committed) return target;
++    if (!allow_growth) return committed;
++    const uint64_t spare = free_bytes > reserve && free_bytes - reserve > quantum
++        ? free_bytes - reserve - quantum : 0;
++    const uint64_t growth = spare / quantum * quantum;
++    return growth > std::numeric_limits<uint64_t>::max() - committed
++        ? std::numeric_limits<uint64_t>::max() : committed + growth;
++}
++
++// Exact control-pipe grammar: MEMORY <positive-id> <resident-MiB> <VRAM-reserve-MiB>.
++// Parse into a temporary so malformed input never partially changes the caller's request.
++inline bool parse_live_memory_request(const std::string& line, LiveMemoryRequest& out) {
++    std::istringstream in(line);
++    std::string verb, id, ram, vram, extra;
++    if (!(in >> verb >> id >> ram >> vram) || verb != "MEMORY" || (in >> extra)) return false;
++    auto number = [](const std::string& s, uint64_t& value) {
++        if (s.empty() || s.find_first_not_of("0123456789") != std::string::npos) return false;
++        const auto result = std::from_chars(s.data(), s.data() + s.size(), value);
++        return result.ec == std::errc{} && result.ptr == s.data() + s.size();
++    };
++    LiveMemoryRequest next;
++    if (!number(id, next.id) || !number(ram, next.resident_mib) ||
++        !number(vram, next.vram_reserve_mib) || next.id == 0 ||
++        next.resident_mib > (1ull << 20) || next.vram_reserve_mib > (1ull << 20)) return false;
++    out = next;
++    return true;
++}
++
++} // namespace strata::core
+diff --git a/engine/src/core/expert_cache.cpp b/engine/src/core/expert_cache.cpp
+index 9630d1c3386..7ab438e9a84 100644
+--- a/engine/src/core/expert_cache.cpp
++++ b/engine/src/core/expert_cache.cpp
+@@ -17,6 +17,7 @@
+ 
+ #include <algorithm>
+ #include <atomic>
++#include <charconv>
+ #include <cstdio>
+ #include <filesystem>
+ #include <cstdlib>
+@@ -448,7 +449,10 @@ bool ExpertCache::open_segmented(uint64_t want, std::string& err) {
+         segs_.push_back(0);
+         seg_size_.push_back((int64_t) std::min<uint64_t>((uint64_t) seg_, total - at));
+     }
+-    for (size_t i = 0; i < segs_.size(); ++i) {
++    const uint64_t initial = initial_seg_req_ > 0
++        ? std::min<uint64_t>(total, ((uint64_t) initial_seg_req_ + (uint64_t) seg_ - 1) / (uint64_t) seg_ * (uint64_t) seg_)
++        : total;
++    for (size_t i = 0; i < segs_.size() && (uint64_t) i * (uint64_t) seg_ < initial; ++i) {
+         if (!map_segment(v, dev, va + (CUdeviceptr) ((uint64_t) i * (uint64_t) seg_), (size_t) seg_size_[i],
+                          segs_[i])) {
+             char buf[200];
+@@ -614,7 +618,32 @@ bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int6
+         return false;
+     }
+ 
++    // Explicit opt-in for a partially committed Live Memory arena. The ordinary cache remains fully mapped
++    // unless this variable is present or the caller sets the initial prefix through the API.
++    if (initial_seg_req_ == 0) {
++        const char* live_mib = std::getenv("STRATA_LIVE_MEMORY_INITIAL_MIB");
++        if (live_mib != nullptr) {
++            uint64_t mib = 0;
++            const char* end = live_mib + std::strlen(live_mib);
++            const auto parsed = std::from_chars(live_mib, end, mib);
++            if (live_mib[0] == '\0' || parsed.ec != std::errc{} || parsed.ptr != end || mib == 0 ||
++                mib > (uint64_t) INT64_MAX / (uint64_t(1) << 20)) {
++                err = "ExpertCache: STRATA_LIVE_MEMORY_INITIAL_MIB must be a positive whole-MiB value";
++                return false;
++            }
++            initial_seg_req_ = (int64_t) (mib << 20);
++            if (seg_req_ <= 0) seg_req_ = 32ll << 20;
++        }
++    }
+     const uint64_t want = (uint64_t) n_slots * (uint64_t) blob_bytes;
++    if (initial_seg_req_ > 0 && seg_req_ <= 0) {
++        err = "ExpertCache: Live Memory's initial commit requires a segmented VMM arena";
++        return false;
++    }
++    const uint64_t initial_want = initial_seg_req_ > 0
++        ? std::min<uint64_t>(want, ((uint64_t) initial_seg_req_ + (uint64_t) seg_req_ - 1) /
++                                      (uint64_t) seg_req_ * (uint64_t) seg_req_)
++        : want;
+ 
+     // ---- **THE ALLOCATION IS CHECKED AGAINST THE CARD, NOT AGAINST THE REQUEST.**
+     //
+@@ -625,21 +654,33 @@ bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int6
+     size_t free_b = 0, total_b = 0;
+     if (cudaMemGetInfo(&free_b, &total_b) == cudaSuccess) {
+         free_b = device_free_bytes();   // unified memory: what the OS can give back counts (see the header)
+-        if ((uint64_t) free_b < want) {
+-            char buf[320];
+-            std::snprintf(buf, sizeof buf,
+-                          "ExpertCache: %lld slots x %lld B = %.2f GiB, but only %.2f GiB of VRAM is free "
+-                          "(%.2f GiB of %.2f GiB total). Lower --expert-cache.",
+-                          (long long) n_slots, (long long) blob_bytes, (double) want / 1073741824.0,
+-                          (double) free_b / 1073741824.0, (double) (total_b - free_b) / 1073741824.0,
+-                          (double) total_b / 1073741824.0);
++        if ((uint64_t) free_b < initial_want) {
++            char buf[384];
++            if (initial_seg_req_ > 0) {
++                std::snprintf(buf, sizeof buf,
++                              "ExpertCache: Live Memory initial commit %.2f GiB (of %.2f GiB reserved) exceeds "
++                              "the %.2f GiB of VRAM free",
++                              (double) initial_want / 1073741824.0, (double) want / 1073741824.0,
++                              (double) free_b / 1073741824.0);
++            } else {
++                std::snprintf(buf, sizeof buf,
++                              "ExpertCache: %lld slots x %lld B = %.2f GiB, but only %.2f GiB of VRAM is free "
++                              "(%.2f GiB of %.2f GiB total). Lower --expert-cache.",
++                              (long long) n_slots, (long long) blob_bytes, (double) want / 1073741824.0,
++                              (double) free_b / 1073741824.0, (double) (total_b - free_b) / 1073741824.0,
++                              (double) total_b / 1073741824.0);
++            }
+             err = buf;
+             return false;
+         }
+     }
+ 
+ #if !defined(STRATA_EC_NO_VMM)
+-    if (seg_req_ > 0 && !segmented_supported()) {   // a driver without them: one block, the engine starts all the same
++    if (seg_req_ > 0 && !segmented_supported()) {
++        if (initial_seg_req_ > 0) {
++            err = "ExpertCache: Live Memory requires CUDA virtual memory management on this device and driver";
++            return false;
++        }
+         std::fprintf(stderr, "ExpertCache: --vram-elastic is off: the driver or this GPU offers no virtual memory management; "
+                              "the cache is one block\n");
+         seg_req_ = 0;
+@@ -669,18 +710,19 @@ bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int6
+     }
+     // Zeroed so a slot read before it is filled is a DETERMINISTIC wrong answer rather than whatever the
+     // allocator handed back.  A stale block of a previous process's memory would still sum to finite floats.
+-    if (cudaMemset(base_, 0, (size_t) want) != cudaSuccess) {
+-        err = "ExpertCache: cudaMemset of the slot arena failed";
++    const uint64_t zero_bytes = segmented() ? (uint64_t) mapped_bytes() : want;
++    if (zero_bytes > 0 && cudaMemset(base_, 0, (size_t) zero_bytes) != cudaSuccess) {
++        err = "ExpertCache: cudaMemset of the committed slot prefix failed";
+         close();
+         return false;
+     }
+ 
+     residency_.assign((size_t) (n_layers * n_expert), kNotResident);
+     slots_ = n_slots;
+-    live_slots_ = n_slots;
+     n_layers_ = n_layers;
+     n_expert_ = n_expert;
+     blob_ = blob_bytes;
++    live_slots_ = segmented() ? slots_within(mapped_bytes()) : n_slots;
+ #if defined(STRATA_USE_HIP)
+     if (!ensure_blocking_staging((std::size_t) blob_, err)) {
+         close();
+@@ -715,10 +757,10 @@ bool ExpertCache::open_sized(const std::vector<int64_t>& slot_bytes, int64_t n_l
+     // one allocation of the summed size, through the uniform path's checks: n "slots" of 1 byte
+     if (!open((int64_t) off.back(), n_layers, n_expert, 1, err)) return false;
+     slots_ = (int64_t) slot_bytes.size();
+-    live_slots_ = slots_;
+     blob_ = mx;
+     off_ = std::move(off);
+     guard_ = guard_req_;
++    live_slots_ = segmented() ? slots_within(mapped_bytes()) : slots_;
+ #if defined(STRATA_USE_HIP)
+     if (!ensure_blocking_staging((std::size_t) blob_, err)) {
+         close();
+diff --git a/tools/settings_register.py b/tools/settings_register.py
+index fa4026df14e..d2ea11e0564 100644
+--- a/tools/settings_register.py
++++ b/tools/settings_register.py
+@@ -223,7 +223,7 @@ def _backend_of(path: str, flavours: set[str]) -> list[str]:
+     return res
+ 
+ 
+-_INT_RE = re.compile(r"\b(atoi|stoi|strtol|strtoll|strtoul|strtoull|atol|atoll|stoll|stoul|stoull)\b")
++_INT_RE = re.compile(r"\b(atoi|stoi|strtol|strtoll|strtoul|strtoull|atol|atoll|stoll|stoul|stoull|from_chars)\b")
+ _FLOAT_RE = re.compile(r"\b(atof|strtod|strtof|stof|stod)\b")
+ _NUM = r"-?(?:0x[0-9a-fA-F]+|\d[\d.']*(?:e[+-]?\d+)?)[fFuUlL]*"
+ 
+@@ -256,9 +256,9 @@ def _analyze(lines, i, name, fn, col):
+             return "float", None, (_num_clean(arg) if arg else None)
+         if short == "pipe_dbg_env":
+             return "debug-gated", None, "read only when STRATA_PIPELINE_DEBUG=1"
+-    # std::getenv: look at the rest of the statement and the next two lines
++    # std::getenv: look at the rest of the statement and the next four lines
+     win = [first]
+-    for k in range(1, 4):
++    for k in range(1, 5):
+         if i + k < len(lines):
+             win.append(lines[i + k])
+     text = "\n".join(win)
+diff --git a/engine/CMakeLists.txt b/engine/CMakeLists.txt
+index 62382932c7b..fb31f3b144d 100644
+--- a/engine/CMakeLists.txt
++++ b/engine/CMakeLists.txt
+@@ -222,6 +222,11 @@ if(STRATA_BUILD_CONVERSATION_TESTS)
+   add_executable(conversation_memory_test src/core/conversation_memory_test.cpp src/core/conversation_memory.cpp)
+   target_include_directories(conversation_memory_test PRIVATE include)
+   add_test(NAME conversation_memory_test COMMAND conversation_memory_test)
++  # Live Memory request grammar and capacity policy (header-only, CPU-only).
++  add_executable(live_memory_policy_test tests/core/live_memory_policy_test.cpp)
++  target_include_directories(live_memory_policy_test PRIVATE include)
++  target_compile_features(live_memory_policy_test PRIVATE cxx_std_17)
++  add_test(NAME live_memory_policy_test COMMAND live_memory_policy_test)
+   add_executable(conversation_file_test src/core/conversation_file_test.cpp src/core/conversation_file.cpp)
+   target_include_directories(conversation_file_test PRIVATE include)
+   add_test(NAME conversation_file_test COMMAND conversation_file_test)
+@@ -706,6 +711,11 @@ if(STRATA_NATIVE_EXPERTS)
+     target_include_directories(expdec_bench PRIVATE ${_strata_gpu_include_directories})
+     target_link_libraries(expdec_bench PRIVATE strata_kernels ${_strata_gpu_runtime_target})
+     if(STRATA_BUILD_TESTS AND STRATA_ENABLE_CUDA)
++      # Live Memory's partially committed ExpertCache VMM prefix (SM86+ with driver VMM; skip otherwise).
++      add_executable(expert_cache_segmented_test tests/core/expert_cache_segmented_test.cpp)
++      target_link_libraries(expert_cache_segmented_test PRIVATE strata_engine ${_strata_gpu_runtime_target})
++      add_test(NAME expert_cache_segmented_test COMMAND expert_cache_segmented_test)
++      set_tests_properties(expert_cache_segmented_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+       # Unsloth UD-Q4_K_XL's three expert pairs (and Q8_0 alone, its embedding) on synthetic ggml-quantized weights
+       # at 2560/640: GPU and CPU experts against the float reference, GPU dequantizers against to_float.
+       # q4_K/q5_0 and q5_0/q8_0: a plain llama-quantize "_M" tier GGUF (not Unsloth's dynamic method) commonly
