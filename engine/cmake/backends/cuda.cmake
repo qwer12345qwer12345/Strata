@@ -115,6 +115,12 @@ endmacro()
 # the prompt kernels' tests: the fused experts' (linked to ${_strata_pf_tests_lib})
 macro(strata_cuda_prompt_tests)
     if(STRATA_BUILD_TESTS)
+      # SM86 K8V4: int8 K x split-INT8 query on IMMA, with the q4_0 V gather path unchanged.
+      add_executable(qsa_prompt_attn_parity src/kernels/qsa_prompt_attn_parity.cpp)
+      target_link_libraries(qsa_prompt_attn_parity PRIVATE strata_kernels ${_strata_gpu_runtime_target})
+      add_test(NAME qsa_prompt_attn_parity_k8v4 COMMAND qsa_prompt_attn_parity 4096 512 2 --k8v4)
+      set_tests_properties(qsa_prompt_attn_parity_k8v4 PROPERTIES
+                           ENVIRONMENT "STRATA_K8V4_QK_IMMA=1" SKIP_RETURN_CODE 77 TIMEOUT 600)
       # P4-SPLIT: the engine and Strata's prompt library hold none of llama.cpp's MMQ (names in the bytes, nm, cuobjdump; tools/check_no_mmq.py)
       # The cuobjdump look is named, so a device look that did not run fails the test (exit 3, "NOT RUN (<why>)" in its output).  Each tool
       # gets 600 s (--tool-timeout), under the test's own limit: a slow cuobjdump ends as a named NOT RUN, not as a test killed with no line.
