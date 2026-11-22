@@ -256,7 +256,7 @@ def _analyze(lines, i, name, fn, col):
             return "float", None, (_num_clean(arg) if arg else None)
         if short == "pipe_dbg_env":
             return "debug-gated", None, "read only when STRATA_PIPELINE_DEBUG=1"
-    # std::getenv: look at the rest of the statement and the next two lines
+    # std::getenv: look at the rest of the statement and the next four lines
     win = [first]
     for k in range(1, 5):
         if i + k < len(lines):
