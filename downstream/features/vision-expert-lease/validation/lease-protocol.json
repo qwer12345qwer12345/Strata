@@ -1,0 +1,42 @@
+[
+  {
+    "phase": "real-reader",
+    "protocol": "VISION_LEASE state=held released_mib=1254 restore_experts=1253 vram_free_mib=2064 staging_bytes=1049600 elapsed_ms=11.2"
+  },
+  {
+    "phase": "real-reader",
+    "protocol": "VISION_LEASE state=idle restored_experts=1253 elapsed_ms=1655.8"
+  },
+  {
+    "phase": "real-reader",
+    "protocol": "VISION_LEASE state=held released_mib=1254 restore_experts=1253 vram_free_mib=2064 staging_bytes=1049600 elapsed_ms=12.3"
+  },
+  {
+    "phase": "real-reader",
+    "protocol": "VISION_LEASE state=idle restored_experts=1253 elapsed_ms=1321.7"
+  },
+  {
+    "phase": "real-reader",
+    "protocol": "VISION_LEASE state=held released_mib=1254 restore_experts=1253 vram_free_mib=2048 staging_bytes=1049600 elapsed_ms=11.4"
+  },
+  {
+    "phase": "real-reader",
+    "protocol": "VISION_LEASE state=idle restored_experts=1253 elapsed_ms=1423.3"
+  },
+  {
+    "phase": "real-reader",
+    "protocol": "VISION_LEASE state=held released_mib=1382 restore_experts=1381 vram_free_mib=2144 staging_bytes=1049600 elapsed_ms=11.9"
+  },
+  {
+    "phase": "real-reader",
+    "protocol": "VISION_LEASE state=idle restored_experts=1381 elapsed_ms=1862.9"
+  },
+  {
+    "phase": "failed-reader",
+    "protocol": "VISION_LEASE state=held released_mib=1126 restore_experts=1125 vram_free_mib=2054 staging_bytes=1049600 elapsed_ms=10.3"
+  },
+  {
+    "phase": "failed-reader",
+    "protocol": "VISION_LEASE state=idle restored_experts=1125 elapsed_ms=1868.0"
+  }
+]

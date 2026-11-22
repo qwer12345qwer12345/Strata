@@ -739,10 +739,10 @@ index 000000000..87f35b558
 +    return report
 diff --git a/terminal/l2/manual_compare.py b/terminal/l2/manual_compare.py
 new file mode 100644
-index 000000000..eb178b2e4
+index 000000000..c23a971f5
 --- /dev/null
 +++ b/terminal/l2/manual_compare.py
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,101 @@
 +"""Explicit headless comparison; normal startup never imports this module."""
 +import argparse
 +import json
@@ -766,21 +766,32 @@ index 000000000..eb178b2e4
 +    parser.add_argument('--state-dir', type=Path)
 +    parser.add_argument('--group', action='append', help='combined/spec-lookup/shape-qkv/dense-lookup/skip-lookup/rows/adapt-tail/tail-spec; default all')
 +    parser.add_argument('--budget-s', type=int, default=14400)
++    parser.add_argument('--vision-check',action='store_true',help='run the optional vision lease correctness suite only')
 +    parser.add_argument('--plan', action='store_true', help='show the comparison plan without stopping or starting anything')
 +    parser.add_argument('--worker', type=Path, help=argparse.SUPPRESS)
 +    args = parser.parse_args(argv)
 +    if args.worker:
 +        payload = json.loads(args.worker.read_text())
-+        report = experiments.run_comparison(Path(payload['root']), payload['cfg'], Path(payload['directory']),
-+                                            payload['port'], payload['request'])
++        if payload['request'].get('suite')=='vision':
++            from l2.vision_check import run
++        else:run=experiments.run_comparison
++        report = run(Path(payload['root']),payload['cfg'],Path(payload['directory']),payload['port'],payload['request'])
 +        return 0 if report['status'] == 'passed' else 1
 +    cfg = json.loads(args.profile.read_text())
 +    directory = args.state_dir or Path(cfg.get('startup_benchmark', {}).get(
 +        'output_dir', str(Path.home()/'.local/state/strata/startup-benchmark')))
 +    root, cfg = runtime_config.select(Path(cfg['cwd']), cfg, directory)
++    if args.vision_check and args.group:parser.error('--vision-check and --group are separate suites')
 +    sequence = experiments.arms(args.group)
 +    request = {'engine_sha256': json.loads((directory/'production-baseline.json').read_text())['engine_sha256'],
 +               'budget_s': args.budget_s, 'groups': args.group}
++    if args.vision_check:
++        from l2.vision_check import plan
++        vision_plan=plan(cfg)
++        request['suite']='vision'
++        if args.plan:
++            print(json.dumps(vision_plan,indent=2,ensure_ascii=False))
++            return 0
 +    if args.plan:
 +        print(json.dumps({'status':runtime_config.STATUS, 'automatic_tests':False, 'daily':runtime_config.DAILY,
 +                          'groups':list(dict.fromkeys(r['group'] for r in sequence)), 'arms':len(sequence),

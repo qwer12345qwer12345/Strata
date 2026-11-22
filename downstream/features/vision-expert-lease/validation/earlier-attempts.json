@@ -1,0 +1,35 @@
+{
+  "attempts": [
+    {
+      "status": "failed",
+      "scope": "Desktop API vision/expert-lease correctness with 6GiB partial expert RAM, 5600 GPU slots, 16K context; not full-resident headless speed",
+      "min_mem_available_kib": 11500020,
+      "max_new_swap_kib": 1303804,
+      "guard": "memory or swap limit",
+      "failure": "[Errno 104] Connection reset by peer",
+      "image_answer_contains_expected_colors": false
+    },
+    {
+      "status": "failed",
+      "scope": "Desktop API vision/expert-lease correctness with 2GiB partial expert RAM, 5600 GPU slots, 8K context; not full-resident headless speed",
+      "min_mem_available_kib": 17752696,
+      "max_new_swap_kib": 1092520,
+      "guard": "memory or swap limit",
+      "failure": "[Errno 104] Connection reset by peer",
+      "image_answer_contains_expected_colors": true
+    },
+    {
+      "status": "failed",
+      "scope": "Desktop API vision/expert-lease correctness with 2GiB partial expert RAM, 5600 GPU slots, 8K context; not full-resident headless speed",
+      "min_mem_available_kib": 18020976,
+      "max_new_swap_kib": 3588520,
+      "max_owned_process_swap_kib": 194980,
+      "failure": "reader_start_failure: expected 503, got 500",
+      "image_answer_contains_expected_colors": true
+    }
+  ],
+  "resolution": [
+    "The original all-system 1GiB swap guard interrupted two runs despite >10/17GiB available RAM. A separate owned-process-swap guard plus low-MemAvailable guard was used for the desktop correctness run; global swap remains reported.",
+    "The third attempt found HTTP500 on injected reader startup failure; mapped it to EngineDied/503, retained END restoration, and reran the full API sequence successfully."
+  ]
+}

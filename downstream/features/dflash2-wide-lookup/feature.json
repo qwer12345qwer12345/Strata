@@ -1,10 +1,10 @@
 {
   "id": "dflash2-wide-lookup",
   "name": "Opt-in solo DFlash2 wide lookup bridge and explicit headless comparisons",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "status": "active",
   "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
-  "patched_tree": "4dca0c64155b112dd972774de6a18c48f2039bff",
+  "patched_tree": "62e4835632803c9370a9d9f1850cdb1c12b5326e",
   "requires": [
     "legacy-session-archive"
   ],
@@ -12,7 +12,7 @@
     {
       "id": "dflash2-wide-lookup",
       "path": "patches/0001-dflash2-wide-lookup.patch",
-      "sha256": "75358ae4394b0a6c530324addc6df20ad1f357307476a7f81291377f470d6f65"
+      "sha256": "191ddc7f1fe5ad77012d6dc81a58bc8ff1c93f56b6295a0a68003edd81774f15"
     }
   ],
   "tests": "tests/test.json",

@@ -27,24 +27,12 @@
 
 ## 识图现在的准确状态
 
-**当前日常没有开启识图。** 原服务profile没有vision段或`--vision`，统一选择器也没有添加它。
+已按 [显存借还设计](design/GYRO_VISION_VRAM_LEASE.md) 实现独立 [vision-expert-lease补丁](features/vision-expert-lease/README.md)，并配置为下一次无头启动启用。该节更新取代此前“未实现、保持关闭”的状态；前面的计算内核分析仍有效。
 
-本机有对应的约866MiB BF16 mmproj文件，有一份来自engine0.1.58组件的`strata-vision`；这证明文件存在，不证明它与当前0.1.65、模型和低内存预算已经完成兼容性验收。此轮没有加载编码器。
+单卡CUDA下，服务在FIFO内暂停语言引擎，释放专家缓存尾部物理段，GPU编码图片后立即退出reader，再从原始专家来源恢复原槽位。借出期间命令门禁禁止生成，归还失败保留门禁供重试。普通VRAM命令原有resident拒绝条件未删除；不需要增添一份完整RAM专家副本，也不复用Live Memory。
 
-### 上游现成GPU方案为什么还不满足我们的目标
+本机0.1.58 reader和BF16 mmproj已与本次编译的0.1.65引擎完成真实API兼容检查；图片上限1024 token。冷图、多图、缓存、取消、坏图和reader启动失败的归还均检查通过。测试采用桌面2GiB局部专家RAM预算和8K上下文，不能证明日常完整驻留、256K峰值或一般识图质量。无头正式检查入口为 `sudo ~/.local/bin/strata-headless-compare --vision-check`；普通启动不会执行它。
 
-1. `serve/server.py` 的 `_vision_up()` 请求引擎腾显存；`_vision_idle_down()` 在闲置后关闭编码器并归还。默认闲置时长约120秒，常见实现会让编码器与后续语言生成共存一段时间，并非图片编码完成后立刻归还。
-2. 当前低内存模式仅在RAM保存GPU专家的补集。`generate.cpp` 的 `vram_command` 在 `src.complement_ready()` 时明确拒绝伸缩：GPU中的一些专家没有RAM副本，直接让出槽位会失去完整可用覆盖。
-3. 上游 `reader_room.hpp` 为识图+elastic+该驻留模式至少保留2048MiB。相对现有448MiB，需再让出约1600MiB GPU专家空间；对应专家转入RAM补集，可能使32GiB内存越界或触发文件层，不能只比较编码器自身快慢。
-4. 原先“编码前借专家显存、编码后按原槽恢复再生成”的方案仍只是 [设计文档](design/GYRO_VISION_VRAM_LEASE.md)，活动补丁栈没有实现或验收该事务。新DP4A优化速度，不改变这个专家所有权关系。
-
-因此，**不能宣称GPU按需借还识图已经可直接开启**。启用上游静态保留方案也许能运行，但会改变专家容量，尚无本机驻留证据；本次没有悄悄开它。
-
-### CPU路径
-
-上游支持 `vision.gpu=false`，可绕开GPU腾显存问题；仍需在RAM容纳编码器权重和工作区，读取图片也有CPU耗时。当前32GiB与0.25GiB专家headroom并不足以静态证明额外内存一定能装下，旧reader兼容性也未验证。它是比GPU借还更接近现成实现的候选，并不是已验收功能。若开启，宜按需加载、限制图片token，单独核对内存与图片输出，再决定是否日常启用。
-
-本次保持识图关闭，保留当前文本服务容量；未启用Live Memory、未重开ninfer、未下载或加载视觉模型。
-
+CPU静默回退在该opt-in模式中关闭，避免GPU reader启动失败时引入未预算的CPU权重和工作区。图片编码缓存使用磁盘缓存目录；专家恢复只用单blob暂存。完整结果及失败记录见 [validation](features/vision-expert-lease/validation/README.md)。
 
 补充：ADAPT_NOWAIT与官方tail skip的源码核对、文档矛盾和用户性能取舍见 [NOWAIT_AND_TAIL_SKIP.md](NOWAIT_AND_TAIL_SKIP.md)。此前以严格重复性关闭NOWAIT的本机决策已纠正；上游默认不做修改，通过其保留的环境开关显式选入。

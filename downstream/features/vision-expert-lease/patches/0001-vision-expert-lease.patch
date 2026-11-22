@@ -1,0 +1,781 @@
+diff --git a/engine/cmake/strata_gpu_engine.cmake b/engine/cmake/strata_gpu_engine.cmake
+index 120ebaf87..95504011c 100644
+--- a/engine/cmake/strata_gpu_engine.cmake
++++ b/engine/cmake/strata_gpu_engine.cmake
+@@ -410,6 +410,18 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+     target_link_libraries(expert_cache_per_layer_test PRIVATE strata_engine)
+     add_test(NAME expert_cache_per_layer_test COMMAND expert_cache_per_layer_test)
+     set_tests_properties(expert_cache_per_layer_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
++    add_executable(vision_expert_lease_test tests/core/vision_expert_lease_test.cpp)
++    target_include_directories(vision_expert_lease_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${_strata_gpu_include_directories})
++    if(MSVC)
++      target_compile_options(vision_expert_lease_test PRIVATE /UNDEBUG)
++    else()
++      target_compile_options(vision_expert_lease_test PRIVATE -UNDEBUG)
++    endif()
++    add_test(NAME vision_expert_lease_test COMMAND vision_expert_lease_test)
++    add_executable(vision_expert_lease_gpu_test tests/core/vision_expert_lease_gpu_test.cpp)
++    target_link_libraries(vision_expert_lease_gpu_test PRIVATE strata_engine)
++    add_test(NAME vision_expert_lease_gpu_test COMMAND vision_expert_lease_gpu_test)
++    set_tests_properties(vision_expert_lease_gpu_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 90)
+     add_executable(expert_cache_segmented_test tests/core/expert_cache_segmented_test.cpp)
+     target_link_libraries(expert_cache_segmented_test PRIVATE strata_engine)
+     add_test(NAME expert_cache_segmented_test COMMAND expert_cache_segmented_test)
+diff --git a/engine/include/strata/core/vision_expert_lease.hpp b/engine/include/strata/core/vision_expert_lease.hpp
+new file mode 100644
+index 000000000..582166aee
+--- /dev/null
++++ b/engine/include/strata/core/vision_expert_lease.hpp
+@@ -0,0 +1,61 @@
++#pragma once
++// A paused single-GPU vision turn may lend physical cache segments without changing
++// expert ownership. The command dispatcher MUST block GPU work while active().
++#include <cstdint>
++#include <functional>
++#include <string>
++#include <utility>
++#include <vector>
++
++namespace strata::core {
++struct VisionLeaseOps {
++    std::function<int64_t()> mapped, slots;
++    std::function<bool(int64_t,std::string&)> shrink, grow;
++    std::function<bool(int32_t,int32_t,std::string&)> refill; // residency index, original slot; synchronous
++    std::function<bool(std::string&)> finish;
++};
++
++class VisionExpertLease {
++    bool held_ = false;
++    int64_t original_bytes_ = 0, original_slots_ = 0, kept_slots_ = 0;
++    std::vector<int32_t> original_res_;
++public:
++    bool active() const { return held_; }
++    int64_t original_bytes() const { return original_bytes_; }
++    int64_t original_slots() const { return original_slots_; }
++    int64_t kept_slots() const { return kept_slots_; }
++    size_t restore_experts() const {
++        size_t n=0;for(int32_t slot:original_res_)if(slot>=kept_slots_)++n;return n;
++    }
++    bool restore(const VisionLeaseOps& ops, const std::vector<int32_t>& res, std::string& err) {
++        if (!held_) return true; // retry after an acknowledged END is harmless
++        if (res != original_res_) { err="vision lease: expert ownership changed during the lease";return false; }
++        if (!ops.grow(original_bytes_,err) || ops.mapped()!=original_bytes_ || ops.slots()!=original_slots_) {
++            if(err.empty())err="vision lease: original cache mapping is not fully restored";
++            return false; // retain the snapshot and gate; END may be retried
++        }
++        for(size_t i=0;i<original_res_.size();++i) {
++            const int32_t slot=original_res_[i];
++            if(slot>=kept_slots_ && !ops.refill((int32_t)i,slot,err))return false;
++        }
++        if(!ops.finish(err))return false;
++        held_=false;original_res_.clear();
++        return true;
++    }
++    bool begin(int64_t keep_bytes, const VisionLeaseOps& ops,
++               const std::vector<int32_t>& res, std::string& err) {
++        if(held_){err="vision lease: already active; restore it before another borrow";return false;}
++        original_bytes_=ops.mapped();original_slots_=ops.slots();
++        if(keep_bytes<0 || keep_bytes>original_bytes_){err="vision lease: invalid retained byte count";return false;}
++        // Allocate metadata before releasing any VRAM. Never copy the expert complement.
++        original_res_=res;kept_slots_=original_slots_;held_=true;
++        const bool ok=ops.shrink(keep_bytes,err);
++        kept_slots_=ops.slots(); // includes partial driver failure
++        if(ok)return true;
++        const std::string cause=err;std::string rollback;
++        if(!restore(ops,res,rollback))err=cause+"; rollback incomplete: "+rollback;
++        else err=cause+"; original cache restored";
++        return false;
++    }
++};
++} // namespace strata::core
+diff --git a/engine/src/program/generate.cpp b/engine/src/program/generate.cpp
+index 9d57f2b40..f57c5a340 100644
+--- a/engine/src/program/generate.cpp
++++ b/engine/src/program/generate.cpp
+@@ -23,6 +23,7 @@
+ #include "strata/core/arch_defaults.hpp"
+ #include "strata/core/prompt_checkpoint_grid.hpp"
+ #include "strata/core/reader_room.hpp"
++#include "strata/core/vision_expert_lease.hpp"
+ #include "strata/core/residency_trim.hpp"
+ #include "strata/core/kfd_settle.hpp"
+ #include "strata/core/kfd_quiet.hpp"
+@@ -8715,7 +8716,7 @@ int main(int argc, char** argv) {
+     // The picture reader's room in the resident RAM mode (strata/core/reader_room.hpp): there the cache refuses the server's VRAM
+     // command, so an on-demand reader keeps its room in the reserve, as before the reader went on demand.  Decided here, once, before
+     // the cache is sized; the mode is not entered later.
+-    if (const int keep = strata::core::reader_room_reserve_mib(o.vram_reserve_mib, o.vision, o.vram_elastic && o.serve,
++    if (const int keep = strata::core::reader_room_reserve_mib(o.vram_reserve_mib, o.vision, o.vram_elastic && o.serve && !(std::getenv("STRATA_VISION_EXPERT_LEASE") && std::string(std::getenv("STRATA_VISION_EXPERT_LEASE")) == "1"),
+                                                                o.resident_cpu_experts);
+         keep != o.vram_reserve_mib) {
+         std::fprintf(stderr, "strata generate: the resident RAM mode cannot resize the expert cache, so the picture reader's %d MiB "
+@@ -16052,6 +16053,82 @@ int main(int argc, char** argv) {
+                         (long long) (free_b >> 20), (long long) o.prefill_chunk);
+             return true;
+         };
++        // Dedicated vision transaction. Unlike generic VRAM resize it never changes
++        // host_res or RAM complement ownership, and no model work may run until END.
++        strata::core::VisionExpertLease vision_lease;
++        const bool vision_lease_on = std::getenv("STRATA_VISION_EXPERT_LEASE") &&
++                                     std::string(std::getenv("STRATA_VISION_EXPERT_LEASE")) == "1";
++        struct LeaseStaging { uint8_t* p=nullptr; size_t bytes=0; ~LeaseStaging(){if(p)cudaFreeHost(p);} } lease_staging;
++        strata::core::VisionLeaseOps lease_ops;
++        lease_ops.mapped=[&]{return xcache.mapped_bytes();};
++        lease_ops.slots=[&]{return xcache.slots();};
++        lease_ops.shrink=[&](int64_t n,std::string& e){return xcache.shrink(n,e);};
++        lease_ops.grow=[&](int64_t n,std::string& e){return xcache.grow(n,e);};
++        lease_ops.refill=[&](int32_t index,int32_t slot,std::string& e){
++            const int64_t layer=index/g.n_expert, expert=index%g.n_expert;
++            const size_t nb=(size_t)strata::kernels::cpu::expert_layout().blob_bytes(layer);
++            if(nb>lease_staging.bytes){e="vision lease: expert exceeds the reserved single-blob staging buffer";return false;}
++            if(!srcp->copy_blob(layer,expert,lease_staging.p)){e="vision lease: reading the original expert failed";return false;}
++            // Synchronous per blob: neither file staging nor this pinned buffer can be
++            // recycled under an upload. Same source/layout as the startup profile fill.
++            return xcache.fill_slot_blocking(slot,lease_staging.p,e,(int64_t)nb);
++        };
++        lease_ops.finish=[&](std::string& e){
++            if(!xcache.sync_queued(e))return false;
++            if(res_upload()!=cudaSuccess){e="vision lease: residency publication failed";return false;}
++            return true;
++        };
++        auto vision_lease_command=[&](const std::string& cmd,std::string& e)->bool{
++            if(!vision_lease_on){e="vision lease: STRATA_VISION_EXPERT_LEASE=1 is required";return false;}
++            const bool end=cmd=="VISION_LEASE END";
++            const auto started=Clock::now();
++            if(end){
++                const size_t refill=vision_lease.restore_experts();
++                if(!vision_lease.restore(lease_ops,host_res,e))return false;
++                std::printf("VISION_LEASE state=idle restored_experts=%zu elapsed_ms=%.1f\n",refill,
++                    std::chrono::duration<double,std::milli>(Clock::now()-started).count());
++                return true;
++            }
++            const std::string prefix="VISION_LEASE BEGIN ";
++            if(cmd.rfind(prefix,0)!=0){e="expected: VISION_LEASE BEGIN reserve_mib | VISION_LEASE END";return false;}
++            char* tail=nullptr;const long long mib=std::strtoll(cmd.c_str()+prefix.size(),&tail,10);
++            if(tail==cmd.c_str()+prefix.size() || *tail!='\0' || mib<0 || mib>1048576){e="vision lease: invalid reserve";return false;}
++            if(multi_gpu || !stages.empty() || o.batch>0 || o.pipeline_windows>0 || o.kv_grow || peer.valid() ||
++               srcp!=&src || !src.complement_ready() || xcache.sealed() || !xcache.segmented() ||
++               std::any_of(o.expert_cache_remote.begin(),o.expert_cache_remote.end(),[](int n){return n>0;})){
++                e="vision lease requires single CUDA GPU, segmented cache and file-backed resident complement, no batch/pipeline/kv-grow/helper";return false;
++            }
++#if defined(STRATA_USE_HIP) || defined(STRATA_GPU_METAL)
++            e="vision lease is CUDA-only";return false;
++#endif
++            if(vision_lease.active()){e="vision lease: restore the active lease first";return false;}
++            for(const PfPart& p:pf_parts)if(!p.lent.empty()){e="vision lease: a prompt loan is still out";return false;}
++            if(!adapt_tick(true)){e="vision lease: adaptive refill failed";return false;}
++            if(!ver.wait_commit(e))return false;
++            adapt_quiesce();
++            if(cudaDeviceSynchronize()!=cudaSuccess){e="vision lease: device did not quiesce";return false;}
++            size_t max_blob=0;
++            for(int64_t l=0;l<g.n_layers;++l)max_blob=std::max(max_blob,(size_t)strata::kernels::cpu::expert_layout().blob_bytes(l));
++            if(!lease_staging.p){
++                if(cudaHostAlloc((void**)&lease_staging.p,max_blob,cudaHostAllocDefault)!=cudaSuccess){e="vision lease: single-blob staging does not fit";return false;}
++                lease_staging.bytes=max_blob;
++            }
++            size_t free=0,total=0;if(cudaMemGetInfo(&free,&total)!=cudaSuccess){e="vision lease: free VRAM query failed";return false;}
++            const int64_t wanted=mib<<20,mapped=xcache.mapped_bytes(),seg=xcache.segment_bytes();
++            int64_t keep=mapped;
++            if((int64_t)free<wanted)keep=std::max<int64_t>(0,mapped-(wanted-(int64_t)free))/seg*seg;
++            if(!vision_lease.begin(keep,lease_ops,host_res,e))return false;
++            if(cudaMemGetInfo(&free,&total)!=cudaSuccess || (int64_t)free<wanted){
++                std::string rollback;
++                if(!vision_lease.restore(lease_ops,host_res,rollback))e="vision lease: insufficient VRAM; restore failed: "+rollback;
++                else e="vision lease: insufficient VRAM; original cache restored";
++                return false;
++            }
++            std::printf("VISION_LEASE state=held released_mib=%lld restore_experts=%zu vram_free_mib=%lld staging_bytes=%zu elapsed_ms=%.1f\n",
++                (long long)((mapped-xcache.mapped_bytes())>>20),vision_lease.restore_experts(),(long long)(free>>20),
++                lease_staging.bytes,std::chrono::duration<double,std::milli>(Clock::now()-started).count());
++            return true;
++        };
+         // ---- --batch: the slots of the batch windows
+         struct BSlot {
+             bool active = false, stop = false;
+@@ -17650,7 +17727,7 @@ int main(int argc, char** argv) {
+             line_drain_ms = 0.0;
+             strata::core::manifest::instance().flush_if_dirty("request");   // STRATA_MANIFEST: what the last request added (a no-op when off)
+             // Between requests (nothing in flight): the park pools' upkeep, which the park and the prompt read leave alone
+-            if (!batch_on() && !(piped && pipe_inflight()) && !strata::core::progress().busy.load()) {
++            if (!vision_lease.active() && !batch_on() && !(piped && pipe_inflight()) && !strata::core::progress().busy.load()) {
+                 pool_topup();
+                 segpool_kick();
+             }
+@@ -17681,6 +17758,18 @@ int main(int argc, char** argv) {
+             } else if (!next_line(line)) {
+                 break;
+             }
++            if(line.rfind("VISION_LEASE",0)==0){
++                std::string e;
++                try { vision_lease_command(line,e); }
++                catch(const std::exception& ex) { e=std::string("vision lease: ")+ex.what(); }
++                if(!e.empty())std::printf("ERR %s\n",e.c_str());
++                std::fflush(stdout);continue;
++            }
++            if(vision_lease.active() && line=="QUIT")break; // teardown is safe; never dispatch model kernels
++            if(vision_lease.active()){
++                std::printf("ERR vision lease active: restore with VISION_LEASE END before model work\n");
++                std::fflush(stdout);continue;
++            }
+             // --batch: BSTOP <slot> ends that slot at its next batch window; BGEN <slot> <max_new> ... reads the
+             // request's prompt and first token as a GEN 1, then continues it in that slot
+             if (line.rfind("BSTOP ", 0) == 0) {
+diff --git a/engine/tests/core/vision_expert_lease_gpu_test.cpp b/engine/tests/core/vision_expert_lease_gpu_test.cpp
+new file mode 100644
+index 000000000..3e577eec2
+--- /dev/null
++++ b/engine/tests/core/vision_expert_lease_gpu_test.cpp
+@@ -0,0 +1,58 @@
++#include "strata/core/expert_cache.hpp"
++#include "strata/core/expert_cache_refuse.hpp"
++#include "strata/core/vision_expert_lease.hpp"
++#include <cuda_runtime.h>
++#include <algorithm>
++#include <cstdio>
++#include <stdexcept>
++#include <vector>
++using namespace strata::core;
++static bool refuse_unmap(const char* name,int64_t seg){return std::string(name)=="unmap" && seg==3;}
++int main(){
++ int devices=0;if(cudaGetDeviceCount(&devices)!=cudaSuccess || !devices)return 77;
++ try{
++ auto ck=[](bool ok,const std::string&e){if(!ok)throw std::runtime_error(e);};
++ auto cu=[&](cudaError_t e){ck(e==cudaSuccess,cudaGetErrorString(e));};
++ for(int sized:{0,1}){
++  ExpertCache cache;cache.set_segment_bytes(8ll<<20);std::string err;
++  std::vector<int64_t> sizes(80,1<<20);if(sized)for(int i=0;i<40;++i)sizes[i]=1<<19;
++  ck(sized?cache.open_sized(sizes,2,64,err):cache.open(80,2,64,1<<20,err),err);
++  if(!cache.segmented())return 77;
++  std::vector<int32_t> res(128,-1);std::vector<int64_t> offsets(128,0);std::FILE* disk=std::tmpfile();ck(disk!=nullptr,"tmpfile");
++  std::vector<uint8_t> blob(1<<20);int64_t offset=0;
++  for(int slot=0;slot<80;++slot){const int layer=slot/40,ex=slot%40,index=layer*64+ex;
++   res[index]=cache.admit(layer,ex);ck(res[index]==slot,"slot admission");offsets[index]=offset;
++   for(int64_t b=0;b<sizes[slot];++b)blob[b]=(uint8_t)((slot*19+b*37+(b>>9))%251);
++   ck(std::fwrite(blob.data(),1,sizes[slot],disk)==(size_t)sizes[slot],"fixture write");offset+=sizes[slot];
++   ck(cache.fill_slot_blocking(slot,blob.data(),err,sizes[slot]),err);
++  }
++  std::fflush(disk);const auto original=res;auto*base=cache.device_slot(0);const auto original_mapped=cache.mapped_bytes();
++  uint8_t* pinned=nullptr;cu(cudaHostAlloc((void**)&pinned,1<<20,cudaHostAllocDefault));
++  VisionLeaseOps ops;int fail_read=0;size_t bytes_read=0;
++  ops.mapped=[&]{return cache.mapped_bytes();};ops.slots=[&]{return cache.slots();};
++  ops.shrink=[&](int64_t n,std::string&e){return cache.shrink(n,e);};ops.grow=[&](int64_t n,std::string&e){return cache.grow(n,e);};
++  ops.refill=[&](int32_t idx,int32_t slot,std::string&e){
++   if(fail_read){e="injected original-file read failure";return false;}
++   if(std::fseek(disk,(long)offsets[idx],SEEK_SET) || std::fread(pinned,1,sizes[slot],disk)!=(size_t)sizes[slot]){e="fixture read";return false;}
++   bytes_read+=sizes[slot];return cache.fill_slot_blocking(slot,pinned,e,sizes[slot]);};
++  ops.finish=[&](std::string&e){return cache.sync_queued(e);};
++  VisionExpertLease lease;ck(lease.begin(20ll<<20,ops,res,err),err);ck(lease.active()&&res==original,"borrow ownership");
++  ck(cache.mapped_bytes()<original_mapped,"VRAM not lent");
++  // A separate encoder-like allocation really occupies the released physical VRAM.
++  void* encoder=nullptr;cu(cudaMalloc(&encoder,16<<20));cu(cudaMemset(encoder,0x47,16<<20));cu(cudaFree(encoder));
++  fail_read=1;ck(!lease.restore(ops,res,err)&&lease.active(),"read failure did not retain gate");
++  fail_read=0;ck(lease.restore(ops,res,err),err);ck(!lease.active()&&res==original&&base==cache.device_slot(0),"restore identity");
++  auto verify=[&]{for(int slot=0;slot<80;++slot){
++   const int idx=(slot/40)*64+slot%40;std::fseek(disk,(long)offsets[idx],SEEK_SET);ck(std::fread(pinned,1,sizes[slot],disk)==(size_t)sizes[slot],"verify source");
++   ck(cache.verify_slot(slot,pinned,err,sizes[slot]),err);
++  }};verify();
++  ec_test::refuse_segment_call=refuse_unmap;
++  ck(!lease.begin(8ll<<20,ops,res,err),"injected partial unmap was not refused");
++  ec_test::refuse_segment_call=nullptr;
++  ck(!lease.active()&&cache.mapped_bytes()==original_mapped&&res==original,"partial-shrink rollback");verify();
++  cu(cudaFreeHost(pinned));std::fclose(disk);
++  std::printf("sized=%d PASS: original bytes/slots/addresses restored, partial unmap rollback, read retry, staging=1MiB, read=%zu bytes\n",sized,bytes_read);
++ }
++ std::puts("vision_expert_lease_gpu_test: PASS");return 0;
++ }catch(const std::exception&e){ec_test::refuse_segment_call=nullptr;std::fprintf(stderr,"FAIL %s\n",e.what());return 1;}
++}
+diff --git a/engine/tests/core/vision_expert_lease_test.cpp b/engine/tests/core/vision_expert_lease_test.cpp
+new file mode 100644
+index 000000000..84a5549e4
+--- /dev/null
++++ b/engine/tests/core/vision_expert_lease_test.cpp
+@@ -0,0 +1,30 @@
++#include "strata/core/vision_expert_lease.hpp"
++#include <cassert>
++#include <iostream>
++using namespace strata::core;
++int main(){
++ VisionExpertLease lease;std::vector<int32_t> res={-1,3,0,2,1};const auto original=res;
++ int64_t bytes=64,slots=4;int fail_grow=0,fail_refill=0,fail_shrink=0;int finish=0;
++ std::vector<std::pair<int,int>> written;
++ VisionLeaseOps ops;
++ ops.mapped=[&]{return bytes;};ops.slots=[&]{return slots;};
++ ops.shrink=[&](int64_t keep,std::string&e){bytes=keep;slots=keep/16;if(fail_shrink){e="injected partial shrink";return false;}return true;};
++ ops.grow=[&](int64_t want,std::string&e){if(fail_grow){e="injected grow";return false;}bytes=want;slots=want/16;return true;};
++ ops.refill=[&](int32_t i,int32_t s,std::string&e){if(fail_refill){e="injected read/copy";return false;}written.emplace_back(i,s);return true;};
++ ops.finish=[&](std::string&){++finish;return true;};std::string err;
++ assert(lease.begin(32,ops,res,err)&&lease.active()&&res==original&&lease.restore_experts()==2);
++ assert(!lease.begin(16,ops,res,err));assert(lease.active());
++ fail_grow=1;assert(!lease.restore(ops,res,err)&&lease.active()&&res==original);
++ fail_grow=0;fail_refill=1;assert(!lease.restore(ops,res,err)&&lease.active());
++ fail_refill=0;assert(lease.restore(ops,res,err)&&!lease.active());
++ assert((written==std::vector<std::pair<int,int>>{{1,3},{3,2}}));assert(bytes==64&&finish==1);
++ assert(lease.restore(ops,res,err)&&finish==1); // idempotent END
++ written.clear();fail_shrink=1;assert(!lease.begin(16,ops,res,err)&&!lease.active());
++ assert(bytes==64&&slots==4&&written.size()==3&&res==original);
++ fail_grow=1;assert(!lease.begin(16,ops,res,err)&&lease.active());
++ fail_grow=0;fail_shrink=0;assert(lease.restore(ops,res,err)&&!lease.active());
++ assert(lease.begin(32,ops,res,err));res[1]=-1;assert(!lease.restore(ops,res,err)&&lease.active());
++ res=original;assert(lease.restore(ops,res,err));
++ assert(!lease.begin(-1,ops,res,err)&&!lease.active());
++ std::cout<<"vision_expert_lease_test: PASS (borrow, partial shrink rollback, failed map/read retry, ownership gate, idempotent END)\n";
++}
+diff --git a/terminal/l2/test_vision_check.py b/terminal/l2/test_vision_check.py
+new file mode 100644
+index 000000000..cacf44169
+--- /dev/null
++++ b/terminal/l2/test_vision_check.py
+@@ -0,0 +1,28 @@
++import unittest
++import io
++import json
++import contextlib
++from pathlib import Path
++import tempfile
++from unittest import mock
++from l2 import manual_compare,test_runtime_config
++from l2 import vision_check
++class VisionCheck(unittest.TestCase):
++ def test_fixture_and_plan_need_no_model(self):
++  self.assertTrue(vision_check.fixture_png().startswith(b'\x89PNG\r\n\x1a\n'))
++  cfg={'vision':{'gpu':True,'expert_lease':True}}
++  plan=vision_check.plan(cfg)
++  self.assertEqual(plan['suite'],'vision-lease-v1');self.assertFalse(plan['automatic_tests'])
++  self.assertEqual(len(plan['checks']),4)
++ def test_missing_or_cpu_vision_rejected(self):
++  for cfg in ({},{'vision':{'gpu':False,'expert_lease':True}},{'vision':{'gpu':True}}):
++   with self.assertRaises(ValueError):vision_check.plan(cfg)
++ def test_manual_vision_plan_does_not_stop_or_start_anything(self):
++  with tempfile.TemporaryDirectory() as t:
++   _,profile,_=test_runtime_config.RuntimeConfiguration().fixture(Path(t))
++   out=io.StringIO()
++   with mock.patch.object(manual_compare.subprocess,'run') as run,mock.patch.object(manual_compare.subprocess,'Popen') as popen,contextlib.redirect_stdout(out):
++    self.assertEqual(manual_compare.main(['--profile',str(profile),'--vision-check','--plan']),0)
++   run.assert_not_called();popen.assert_not_called()
++   self.assertEqual(json.loads(out.getvalue())['suite'],'vision-lease-v1')
++if __name__=='__main__':unittest.main()
+diff --git a/terminal/l2/vision_check.py b/terminal/l2/vision_check.py
+new file mode 100644
+index 000000000..228068efe
+--- /dev/null
++++ b/terminal/l2/vision_check.py
+@@ -0,0 +1,78 @@
++"""Explicit full-resident headless vision lifecycle check; never called at startup."""
++import base64
++import copy
++import datetime
++import hashlib
++import json
++from pathlib import Path
++import re
++import struct
++import time
++import zlib
++from l2 import headless_experiments as runner
++from l2.chat_latency import workloads
++from l2.runtime_config import set_options
++
++
++def fixture_png():
++    # Deterministic test media: three red/green/blue rectangles, no user data/Pillow.
++    w,h=192,96
++    rows=[]
++    for y in range(h):
++        row=bytearray()
++        for x in range(w):
++            rgb=(255,255,255)
++            if 12<=y<80 and 4<=x%64<60:rgb=((255,0,0),(0,160,0),(0,0,255))[x//64]
++            row.extend(rgb)
++        rows.append(b'\0'+row)
++    def chunk(tag,data):return struct.pack('>I',len(data))+tag+data+struct.pack('>I',zlib.crc32(tag+data)&0xffffffff)
++    return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',w,h,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(b''.join(rows)))+chunk(b'IEND',b'')
++
++
++def plan(cfg):
++    vision=cfg.get('vision') or {}
++    if not (vision.get('gpu') is True and vision.get('expert_lease') is True):
++        raise ValueError('vision check requires configured vision.gpu=true and vision.expert_lease=true')
++    return {'suite':'vision-lease-v1','automatic_tests':False,
++            'checks':['text warmup','cold synthetic image','same image cached','3072-token text after expert restoration'],
++            'requires':'full resident RAM complement and zero decode expert file reads',
++            'image_fixture_sha256':hashlib.sha256(fixture_png()).hexdigest()}
++
++
++def run(root,cfg,directory,port,request):
++    spec=plan(cfg);runner.check_environment()
++    with Path(cfg['exe']).open('rb') as f:
++        if hashlib.file_digest(f,'sha256').hexdigest()!=request['engine_sha256']:
++            raise ValueError('vision check engine changed')
++    folder=directory/('vision-lease-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
++    folder.mkdir(parents=True,mode=0o700)
++    seed=folder/'expert-profile.bin';args=cfg['args'];seed.write_bytes(Path(args[args.index('--expert-profile')+1]).read_bytes())
++    trial=copy.deepcopy(cfg)
++    for flag in ('--expert-profile-save','--expert-profile'):
++        while flag in trial['args']:
++            i=trial['args'].index(flag);del trial['args'][i:i+2]
++    trial['args']=set_options(trial['args'],{'--expert-profile':seed,'--conversation-cache-mib':0,'--conversation-cache-slots':0})
++    for key in ('startup_benchmark','slot_save_path','l2_backend_port','l2_disk_budget_mib'):trial.pop(key,None)
++    trial['env'].update(STRATA_DRAFT_LOG='1',STRATA_DECODE_TIMING='1',STRATA_CONV_DISK_DIR=str(folder/'parked'))
++    image=[{'type':'text','text':'Name the three colored rectangles from left to right. Answer briefly in English.'},
++           {'type':'image_url','image_url':{'url':'data:image/png;base64,'+base64.b64encode(fixture_png()).decode()}}]
++    warmup,long_output,*_=workloads()
++    cases=(warmup,('image_cold',image,64),('image_cached',image,64),('text_after_restore',long_output[1],3072))
++    result=runner.run_phase(root,trial,'vision',folder/'trial',seed,port,
++        time.monotonic()+min(14400,max(300,request.get('budget_s',1200))),
++        workloads=cases,launch_profile=trial,stream_latency=True)
++    engine_log=(folder/'trial/engine.log').read_text(errors='replace')
++    if result['status']=='passed' and any(note in engine_log for note in
++            ('whole resident RAM mode does not fit','FileExpertSource: RAM budget ')):
++        result.update(status='failed',error='full expert complement residency was not confirmed')
++    transcript=(folder/'trial/server.log').read_text(errors='replace')
++    begins=re.findall(r'VISION_LEASE state=held ([^\n]*)',transcript)
++    ends=re.findall(r'VISION_LEASE state=idle ([^\n]*)',transcript)
++    result.update(spec=spec,lease_begins=len(begins),lease_ends=len(ends),borrow_records=begins,restore_records=ends)
++    if result['status']=='passed' and (len(begins)!=1 or len(ends)!=1):
++        result.update(status='failed',error='cold picture must borrow/restore once; cached picture must not borrow again')
++    if result['status']=='passed' and any(r['timings']['predicted_n']<1 for r in result['cases']):
++        result.update(status='failed',error='empty model output')
++    (folder/'results.json').write_text(json.dumps(result,indent=2)+'\n')
++    print(f'Strata 手动识图检查 {result["status"]}；报告 {folder/"results.json"}',flush=True)
++    return result
+diff --git a/terminal/serve/server.py b/terminal/serve/server.py
+index 9c53dcd40..4b4c1f723 100644
+--- a/terminal/serve/server.py
++++ b/terminal/serve/server.py
+@@ -1255,6 +1255,32 @@ class StrataEngine:
+             if time.time() > deadline:
+                 raise EngineDied("the engine did not answer the VRAM command")
+ 
++    def vision_lease(self, reserve_mib: int | None, timeout: float = 300.0) -> dict:
++        """Borrow/restore experts only while the service holds its request FIFO."""
++        with self._exclusive_control():
++            if not self.alive():
++                raise EngineDied("the engine is not running")
++            command = "END" if reserve_mib is None else f"BEGIN {int(reserve_mib)}"
++            self.proc.stdin.write("VISION_LEASE " + command + "\n")
++            self.proc.stdin.flush()
++            expected = "idle" if reserve_mib is None else "held"
++            deadline = time.monotonic() + timeout
++            while time.monotonic() < deadline:
++                try:
++                    line = self.lines.get(timeout=max(.1, deadline-time.monotonic()))
++                except queue.Empty:
++                    raise EngineDied("the engine did not answer the vision lease command") from None
++                if line is None:
++                    raise EngineDied("the engine ended during a vision lease")
++                if line.startswith("ERR"):
++                    raise ValueError(line[4:].strip())
++                if line.startswith("VISION_LEASE "):
++                    out = dict(item.split("=",1) for item in line.split()[1:] if "=" in item)
++                    if out.get("state") == expected:
++                        print("[strata] " + line.strip(), flush=True)
++                        return out
++            raise EngineDied("vision lease response timed out")
++
+     def pen_from_key(self, orig_len: int, prompt_len: int) -> str:
+         """` pen_from=N` for a leg that continues a request (prompt + what it generated): where the reply began, Strata's penalty window start. The all-cards split engine
+         (sFNX) and Hy4-Flash (`strata-hy4`) refuse the key (GEN: unknown/unsupported key pen_from): it is not sent."""
+@@ -2892,7 +2918,17 @@ class Vision:
+ 
+     def __init__(self, cfg: dict, log=None, env: dict | None = None, lazy: bool = False):
+         args = self.reader_args(cfg)
+-        self.dir = self.work_dir()
++        # /tmp may be tmpfs on a 32GiB Linux host. Lease-mode image caches live
++        # under the disk cache, keeping the existing per-reader lifecycle/eviction.
++        cache_parent = cfg.get("cache_parent")
++        if cache_parent is None and cfg.get("expert_lease") is True:
++            cache_parent = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home()/".cache")))/"strata"/"vision"
++        if cache_parent is not None:
++            parent = Path(cache_parent).expanduser()
++            parent.mkdir(parents=True, exist_ok=True, mode=0o700)
++            self.dir = Path(tempfile.mkdtemp(prefix="strata-vision-", dir=parent))
++        else:
++            self.dir = self.work_dir()
+         self.spawn = (args, log, env)                   # to start it again after an unload
+         # AMD: the GPU reader (strata-vision-hip) has the CPU reader (strata-vision, same program, no GPU runtime) to
+         # fall back on when it does not start; _start switches to it by itself
+@@ -2911,8 +2947,14 @@ class Vision:
+         # opt-in (the vision section's "elastic": true, with the config's "vram_elastic"): the encoder starts with the
+         # first picture and stops after elastic_idle_s without one; while it runs, the engine's expert cache keeps
+         # elastic_mib of VRAM free for it (Service._vision_up / _vision_idle_down)
++        self.expert_lease = cfg.get("expert_lease") is True
++        if self.expert_lease:
++            if cfg.get("gpu") is not True:
++                raise ValueError("vision.expert_lease requires the GPU reader")
++            # A CPU fallback could exhaust this low-RAM host's complement budget.
++            self.fallback = self.cpu_spawn = None
+         self.max_tokens = self.token_limit(cfg)
+-        self.elastic = cfg.get("elastic") is True
++        self.elastic = self.expert_lease or cfg.get("elastic") is True
+         self.elastic_mib = self.elastic_ask_mib(cfg, self.max_tokens)
+         self.elastic_idle_s = float(cfg.get("elastic_idle_s") or 120)
+         if not lazy and not self.elastic:
+@@ -3987,6 +4029,7 @@ class Service:
+         self.before_load_strict = False                  # #1997: refuse (503) whenever it fails
+         self.vram_reserve = None                         # #533: the last POST /v1/vram reserve (None: the start's)
+         self.vram_reserve_asked = False                  # a POST /v1/vram was made (vram_reserve None is then asked)
++        self.vision_lease_held = False                   # dedicated transaction, protected by the request FIFO
+         self.vision_held = False                         # an elastic encoder holds VRAM the expert cache gave it
+         self.vision_no_shrink = False                    # the engine said its cache never shrinks (no --vram-elastic)
+         self.vision_no_shrink_said = False
+@@ -4296,6 +4339,56 @@ class Service:
+         has no such command: it answered "VRAM n" with its usage text ("expected: GEN <max_new> ..."), 0.2.15 release test."""
+         return "vram_elastic" in (getattr(self.engine, "info", None) or {})
+ 
++    def _finish_vision_expert_lease(self):
++        """Stop and reap the reader before remapping/refilling experts. FIFO held."""
++        if not self.vision_lease_held:
++            return
++        try:
++            proc = getattr(self,"_vision_lease_process",None) or getattr(self.vision,"proc",None)
++            self._vision_lease_process = proc
++            self.vision.unload()
++            if proc is not None and proc.poll() is None:
++                proc.kill()
++                proc.wait(timeout=10)
++            if self.vision.alive() or (proc is not None and proc.poll() is None):
++                raise RuntimeError("the image encoder is still running")
++            self.engine.vision_lease(None)
++        except Exception as exc:
++            # The engine continues to reject model work. A later request retries END.
++            raise EngineDied(f"the vision expert cache has not been restored: {exc}") from exc
++        self.vision_lease_held = False
++        self._vision_lease_process = None
++
++    @contextlib.contextmanager
++    def _vision_encoding(self, images):
++        """The caller holds _turn(); cached images borrow nothing."""
++        v = self.vision
++        cached = hasattr(v,"all_cached") and v.all_cached(images)
++        if not getattr(v,"expert_lease",False):
++            if not cached:
++                self._vision_up()
++            yield
++            return
++        if self.vision_lease_held:
++            self._finish_vision_expert_lease()
++        if cached:
++            yield
++            return
++        self.ensure_loaded()
++        self.vision_lease_held = True   # even an ambiguous BEGIN failure needs END
++        try:
++            try:
++                self.engine.vision_lease((self._engine_reserve() or 0) + v.elastic_mib)
++            except (ValueError,RuntimeError) as exc:
++                raise EngineDied(f"the expert cache could not be lent to vision: {exc}") from exc
++            try:
++                v.restart()
++            except Exception as exc:
++                raise EngineDied(f"the image encoder failed to start: {exc}") from exc
++            yield
++        finally:
++            self._finish_vision_expert_lease()
++
+     def _vision_up(self):
+         """The image turn's start for an elastic encoder that is not running (the caller holds self.fifo): the expert
+         cache first keeps the encoder's elastic_mib of VRAM free on top of the reserve, then the encoder starts (load and
+@@ -5045,8 +5138,8 @@ class Service:
+                             src = fetched[item["source"]] = Vision.download(src)   # outside the FIFO, as in prepare()
+                         if self.vision is not None:
+                             with self._turn(cancel):  # the encoder takes its turn with the requests (see below)
+-                                self._vision_up()         # an elastic encoder is not running until a picture needs it
+-                                self.vision.encode(src)
++                                with self._vision_encoding([src]):
++                                    self.vision.encode(src)
+                         else:
+                             # Hy4-Flash in-process vision: validate readability without invoking a sidecar encoder
+                             Vision.normalize(src if isinstance(src, bytes) else Vision.load(src))
+@@ -5068,6 +5161,9 @@ class Service:
+         prompt; with thinking, Service.run writes it once the thinking is over."""
+         # `cancel` (#1999): set when the client hangs up; the downloads, the wait for the turn and the encodes stop
+         # between pictures and raise ClientGone
++        if self.vision_lease_held:
++            with self._turn(cancel):
++                self._finish_vision_expert_lease()
+         # Cached tool images are references in browser history, never arbitrary file paths or huge base64 strings.
+         for message in messages:
+             for part in message.get("content", []) if isinstance(message.get("content"), list) else []:
+@@ -5130,11 +5226,10 @@ class Service:
+             # "reading the prompt" with CPU and GPU busy, for good (reproduced).  So encoding takes its turn in the
+             # same FIFO as the requests.
+             with self._turn(cancel):
+-                if not (hasattr(self.vision, "all_cached") and self.vision.all_cached(images)):
+-                    self._vision_up()
+                 try:
+-                    encoded = (self.vision.encode_all(images, cancel) if hasattr(self.vision, "encode_all")
+-                               else [self.vision.encode(src) for src in images])
++                    with self._vision_encoding(images):
++                        encoded = (self.vision.encode_all(images, cancel) if hasattr(self.vision, "encode_all")
++                                   else [self.vision.encode(src) for src in images])
+                 finally:
+                     self.last_image_at = time.time()
+             # one <|image_pad|> per image -> one per image token.  Only the markers the template writes for an image
+@@ -8197,6 +8292,13 @@ def apply_vision_defaults(cfg: dict) -> dict:
+     A config that says "vram_elastic" itself, and AMD (no shrinking expert cache on HIP), keep the room in the reserve as before: the reserve
+     setup writes for a GPU reader that stays on the card (700 MiB, or none) becomes VISION_RESERVE_MIB; a reserve the person or the app chose
+     (any other number) is kept."""
++    if isinstance(cfg.get("vision"),dict) and cfg["vision"].get("expert_lease") is True:
++        if cfg["vision"].get("gpu") is not True or cfg.get("backend") not in (None,"cuda") or len(gpu_list(cfg))>1 or parallel_slots(cfg):
++            raise ValueError("vision expert lease requires a single CUDA GPU and the GPU picture reader")
++        cfg["vision"] = {**cfg["vision"], "elastic":True}
++        cfg["vram_elastic"] = True
++        cfg.setdefault("env",{})["STRATA_VISION_EXPERT_LEASE"] = "1"
++        return cfg
+     if not vision_on_demand_by_default(cfg):
+         return cfg
+     cfg["vision"] = {**cfg["vision"], "elastic": True}
+diff --git a/terminal/serve/test_vision_expert_lease.py b/terminal/serve/test_vision_expert_lease.py
+new file mode 100644
+index 000000000..cc5e8a414
+--- /dev/null
++++ b/terminal/serve/test_vision_expert_lease.py
+@@ -0,0 +1,148 @@
++"""The reader's whole lifetime lies between borrow and restore, under the FIFO."""
++import contextlib
++import io
++from pathlib import Path
++import subprocess
++import tempfile
++import threading
++import unittest
++from unittest import mock
++from serve import test_vram
++from serve.frontend import ChatTemplate
++from serve.server import ByteTokenizer,ClientGone,EngineDied,Service,Vision,apply_vision_defaults
++
++class Reader:
++    expert_lease=True
++    elastic=True
++    elastic_mib=2048
++    def __init__(self,folder,events):
++        self.dir=folder;self.events=events;self.up=False;self.cache={};self.fail=False
++        self.rows=folder/'image.sve';self.rows.write_bytes(b'embeddings')
++    def alive(self):return self.up
++    def restart(self):self.events.append('reader-start');self.up=True
++    def unload(self):self.events.append('reader-reaped');self.up=False
++    def all_cached(self,images):return all(x in self.cache for x in images)
++    def encode(self,source,keep=()):
++        if source in self.cache:return self.cache[source]
++        assert self.up
++        self.events.append('encode')
++        if self.fail:raise ValueError('encoder failed')
++        self.cache[source]=(self.rows,3);return self.cache[source]
++    encode_all=Vision.encode_all
++
++class LeaseVision(unittest.TestCase):
++    def setUp(self):
++        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
++        self.folder=Path(self.temp.name);self.events=[];self.tok=ByteTokenizer()
++        self.engine=test_vram.VramEngine(self.tok);self.engine.loaded=True
++        self.reader=Reader(self.folder,self.events)
++        self.service=Service(self.engine,self.tok,ChatTemplate(Path(__file__).with_name('chat_template.jinja')),vision=self.reader)
++        self.service.free_vram_mib=lambda:None
++        def lease(reserve,timeout=300):
++            self.events.append('restore' if reserve is None else 'borrow')
++            return {'state':'idle' if reserve is None else 'held'}
++        self.engine.vision_lease=lease
++        self.addCleanup(self.drop_embeddings)
++    def drop_embeddings(self):
++        obj=getattr(self.service,'embeddings',None)
++        if obj is not None and getattr(obj,'path',None):obj.path.unlink(missing_ok=True)
++    def picture(self,images=('a.png',),cancel=None):
++        messages=[{'role':'user','content':[{'type':'text','text':'describe'}]+[{'type':'image','source':src} for src in images]}]
++        return self.service.prepare(messages,None,{},cancel=cancel)
++    def test_multi_image_stops_and_restores_before_prepare_returns(self):
++        self.picture(('a.png','b.png'))
++        self.assertEqual(self.events,['borrow','reader-start','encode','encode','reader-reaped','restore'])
++        self.assertFalse(self.service.vision_lease_held)
++        self.assertFalse(self.reader.alive())
++        self.assertEqual(self.engine.calls,[]) # never generic VRAM resize
++    def test_cached_image_needs_no_reader_or_lease(self):
++        self.picture();self.events.clear();self.picture()
++        self.assertEqual(self.events,[])
++    def test_encoder_failure_and_cancel_both_restore(self):
++        self.reader.fail=True
++        with self.assertRaisesRegex(ValueError,'encoder failed'):self.picture()
++        self.assertEqual(self.events[-2:],['reader-reaped','restore'])
++        self.assertFalse(self.service.vision_lease_held)
++        self.reader.fail=False;cancel=threading.Event();original=self.reader.encode
++        def encode(*a,**kw):
++            result=original(*a,**kw);cancel.set();return result
++        self.reader.encode=encode
++        with self.assertRaises(ClientGone):self.picture(('b.png','c.png'),cancel)
++        self.assertEqual(self.events[-2:],['reader-reaped','restore'])
++    def test_start_failure_also_restores(self):
++        def fail():raise RuntimeError('reader start failed')
++        self.reader.restart=fail
++        with self.assertRaisesRegex(RuntimeError,'reader start failed'):self.picture()
++        self.assertEqual(self.events,['borrow','reader-reaped','restore'])
++    def test_begin_failure_still_sends_idempotent_end(self):
++        original=self.engine.vision_lease
++        def fail(reserve,timeout=300):
++            if reserve is not None:raise ValueError('borrow failed')
++            return original(reserve,timeout)
++        self.engine.vision_lease=fail
++        with self.assertRaisesRegex(EngineDied,'borrow failed'):self.picture()
++        self.assertEqual(self.events,['reader-reaped','restore'])
++    def test_failed_restore_blocks_turn_and_next_text_retries(self):
++        original=self.engine.vision_lease;failed=[False]
++        def fail(reserve,timeout=300):
++            if reserve is None and not failed[0]:failed[0]=True;raise ValueError('cannot map cache')
++            return original(reserve,timeout)
++        self.engine.vision_lease=fail
++        with self.assertRaisesRegex(EngineDied,'not been restored'):self.picture()
++        self.assertTrue(self.service.vision_lease_held)
++        self.service.prepare([{'role':'user','content':'text'}],None,{})
++        self.assertFalse(self.service.vision_lease_held)
++        self.assertEqual(self.events[-1],'restore')
++    def test_unreaped_reader_prevents_remapping(self):
++        proc=mock.Mock();proc.poll.return_value=None;proc.wait.side_effect=subprocess.TimeoutExpired('reader',10)
++        self.reader.proc=proc
++        with self.assertRaisesRegex(EngineDied,'not been restored'):self.picture()
++        self.assertNotIn('restore',self.events)
++        self.assertTrue(self.service.vision_lease_held)
++        proc.poll.return_value=0
++        self.service.prepare([{'role':'user','content':'text'}],None,{})
++        self.assertFalse(self.service.vision_lease_held)
++    def test_config_is_opt_in_and_resident_reserve_not_inflated(self):
++        cfg={'args':['--vram-reserve-mib','448'],'vision':{'gpu':True,'expert_lease':True}}
++        out=apply_vision_defaults(cfg)
++        self.assertEqual(out['env']['STRATA_VISION_EXPERT_LEASE'],'1')
++        self.assertTrue(out['vram_elastic']);self.assertTrue(out['vision']['elastic'])
++        self.assertEqual(out['args'],['--vram-reserve-mib','448'])
++        with self.assertRaises(ValueError):apply_vision_defaults({'vision':{'gpu':False,'expert_lease':True}})
++    def test_lease_reader_uses_disk_cache_parent_and_stays_unloaded(self):
++        parent=self.folder/'disk-cache'
++        v=Vision({'exe':'unused','mmproj':'unused','model':'unused','gpu':True,
++                  'expert_lease':True,'cache_parent':str(parent)})
++        try:
++            self.assertEqual(v.dir.parent,parent)
++            self.assertFalse(v.alive())
++            self.assertIsNone(v.fallback)
++        finally:v.shutdown()
++    def test_concurrent_text_prepare_waits_for_image_restore(self):
++        entered=threading.Event();release=threading.Event();text_done=threading.Event();errors=[]
++        original=self.reader.encode
++        def held_encode(*args,**kwargs):
++            entered.set()
++            if not release.wait(3):raise RuntimeError("test release timeout")
++            return original(*args,**kwargs)
++        self.reader.encode=held_encode
++        def image():
++            try:self.picture()
++            except Exception as e:errors.append(e)
++        def text():
++            try:self.service.prepare([{'role':'user','content':'text'}],None,{})
++            except Exception as e:errors.append(e)
++            finally:text_done.set()
++        a=threading.Thread(target=image);b=threading.Thread(target=text)
++        a.start();self.assertTrue(entered.wait(2));b.start()
++        try:self.assertFalse(text_done.wait(.1))
++        finally:release.set();a.join(3);b.join(3)
++        self.assertFalse(a.is_alive());self.assertFalse(b.is_alive());self.assertFalse(errors)
++        self.assertEqual(self.events[-1],'restore')
++    def test_protocol_requires_matching_end_ack(self):
++        engine=test_vram.EngineCommand().engine(['VISION_LEASE state=held released_mib=128\n','VISION_LEASE state=idle restored_experts=3\n'])
++        out=engine.vision_lease(None)
++        self.assertEqual(out['state'],'idle')
++        self.assertEqual(engine.proc.stdin.getvalue(),'VISION_LEASE END\n')
++
++if __name__=='__main__':unittest.main()

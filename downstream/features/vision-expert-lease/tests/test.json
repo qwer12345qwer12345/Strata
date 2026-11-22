@@ -1,0 +1,25 @@
+{
+  "cmake_args": [],
+  "targets": [],
+  "ctest_regex": "",
+  "optional_targets": {
+    "cuda": [
+      "vision_expert_lease_test",
+      "vision_expert_lease_gpu_test",
+      "expert_cache_segmented_test"
+    ]
+  },
+  "optional_ctest_regex": {
+    "cuda": "^(vision_expert_lease_test|vision_expert_lease_gpu_test|expert_cache_segmented_test)$"
+  },
+  "overlays": [],
+  "python_modules": [
+    "serve.test_vision_expert_lease",
+    "serve.test_vision_elastic",
+    "serve.test_vision_tool_image",
+    "serve.test_vision_cpu_fallback",
+    "serve.test_vram",
+    "l2.test_vision_check"
+  ],
+  "settings_generation": false
+}

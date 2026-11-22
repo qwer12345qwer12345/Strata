@@ -1,0 +1,22 @@
+{
+  "os": "CachyOS Linux",
+  "kernel": "7.3.3-1-cachyos",
+  "cpu": "Intel Core Ultra 7 270K Plus",
+  "logical_cpus": 24,
+  "ram_bytes": 32971632640,
+  "gpu": "NVIDIA GeForce RTX 3080",
+  "gpu_memory_mib": 12288,
+  "driver": "620.70.06",
+  "cuda_toolkit": "13.4.92",
+  "gcc": "16.2.1",
+  "python": "3.12.15",
+  "engine": "0.1.65 + nine downstream patches",
+  "terminal": "0.2.19",
+  "reader_component": "0.1.58 Linux CUDA12",
+  "mmproj": "Qwen3.8-Flash-Next BF16",
+  "model": "Qwen3.8-Flash-Next Gyro-S TQ1_0",
+  "route_prior": 0.5,
+  "expert_rows": 2,
+  "workers": 15,
+  "vm_swappiness": 150
+}

@@ -1,6 +1,6 @@
 # Gyro 识图时临时借用显存
 
-2026-11-23。方案以 Strata 0.2.19 / Engine 0.1.65 的 `c6f6427d9de9016fd92d13e29740f65625261df7` 为基础，面向 RTX 3080 12 GiB、32 GB DDR5、Gyro-S、单请求 `/v1/chat/completions`。用户选择重新规划识图显存借还。本文件记录拟实现的结构，尚无该结构的真实模型验收结果。
+2026-11-23。方案以 Strata 0.2.19 / Engine 0.1.65 的 `c6f6427d9de9016fd92d13e29740f65625261df7` 为基础，面向 RTX 3080 12 GiB、32 GB DDR5、Gyro-S、单请求 `/v1/chat/completions`。已实现为独立 opt-in [vision-expert-lease 功能包](../features/vision-expert-lease/README.md)，已完成 SM86 构建、真实 GPU 映射测试及真实图片 API 检查。完整驻留、256K 无头验收尚未执行；桌面受限预算结果不能替代它。
 
 ## 目标和生命周期
 
@@ -45,7 +45,7 @@
 - 所有图片成功、编码失败和客户端取消都进入归还路径。
 - 恢复期间先完成数据上传，再发布专家驻留。GPU 段无法完整映射或回填失败时，当前请求给出清楚的错误，由显式的恢复流程处理模型状态。
 
-首版使用现有图片预算计算，包含权重、图片 token 上限对应的工作区及余量。显存分段大小以减少实现改动为起点，随后测量较小分段能否减少 12 GiB 卡的舍入浪费。
+首版使用现有图片预算计算，包含权重、图片 token 上限对应的工作区及余量。本机设128MiB显存分段减少舍入浪费，尚未做128/512MiB吞吐对比；图片预算1024 token已通过真实API检查。
 
 日常保留 Gyro-S、DFlash2、prior 0.5 和成对行。量化和路由设置在借还前后相同，便于验证同一输入的数值与缓存恢复。
 
@@ -57,8 +57,12 @@
 
 验收须同时满足正常回答、编码器退出、缓存归还与恢复后解码不依赖专家文件读取。纯 VMM 测试通过只证明底层分段操作，真实图片请求才能证明完整交接流程。
 
-## 与当前仓库的关系
+## 当前实现和验收状态
 
-这是未实现的设计。当前活动栈采用旧PR5500 V2/V3完整增量存档、BF16 PLE、SM86分派与宽lookup；Live Memory、Runtime KV Storage、Shutdown Persistent Cache目录仅作reference，未启用。不要把历史文档中的“保留”理解为这些功能正在日常运行。
+活动栈已经加入 `vision-expert-lease`。原有普通 VRAM 命令的 complement resident 拒绝条件保留；新增专用 `VISION_LEASE BEGIN/END`，借出时冻结所有权并禁止语言模型工作，完整恢复后才解除门禁。部分失败保留事务，允许重试归还。
 
-2026-11-23静态复核仍见上游VRAM命令拒绝complement resident模式；因此本设计还不是可直接开启的识图功能。现状见 [跨模块复核](../GLOBAL_REVIEW_AND_VISION.md)。
+C++/GPU测试3项、视觉与手动入口Python测试64项、既有控制回归25项通过。真实API检查覆盖冷图、缓存、多图、借出后取消、坏图400、编码器启动失败503及后续文本；1024 token图片预算另做4项检查。测试图均自行生成。实际恢复暂存1049600 bytes；专家归还约1.3–1.9秒。完整数据、早期失败和环境见 [验收记录](../features/vision-expert-lease/validation/README.md)。
+
+本机下一次无头启动启用该功能，正常启动不发送测试prompt。显式运行 `sudo ~/.local/bin/strata-headless-compare --vision-check` 才执行完整驻留检查、冷图/缓存图和恢复后的3072-token输出；要求生成阶段零专家文件blob读取。桌面active时该命令拒绝运行，不自动切换桌面或网络。
+
+旧PR5500 V2/V3完整存档、BF16 PLE、SM86分派与宽lookup均保留。Live Memory、Runtime KV Storage、Shutdown Persistent Cache仍为reference，未启用。

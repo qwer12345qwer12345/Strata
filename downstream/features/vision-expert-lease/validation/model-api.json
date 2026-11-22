@@ -1,0 +1,201 @@
+{
+  "scope": "Desktop API vision/expert-lease correctness with 2GiB partial expert RAM, 5600 GPU slots, 8K context; not full-resident headless speed",
+  "cases": [
+    {
+      "case": "text_before",
+      "status": 200,
+      "seconds": 5.943021959999896,
+      "text": "A database transaction is a sequence of operations treated as a single, indivisible unit of work. It ensures that either all changes are applied successfully or none are, maintaining data integrity through atomicity.",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 22,
+        "prompt_ms": 3591.0,
+        "prompt_per_token_ms": 163.227,
+        "prompt_per_second": 6.1,
+        "predicted_n": 40,
+        "predicted_ms": 2346.5,
+        "predicted_per_token_ms": 58.663,
+        "predicted_per_second": 17.0,
+        "draft_n": 25,
+        "draft_n_accepted": 18
+      },
+      "error": null,
+      "lease_begins": 0,
+      "lease_ends": 0
+    },
+    {
+      "case": "image_cold",
+      "status": 200,
+      "seconds": 19.74385262299984,
+      "text": " Red, Green, Blue",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 89,
+        "prompt_ms": 15510.3,
+        "prompt_per_token_ms": 174.273,
+        "prompt_per_second": 5.7,
+        "predicted_n": 6,
+        "predicted_ms": 561.8,
+        "predicted_per_token_ms": 93.633,
+        "predicted_per_second": 10.7,
+        "draft_n": 5,
+        "draft_n_accepted": 4
+      },
+      "error": null,
+      "lease_begins": 1,
+      "lease_ends": 1
+    },
+    {
+      "case": "same_image_cached",
+      "status": 200,
+      "seconds": 0.15362976799951866,
+      "text": " Red, Green, Blue",
+      "timings": {
+        "cache_n": 82,
+        "prompt_n": 7,
+        "prompt_ms": 62.7,
+        "prompt_per_token_ms": 8.957,
+        "prompt_per_second": 111.6,
+        "predicted_n": 6,
+        "predicted_ms": 75.7,
+        "predicted_per_token_ms": 12.617,
+        "predicted_per_second": 79.3,
+        "draft_n": 5,
+        "draft_n_accepted": 4
+      },
+      "error": null,
+      "lease_begins": 0,
+      "lease_ends": 0
+    },
+    {
+      "case": "multiple_images",
+      "status": 200,
+      "seconds": 17.70709674200043,
+      "text": "The first image displays three colored squares side-by-side, labeled \"RED\", \"GREEN\", and \"BLUE\". The second image is a single, solid yellow square.",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 107,
+        "prompt_ms": 12785.7,
+        "prompt_per_token_ms": 119.493,
+        "prompt_per_second": 8.4,
+        "predicted_n": 34,
+        "predicted_ms": 1012.9,
+        "predicted_per_token_ms": 29.791,
+        "predicted_per_second": 33.6,
+        "draft_n": 22,
+        "draft_n_accepted": 20
+      },
+      "error": null,
+      "lease_begins": 1,
+      "lease_ends": 1
+    },
+    {
+      "case": "client_disconnected_during_lease",
+      "lease_begins": 1,
+      "lease_ends": 1,
+      "restored_before_next_request": true
+    },
+    {
+      "case": "text_after_cancel",
+      "status": 200,
+      "seconds": 1.3162985110011505,
+      "text": "2 + 3 equals 5.",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 26,
+        "prompt_ms": 1031.1,
+        "prompt_per_token_ms": 39.658,
+        "prompt_per_second": 25.2,
+        "predicted_n": 9,
+        "predicted_ms": 266.2,
+        "predicted_per_token_ms": 29.578,
+        "predicted_per_second": 33.8,
+        "draft_n": 8,
+        "draft_n_accepted": 6
+      },
+      "error": null,
+      "lease_begins": 0,
+      "lease_ends": 0
+    },
+    {
+      "case": "bad_image_restore",
+      "status": 400,
+      "seconds": 4.76423320899994,
+      "text": "",
+      "timings": null,
+      "error": {
+        "type": "invalid_request_error",
+        "message": "the image could not be read: cannot read the image 83a48a2fa5ef16ef79b501db05622591.img"
+      },
+      "lease_begins": 1,
+      "lease_ends": 1
+    },
+    {
+      "case": "text_after_image",
+      "status": 200,
+      "seconds": 2.1947972609996214,
+      "text": "```python\ndef add(a: int, b: int) -> int:\n    \"\"\"Add two integers and return the result.\"\"\"\n    return a + b\n\n# Tiny example\nprint(add(2, 3))  # Output: 5\n```",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 26,
+        "prompt_ms": 654.6,
+        "prompt_per_token_ms": 25.177,
+        "prompt_per_second": 39.7,
+        "predicted_n": 55,
+        "predicted_ms": 1537.2,
+        "predicted_per_token_ms": 27.949,
+        "predicted_per_second": 35.8,
+        "draft_n": 48,
+        "draft_n_accepted": 40
+      },
+      "error": null,
+      "lease_begins": 0,
+      "lease_ends": 0
+    },
+    {
+      "case": "reader_start_failure",
+      "status": 503,
+      "seconds": 1.896982176000165,
+      "text": "",
+      "timings": null,
+      "error": {
+        "type": "server_error",
+        "message": "the image encoder failed to start: the vision encoder did not start: ERR injected encoder-start failure (exit code 23); the next request restarts it"
+      },
+      "lease_begins": 1,
+      "lease_ends": 1
+    },
+    {
+      "case": "text_after_start_failure",
+      "status": 200,
+      "seconds": 3.7607367920008983,
+      "text": "Two prime numbers are **2** and **3**.",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 17,
+        "prompt_ms": 2716.3,
+        "prompt_per_token_ms": 159.782,
+        "prompt_per_second": 6.3,
+        "predicted_n": 12,
+        "predicted_ms": 1040.6,
+        "predicted_per_token_ms": 86.717,
+        "predicted_per_second": 11.5,
+        "draft_n": 11,
+        "draft_n_accepted": 8
+      },
+      "error": null,
+      "lease_begins": 0,
+      "lease_ends": 0
+    }
+  ],
+  "status": "passed",
+  "min_mem_available_kib": 17796444,
+  "max_new_swap_kib": 3569064,
+  "max_owned_process_swap_kib": 208868,
+  "image_answer_contains_expected_colors": true,
+  "limitations": [
+    "Desktop with a 2GiB partial expert RAM budget and 5600 GPU slots; expert file reads exist, so these are lifecycle/correctness checks, not headless throughput.",
+    "Global swap grew with vm.swappiness=150 and file-tier I/O; memory/owned-process swap and all interrupted attempts are reported separately. No full-resident 256K memory or zero-file-read claim.",
+    "Synthetic test media only; this is not a broad image quality benchmark."
+  ]
+}

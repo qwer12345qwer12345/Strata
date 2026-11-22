@@ -8919,10 +8919,10 @@ index 000000000..486a4c4b8
 +if __name__=='__main__':main()
 diff --git a/terminal/l2/runtime_config.py b/terminal/l2/runtime_config.py
 new file mode 100644
-index 000000000..0071152e6
+index 000000000..23d02135a
 --- /dev/null
 +++ b/terminal/l2/runtime_config.py
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,56 @@
 +"""Apply the one user-owned runtime selection. Reading it never runs a benchmark."""
 +import copy
 +import hashlib
@@ -8974,6 +8974,8 @@ index 000000000..0071152e6
 +    result.setdefault('env', {}).update(STRATA_TQ_AMPERE_ROWS=rows,
 +                                      STRATA_PF_FUSED_TQ='1', STRATA_PF_GROUP_SCRATCH='0')
 +    result['env'].update(data.get('environment', {}))
++    for key in ('vision','vram_elastic'):
++        if key in data:result[key]=copy.deepcopy(data[key])
 +    result.update(exe=str(exe), cwd=str(root), log=data['log'], slot_save_path=data['archive_dir'],
 +                  configuration_status=data.get('configuration_status', STATUS))
 +    return root, result
@@ -9250,10 +9252,10 @@ index 000000000..912f54794
 +   self.assertIn(b'504',data.split(b'\r\n')[0])
 diff --git a/terminal/l2/test_runtime_config.py b/terminal/l2/test_runtime_config.py
 new file mode 100644
-index 000000000..c2778cf2f
+index 000000000..b06815fbe
 --- /dev/null
 +++ b/terminal/l2/test_runtime_config.py
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,44 @@
 +import contextlib
 +import copy
 +import hashlib
@@ -9279,7 +9281,8 @@ index 000000000..c2778cf2f
 +   'engine_sha256':hashlib.sha256(b'engine').hexdigest(),'log':str(root/'engine.log'),
 +   'archive_dir':str(root/'archives'),'ple_gguf':str(ple),'ampere_rows':'2',
 +   'environment':{'STRATA_DF2_AMPERE_TUNING':'2','STRATA_DF2_GEMM_TC':'0','STRATA_ADAPT_NOWAIT':'1','STRATA_ROUTE_TAIL_SKIP':'7'},
-+   'argument_overrides':{'--spec':'4','--lookup-max-t':'16'},'configuration_status':'NOT TESTED'}
++   'argument_overrides':{'--spec':'4','--lookup-max-t':'16'},'configuration_status':'NOT TESTED',
++   'vision':{'gpu':True,'expert_lease':True},'vram_elastic':True}
 +  (state/'production-baseline.json').write_text(json.dumps(selection))
 +  file=root/'profile.json';file.write_text(json.dumps(profile))
 +  return profile,file,state
@@ -9294,6 +9297,7 @@ index 000000000..c2778cf2f
 +   self.assertEqual(cfg['env']['STRATA_ADAPT_NOWAIT'],'1')
 +   self.assertEqual(cfg['env']['STRATA_ROUTE_TAIL_SKIP'],'7')
 +   self.assertEqual(cfg['configuration_status'],'NOT TESTED')
++   self.assertTrue(cfg['vision']['expert_lease']);self.assertTrue(cfg['vram_elastic'])
 +   self.assertEqual(profile,before)
 +if __name__=='__main__':unittest.main()
 diff --git a/terminal/l2/test_startup_benchmark.py b/terminal/l2/test_startup_benchmark.py

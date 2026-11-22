@@ -63,3 +63,16 @@ sudo ~/.local/bin/strata-headless-compare
 
 
 HC Q8并非遗漏的关闭项：当前Gyro-S GGUF包含Q8_0 HC投影，上游自动启用，已有真实模型日志记录0.62GiB Q8_0 HC。本次显式固定 `STRATA_HC_Q8=1` 保持这一既有行为。Tail skip不混入额外的tail renorm实验，保持 `STRATA_ROUTE_TAIL_RENORM=0` 的原始近似方式。
+
+## 无头按需识图
+
+已编译部署 `vision-expert-lease`：GPU编码前借专家显存，编码后退出reader并恢复原专家，再开始语言生成。同图磁盘缓存命中不借显存。配置 `vision.gpu=true`、`expert_lease=true`、`max_tokens=1024`、`threads=8`，`vram_elastic=true`、`STRATA_VISION_EXPERT_LEASE=1`、`--vram-segment-mib=128`。不为视觉静态保留2GiB专家容量；128MiB分段相对原分段的吞吐影响仍未测。
+
+下一次无头正常启动生效，无需桌面快捷方式。真实桌面受限预算API已通过，完整驻留和恢复后零文件层读取尚待以下显式检查；它与70组参数矩阵分开运行：
+
+```sh
+strata-headless-compare --vision-check --plan
+sudo ~/.local/bin/strata-headless-compare --vision-check
+```
+
+该检查保留日常完整驻留预算，执行冷图、缓存图和恢复后的3072-token文本。桌面active时退出；无开机自动测试。实现、测试边界见 [功能说明](features/vision-expert-lease/README.md)。

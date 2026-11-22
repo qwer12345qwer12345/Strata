@@ -1,6 +1,6 @@
 # Strata 下游补丁仓库（Downstream Feature Packages）
 
-本轮版本、补丁及硬件验证见[0.2.19 核查记录](validation/2026-11-23-review.md)。识图功能的新结构采用[临时借用专家显存](design/GYRO_VISION_VRAM_LEASE.md)，以单请求图像编码后的立即归还为目标。
+本轮版本、补丁及硬件验证见[0.2.19 核查记录](validation/2026-11-23-review.md)。识图功能的新结构采用[临时借用专家显存](design/GYRO_VISION_VRAM_LEASE.md)，已实现为[vision-expert-lease](features/vision-expert-lease/README.md)，完成真实图片受限预算API检查；完整驻留无头验收待手动执行。
 
 本分支是 Strata 的**下游功能包管理层**。它不维护一份长期漂移的完整源码分叉，而是把每项下游改动拆成可单独应用、验证、测试、启停和退役的补丁包。
 
@@ -51,6 +51,8 @@ downstream/features/<feature-id>/
 | `legacy-session-archive` | 完整旧 PR5500 V2/V3、Linux 文件后备停放、自动 Chat Completions 保存与正常退出等待（单一大补丁） | 活动；由 managed_server 启用 V2/V3 与同步保存 |
 | `ple-bf16-compact` | Direct BF16 PLE 原始行上传、GPU 无损展开、独立复制流 | opt-in，5120 bytes/token |
 | `ampere-tc-dispatch` | SM86 DFlash2 按形状选 scalar/TC，部分 Dense 短窗口 INT8 TC | opt-in，保留9行全局门槛 |
+| `dflash2-wide-lookup` | 10/12/16行lookup与宽窗口桥接、手动对比入口 | opt-in |
+| `vision-expert-lease` | 图像编码借出专家显存、结束后按原槽恢复 | opt-in，本机无头启用 |
 
 `live-memory`、`runtime-kv-storage`、`shutdown-persistent-cache` 已从默认活动栈移除，原目录保留作参考，不能与完整存档包叠加使用。
 
@@ -259,7 +261,7 @@ python downstream/scripts/test.py --feature example \
 
 ## 6. 当前验证边界
 
-活动栈目前包含三个原有计算优化包、一个完整存档包、一个工具边界保护包，以及 BF16 PLE、SM86 分派和 opt-in DFlash2 宽 lookup 三项新包。独立包与完整栈的 Git tree、SHA256 均校验；硬件与真实模型验收范围见各包 validation。存档迁移依据用户选定的旧方案，未启用 Live Memory 或未完成的 Runtime KV Storage。CI 的补丁校验不能替代真实 GPU、跨重启恢复与无头长上下文峰值验收。
+活动栈目前包含三个原有计算优化包、一个完整存档包、一个工具边界保护包，以及 BF16 PLE、SM86 分派、opt-in DFlash2 宽 lookup 和视觉专家显存借还四项新包，共九项。独立包与完整栈的 Git tree、SHA256 均校验；硬件与真实模型验收范围见各包 validation。存档迁移依据用户选定的旧方案，未启用 Live Memory 或未完成的 Runtime KV Storage。CI 的补丁校验不能替代真实 GPU、跨重启恢复与无头长上下文峰值验收。
 
 当前本机日常配置与手动无头对比命令见 [DAILY_CONFIGURATION.md](DAILY_CONFIGURATION.md)。正常启动不再执行基准或请求队列。
 

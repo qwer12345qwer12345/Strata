@@ -1,0 +1,103 @@
+{
+  "scope": "Desktop API vision/expert-lease correctness with 2GiB partial expert RAM, 5600 GPU slots, 8K context; not full-resident headless speed",
+  "cases": [
+    {
+      "case": "text_before",
+      "status": 200,
+      "seconds": 5.878960186000768,
+      "text": "A database transaction is a sequence of operations treated as a single, indivisible unit of work. It ensures that either all changes are applied successfully or none are, maintaining data integrity through atomicity.",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 22,
+        "prompt_ms": 3655.8,
+        "prompt_per_token_ms": 166.173,
+        "prompt_per_second": 6.0,
+        "predicted_n": 40,
+        "predicted_ms": 2217.6,
+        "predicted_per_token_ms": 55.44,
+        "predicted_per_second": 18.0,
+        "draft_n": 25,
+        "draft_n_accepted": 18
+      },
+      "error": null,
+      "lease_begins": 0,
+      "lease_ends": 0
+    },
+    {
+      "case": "image_cold",
+      "status": 200,
+      "seconds": 16.531631871999707,
+      "text": " Red, Green, Blue",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 89,
+        "prompt_ms": 12339.3,
+        "prompt_per_token_ms": 138.644,
+        "prompt_per_second": 7.2,
+        "predicted_n": 6,
+        "predicted_ms": 448.8,
+        "predicted_per_token_ms": 74.8,
+        "predicted_per_second": 13.4,
+        "draft_n": 5,
+        "draft_n_accepted": 4
+      },
+      "error": null,
+      "lease_begins": 1,
+      "lease_ends": 1
+    },
+    {
+      "case": "same_image_cached",
+      "status": 200,
+      "seconds": 0.21665839500019501,
+      "text": " Red, Green, Blue",
+      "timings": {
+        "cache_n": 82,
+        "prompt_n": 7,
+        "prompt_ms": 79.1,
+        "prompt_per_token_ms": 11.3,
+        "prompt_per_second": 88.5,
+        "predicted_n": 6,
+        "predicted_ms": 101.2,
+        "predicted_per_token_ms": 16.867,
+        "predicted_per_second": 59.3,
+        "draft_n": 5,
+        "draft_n_accepted": 4
+      },
+      "error": null,
+      "lease_begins": 0,
+      "lease_ends": 0
+    },
+    {
+      "case": "text_after_image",
+      "status": 200,
+      "seconds": 1.3702948530008143,
+      "text": "Two prime numbers are **2** and **3**.",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 17,
+        "prompt_ms": 725.2,
+        "prompt_per_token_ms": 42.659,
+        "prompt_per_second": 23.4,
+        "predicted_n": 12,
+        "predicted_ms": 641.2,
+        "predicted_per_token_ms": 53.433,
+        "predicted_per_second": 18.7,
+        "draft_n": 11,
+        "draft_n_accepted": 8
+      },
+      "error": null,
+      "lease_begins": 0,
+      "lease_ends": 0
+    }
+  ],
+  "status": "passed",
+  "min_mem_available_kib": 17177728,
+  "max_new_swap_kib": 3297580,
+  "max_owned_process_swap_kib": 166500,
+  "image_answer_contains_expected_colors": true,
+  "limitations": [
+    "Desktop with a 2GiB partial expert RAM budget and 5600 GPU slots; expert file reads exist, so these are lifecycle/correctness checks, not headless throughput.",
+    "Global swap grew with vm.swappiness=150 and file-tier I/O; memory/owned-process swap and all interrupted attempts are reported separately. No full-resident 256K memory or zero-file-read claim.",
+    "Synthetic test media only; this is not a broad image quality benchmark."
+  ]
+}

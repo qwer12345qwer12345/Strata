@@ -1,0 +1,27 @@
+{
+  "cuda_build": "passed; SM86 incremental engine and test binaries",
+  "ctest": {
+    "passed": 3,
+    "tests": [
+      "vision_expert_lease_test",
+      "vision_expert_lease_gpu_test",
+      "expert_cache_segmented_test"
+    ]
+  },
+  "python_feature_suite": {
+    "passed": 64,
+    "python": "3.12.15",
+    "includes": "multi-image, cached image, cancellation, failed encoder, failed restore retry, reader reaping, FIFO serialization, config defaults and manual vision plan"
+  },
+  "python_existing_control_regressions": {
+    "passed": 25
+  },
+  "real_api_300_token_image_limit": "passed 10 cases including actual client disconnection while a lease was held, malformed image, injected reader start failure and subsequent text",
+  "real_api_1024_token_image_limit": "passed cold picture, cached picture and subsequent text; reader warmed up at 1024 tokens",
+  "not_tested": [
+    "HIP/SYCL/Metal builds",
+    "full-resident 256K headless memory and post-vision zero file reads",
+    "general image grounding/OCR quality"
+  ],
+  "environment_note": "Default system Python lacked regex; package suite rerun with the installed service Python3.12 environment."
+}
