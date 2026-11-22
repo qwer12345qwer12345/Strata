@@ -20,6 +20,8 @@ Default: off.
 
 The parity test source is kept in this package's `tests/overlay`, not in the production patch.
 
+The combined Ampere/Gyro implementation rationale and test inventory are preserved in [AMPERE_GYRO_REIMPLEMENTATION.md](../../design/AMPERE_GYRO_REIMPLEMENTATION.md).
+
 ## Tests
 
 See [tests/README.md](tests/README.md). The K8V4 IMMA test skips with code 77 unless the active CUDA device is SM86.

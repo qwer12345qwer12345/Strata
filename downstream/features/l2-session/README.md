@@ -31,6 +31,8 @@ The updated ConversationSpill regression test is stored in this package's test o
 
 This is a restart-persistent full-session L2 foundation using the current upstream session-file format. It does not implement the older branch's V3 immutable base/delta archive, SAVEINC/RESTOREPP or incremental K/V writes.
 
+The staged port rationale and remaining V3 work are preserved in [L2_SESSION_V3_PORT.md](design/L2_SESSION_V3_PORT.md). The older V2/V3 implementation and benchmark work remain on the separately retained `ampere-gyro-latency` branch; this package does not claim to have migrated them.
+
 ## Tests
 
 See [tests/README.md](tests/README.md).

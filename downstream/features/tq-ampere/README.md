@@ -19,6 +19,8 @@ Default: off.
 
 The tests reuse the existing `native_expert_parity` executable and cover TQK6/TQK7 and TQ2_T.
 
+The combined Ampere/Gyro implementation rationale and test inventory are preserved in [AMPERE_GYRO_REIMPLEMENTATION.md](../../design/AMPERE_GYRO_REIMPLEMENTATION.md).
+
 ## Tests
 
 See [tests/README.md](tests/README.md). Run on an SM86 CUDA device to qualify the optimized path.
