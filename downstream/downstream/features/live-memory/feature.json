@@ -1,0 +1,50 @@
+{
+  "id": "live-memory",
+  "name": "Live Memory capacity owner (VMM prefix, RAM blocks, MEMORY protocol, server policy)",
+  "version": "0.2.0",
+  "status": "active",
+  "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
+  "patched_tree": "7278dafe14bd9f7112b8d93e9c58ebf1476a6d87",
+  "requires": [],
+  "patches": [
+    {
+      "id": "live-memory-vmm",
+      "path": "patches/0001-live-memory-vmm.patch",
+      "sha256": "850e57c6d2a0fadb81c3e890929eda26b456eb006330419460cc390b798c48bb"
+    },
+    {
+      "id": "live-memory-transactional-resize",
+      "path": "patches/0002-live-memory-transactional-resize.patch",
+      "sha256": "586e0f3fada95b41988c5350422f7885c8359589ae4c402be5901f11b85f1688"
+    },
+    {
+      "id": "live-memory-live-slot-guards",
+      "path": "patches/0003-live-memory-live-slot-guards.patch",
+      "sha256": "cbd16136d63680e9673b8c631dc42ee344dc44123aec3e1b8d7f44b81c157599"
+    },
+    {
+      "id": "live-memory-ram-blocks",
+      "path": "patches/0004-live-memory-ram-blocks.patch",
+      "sha256": "a341395c51a8d1b261c2207bedbf3b7219f24e33e455c8053413279b70e13ca3"
+    },
+    {
+      "id": "live-memory-engine-protocol",
+      "path": "patches/0005-live-memory-engine-protocol.patch",
+      "sha256": "947e266a1c32e06fbf70cc8732d3d3c2d54b7779a3969bc9c1277134d0f687bc"
+    },
+    {
+      "id": "live-memory-server-policy",
+      "path": "patches/0006-live-memory-server-policy.patch",
+      "sha256": "92d5a1af04dfc3e1d44661392ccd9dfcb1e713c43b413fcc2446837889d22847"
+    }
+  ],
+  "tests": "tests/test.json",
+  "environment": {
+    "STRATA_LIVE_MEMORY_INITIAL_MIB": "<positive whole MiB>",
+    "STRATA_LIVE_MEMORY": "1",
+    "STRATA_LIVE_MEMORY_PIN_RAM": "1 (optional)",
+    "STRATA_LIVE_MEMORY_MAX_BLOCK_MIB": "<MiB, default 512>",
+    "STRATA_LIVE_MEMORY_CAPACITY_S": "<seconds, default 10>",
+    "STRATA_LIVE_MEMORY_POLICY": "1 (server-side automatic policy)"
+  }
+}

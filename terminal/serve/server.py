@@ -325,7 +325,8 @@ from serve import oomd_pacer  # noqa: E402
 from serve import lastrun  # noqa: E402
 from serve import hy4_kind  # noqa: E402
 from serve import hy4_dialect  # noqa: E402
-from serve import live_memory_policy  # noqa: E402
+from serve import inkling_kind  # noqa: E402
+from serve import inkling_dialect  # noqa: E402
 from serve.webfiles import subtree_file as web_subtree_file  # noqa: E402
 from strata_control import engine_component  # noqa: E402
 from strata_control import tls  # noqa: E402
@@ -760,6 +761,7 @@ class StrataEngine:
         # the all-cards split engine (sFNX, strata-split-N[-arch]): its GEN parser accepts fewer keys than Strata's engine (tests/split/test_split_gen_keys.py pins them)
         self.split_engine = os.path.basename(str(exe)).startswith("strata-split")
         self.hy4_engine = hy4_kind.is_hy4_exe(exe)     # the Hy4-Flash engine (serve/hy4_kind.py): one request at a time, no logprobs, no logit bias
+        self.inkling_engine = inkling_kind.is_inkling_exe(exe)   # Inkling-2-Mini (serve/inkling_kind.py): 1..64 continuous batching, DSpark, in-process Vision
         self.session_save_reclaim = '--session-save-reclaim' in args
         paths = {k: v for k, v in zip(args, args[1:]) if k in ("--native", "--pack")}
         self.model_path = paths.get("--native") or paths.get("--pack", "pack/full")
@@ -950,13 +952,6 @@ class StrataEngine:
         self.gen = self.__dict__.get("gen", 0) + 1      # which engine process this is (a request notes its own); first, so
         #                                                 a request that sees the new number sees the new queues (#4451)
         self.lines: queue.Queue = queue.Queue()
-        # Live Memory (PR4 Phase 4): ACK answers wait here for the request_memory() caller (one at a time: the
-        # caller holds _exclusive_control); CAPACITY reports land in terminal_capacity, never in a request's
-        # token stream.  _memory_mu serializes the MEMORY owner against itself (the policy thread, Vision).
-        self.ack_q: queue.Queue = queue.Queue()
-        self.terminal_capacity: dict | None = None
-        self._memory_mu = threading.Lock()
-        self._memory_seq = 0
         # --batch: concurrent requests in the engine's batch slots (see generate_batched).  The engine says how many
         # it runs (INFO batch_slots=N: it may have fewer than asked, or none, when they do not fit)
         asked = next((int(args[args.index(k) + 1]) for k in ("--batch", "--slots", "--parallel") if k in args), 0)
@@ -1047,23 +1042,6 @@ class StrataEngine:
                 sample = parse_stage_in_flight_sample(line)
                 if sample is not None and self.proc is proc:
                     self.terminal_stage_sample = {**sample, "observed_monotonic": time.monotonic()}
-                continue
-            if line.startswith("CAPACITY "):
-                # Live Memory (PR4): the tiers' actual capacity and a fresh RAM reading - control telemetry
-                # that never enters a request's token stream (BSTAT/PSTAT's shape)
-                sample = live_memory_policy.CapacitySample.parse(line.rstrip("\n"))
-                if sample is not None and self.proc is proc:
-                    self.terminal_capacity = {"observed_monotonic": sample.observed_monotonic,
-                                              "ram_resident_mib": sample.ram_resident_mib,
-                                              "ram_available_mib": sample.ram_available_mib,
-                                              "vram_committed_mib": sample.vram_committed_mib,
-                                              "vram_free_mib": sample.vram_free_mib,
-                                              "vram_reserve_mib": sample.vram_reserve_mib}
-                continue
-            if line.startswith("ACK "):
-                # one MEMORY request at a time (the caller holds _memory_mu and the control lines); an ACK
-                # nobody waits for (a timed-out caller) is dropped here instead of reaching a request
-                self.ack_q.put(line.rstrip("\n"))
                 continue
             if line.startswith(("BT ", "BDONE ")) and slot_q:   # --batch: a batch slot's own lines
                 try:
@@ -1277,65 +1255,15 @@ class StrataEngine:
             if time.time() > deadline:
                 raise EngineDied("the engine did not answer the VRAM command")
 
-    def latest_capacity(self) -> dict | None:
-        """Live Memory (PR4): the newest CAPACITY report (the tiers' actual bytes, a fresh cgroup-aware RAM
-        reading and the reserve), or None.  Control telemetry: it never passes through a request's lines."""
-        return self.__dict__.get("terminal_capacity")
-
-    def has_live_memory(self) -> bool:
-        """Does the running engine run the acknowledged MEMORY protocol?  The INFO line says so
-        (live_memory=1, PR4); older engines answer only the VRAM command."""
-        return bool((getattr(self, "info", None) or {}).get("live_memory"))
-
-    def request_memory(self, resident_mib: int, vram_reserve_mib: int, timeout: float = 300.0) -> dict:
-        """Live Memory (PR4 Phase C): `MEMORY <id> <resident-mib> <vram-reserve-mib>` at the same serialized
-        owner the automatic policy and Vision's reserve share (_memory_mu).  The engine applies it at a safe
-        point - it QUEUES the request while a prompt's loan is out - and answers exactly once with a terminal
-        ACK (OK / PARTIAL / REFUSED) reporting the ACTUAL capacity; a REFUSED or PARTIAL is a normal answer,
-        not an error (the engine is the final admission authority).  -> the ACK's figures plus state and id."""
-        with self._memory_mu:
-            with self._exclusive_control():
-                return self._memory(resident_mib, vram_reserve_mib, timeout)
-
-    def _memory(self, resident_mib: int, vram_reserve_mib: int, timeout: float = 300.0) -> dict:
-        if not self.alive():
-            raise EngineDied("the engine is not running")
-        self._memory_seq = getattr(self, "_memory_seq", 0) + 1
-        request_id = self._memory_seq
-        self.proc.stdin.write(f"MEMORY {request_id} {int(resident_mib)} {int(vram_reserve_mib)}\n")
-        self.proc.stdin.flush()
-        deadline = time.time() + timeout
-        while True:
-            try:
-                line = self.ack_q.get(timeout=max(0.1, deadline - time.time()))
-            except queue.Empty:
-                raise EngineDied("the engine did not answer the MEMORY request") from None
-            parsed = live_memory_policy.parse_ack(line)
-            if parsed is None:
-                continue                                  # not an ACK line (a lagging one is dropped by _pump)
-            ack_id, state, numbers, note = parsed
-            if ack_id != request_id:
-                continue                                  # a timed-out earlier caller's answer
-            out = {"state": state, "id": ack_id, **numbers}
-            self.info.update({k: v for k, v in numbers.items()})
-            if state == "OK":
-                return out
-            note = note.replace("_", " ")
-            if state == "REFUSED":
-                raise ValueError(note or "the engine refused the MEMORY request")
-            if note:
-                out["note"] = note                        # PARTIAL: why it stopped short, in words
-            return out                                    # PARTIAL: the actual capacity rides the answer
-
     def pen_from_key(self, orig_len: int, prompt_len: int) -> str:
         """` pen_from=N` for a leg that continues a request (prompt + what it generated): where the reply began, Strata's penalty window start. The all-cards split engine
         (sFNX) and Hy4-Flash (`strata-hy4`) refuse the key (GEN: unknown/unsupported key pen_from): it is not sent."""
-        if getattr(self, "split_engine", False) or getattr(self, "hy4_engine", False) or prompt_len <= orig_len:
+        if getattr(self, "split_engine", False) or getattr(self, "hy4_engine", False) or getattr(self, "inkling_engine", False) or prompt_len <= orig_len:
             return ""
         return f" pen_from={orig_len - 1}"
 
     @staticmethod
-    def sampling_keys(sampling: dict, *, hy4: bool = False) -> str:
+    def sampling_keys(sampling: dict, *, hy4: bool = False, inkling: bool = False) -> str:
         keys = ""
         t = sampling.get("temperature")
         if isinstance(t, (int, float)) and float(t) > 0.0:
@@ -1372,11 +1300,12 @@ class StrataEngine:
         seed = sampling.get("seed")
         if isinstance(seed, int) and seed > 0:
             keys += f" seed={seed}"
-        if hy4:
-            # Hy4-Flash (serve/hy4_kind.py): its GEN parser strictly rejects Flash-Next-only keys
-            # (cvec, ckpt, pin, hold, pipe, aux_cpus, img_keys, logprobs, allowed, bias).
+        if hy4 or inkling:
+            # Hy4-Flash & Inkling-2-Mini: strip Flash-Next-only keys; pass image=<path> keys cleanly
             for p in sampling.get("strata_hy4_images") or []:
                 keys += " image=" + hy4_kind.encode_path(p)
+            for p in sampling.get("strata_inkling_images") or []:
+                keys += " image=" + inkling_kind.encode_path(p)
             return keys
         # setup's calibration (tools/calibrate.py): engine settings for this request only, measured without a restart
         tune = sampling.get("strata_tune")
@@ -1995,7 +1924,9 @@ class StrataEngine:
         self.progress, self.progress_ms, self.reused = None, 0, 0
         born = self.gen                                 # the engine process this request is sent to
         hold = (sampling or {}).get(HOLD_KEY)           # the thinking budget's hold (P2b): the reasoning tokens left when this pass starts, and </think>'s id
-        keys0 = self.sampling_keys({k: v for k, v in (sampling or {}).items() if k != HOLD_KEY}, hy4=getattr(self, "hy4_engine", False))   # (the hold's key goes on per leg: leg_keys below)
+        keys0 = self.sampling_keys({k: v for k, v in (sampling or {}).items() if k != HOLD_KEY},
+                                   hy4=getattr(self, "hy4_engine", False),
+                                   inkling=getattr(self, "inkling_engine", False))   # (the hold's key goes on per leg: leg_keys below)
         # logprobs: only an admission's token can have an LP line here (the slot's "BT" lines carry none), so the
         # server refuses these requests unless max_tokens is 1.  The lines go to the request itself, through its
         # cancel Event: several requests read control lines at once, and the engine's lp_lines is one attribute.
@@ -2545,8 +2476,8 @@ class StrataEngine:
         self.lp_lines = LPLines(cancel)
         carry = NO_LINE                  # a line read for a token's LP line, held until it is used
         # an image request takes the same sampling keys as text (#75: it used to decode greedily whatever was asked)
-        head = f"GENI {int(max_new)}{self.sampling_keys(sampling or {}, hy4=getattr(self, 'hy4_engine', False))} {embeddings}" if embeddings else \
-            f"GEN {int(max_new)}{self.sampling_keys(sampling or {}, hy4=getattr(self, 'hy4_engine', False))}"
+        head = f"GENI {int(max_new)}{self.sampling_keys(sampling or {}, hy4=getattr(self, 'hy4_engine', False), inkling=getattr(self, 'inkling_engine', False))} {embeddings}" if embeddings else \
+            f"GEN {int(max_new)}{self.sampling_keys(sampling or {}, hy4=getattr(self, 'hy4_engine', False), inkling=getattr(self, 'inkling_engine', False))}"
         if prefill_only:                                 # split serving (serve/split.py): read the prompt, make no token
             if embeddings or int(max_new) != 0:
                 raise ValueError("prefill_only is a text prompt and max_new 0")
@@ -3497,7 +3428,7 @@ def mtp_retry_args(cfg: dict, exe: str | None, extra: list[str] | None = None) -
     """The arguments to start again with when an Auto start that picked DFlash2 ends before the engine is ready: the same start with the MTP (or no drafter, when
     the MTP layer is not on this computer). None when there is nothing to retry: the person named DFlash2 themselves (that start fails with its reason, as it
     should), the choice was not DFlash2, or the MTP arguments are the same. Builds the arguments without any line or note (engine_args announce=False)."""
-    if hy4_kind.is_hy4(cfg):
+    if hy4_kind.is_hy4(cfg) or inkling_kind.is_inkling(cfg):
         return None
     if drafting.normalize(cfg.get("drafting")) != "auto" or "args" not in cfg:
         return None
@@ -3515,7 +3446,7 @@ def nodraft_retry_args(cfg: dict, exe: str | None, extra: list[str] | None = Non
     """The arguments to start again with when an Auto start ends before the engine is ready because a card ran out of memory: the same start with no drafter
     (the draft layer and DFlash2's buffers are the biggest optional part on a card that is short), never the MTP in place of DFlash2.  None when the drafting
     was not Auto (the person named a drafter: that start fails with the engine's reason), when the first start has no drafter anyway, or when nothing differs."""
-    if hy4_kind.is_hy4(cfg):
+    if hy4_kind.is_hy4(cfg) or inkling_kind.is_inkling(cfg):
         return None
     if drafting.normalize(cfg.get("drafting")) != "auto" or "args" not in cfg:
         return None
@@ -3537,6 +3468,8 @@ def engine_args(cfg: dict, exe: str | None = None, *, announce: bool = True) -> 
     and without leaving a note for the next engine start (the retry arguments of mtp_retry_args)."""
     if hy4_kind.is_hy4(cfg):                     # the Hy4-Flash engine takes none of the Flash-Next flags below (serve/hy4_kind.py)
         return hy4_kind.engine_args(cfg, exe, announce=announce)
+    if inkling_kind.is_inkling(cfg):             # the Inkling-2-Mini engine takes its own flags (serve/inkling_kind.py)
+        return inkling_kind.engine_args(cfg, exe, announce=announce)
     args = list(cfg["args"])
     # "user_args" (strata_control/user_args.py): the options the person set by hand, over the generated ones at every start,
     # so a setup run or the app rewriting "args" cannot undo them (#3216 #3215 #3270)
@@ -3619,10 +3552,6 @@ def engine_args(cfg: dict, exe: str | None = None, *, announce: bool = True) -> 
         seg = cfg.get("vram_segment_mib")
         if isinstance(seg, int) and not isinstance(seg, bool) and seg > 0 and "--vram-segment-mib" not in args:
             args += ["--vram-segment-mib", str(seg)]
-    # Live Memory (PR4): "live_memory": true opts the engine into the acknowledged MEMORY protocol; the
-    # segmented cache is its VRAM half, so it implies vram_elastic (the config's own key still wins)
-    if cfg.get("live_memory") not in (None, False) and "--vram-elastic" not in args:
-        args.append("--vram-elastic")
     args += parallel_args(cfg, args)
     args += pool_cores_args(cfg, args)
     return draft_costs_args(cfg, learned_profile_args(cfg, args), exe or cfg.get("exe"))
@@ -3832,20 +3761,6 @@ def child_env(cfg: dict, *, offline: bool = False) -> dict:
         env["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in ordered_gpus(cfg))
     for k, v in (cfg.get("env") or {}).items():      # engine settings the config carries (AMD: the GEMM tuning table)
         env[str(k)] = str(v)
-    # Live Memory (PR4): the config's "live_memory" turns the engine's MEMORY protocol on (its env switch);
-    # a dict tunes the blocks: {"pin_ram": true, "max_block_mib": 512, "capacity_s": 10}.  The config's own
-    # "env" entries above still win (setdefault never overrides one).
-    lm = cfg.get("live_memory")
-    if lm not in (None, False):
-        env.setdefault("STRATA_LIVE_MEMORY", "1")
-        sub = lm if isinstance(lm, dict) else {}
-        if sub.get("pin_ram"):
-            env.setdefault("STRATA_LIVE_MEMORY_PIN_RAM", "1")
-        if isinstance(sub.get("max_block_mib"), int) and not isinstance(sub.get("max_block_mib"), bool) \
-                and sub["max_block_mib"] > 0:
-            env.setdefault("STRATA_LIVE_MEMORY_MAX_BLOCK_MIB", str(sub["max_block_mib"]))
-        if isinstance(sub.get("capacity_s"), (int, float)) and not isinstance(sub.get("capacity_s"), bool):
-            env.setdefault("STRATA_LIVE_MEMORY_CAPACITY_S", str(sub["capacity_s"]))
     # 0.2.17 (owner 11-19): the route tail skip is Off unless the person turned it on (STRATA_ROUTE_TAIL_SKIP=7 in the config or in their own environment).
     # The engine's own rule for an unset value is rank 7, so an unset one is set to 0 here, for a config made before 0.2.17 too.
     speed_switches.engine_env_defaults(env)
@@ -3972,6 +3887,7 @@ def vision_env(cfg: dict, env: dict, archs: dict[int, str] | None = None) -> dic
 
 def refuse_for_split(engine, req: dict) -> None:
     hy4_kind.refuse(engine, req)
+    inkling_kind.refuse(engine, req)
     if not getattr(engine, "split_engine", False):
         return
     if top_logprobs(req) is not None:
@@ -4071,13 +3987,6 @@ class Service:
         self.before_load_strict = False                  # #1997: refuse (503) whenever it fails
         self.vram_reserve = None                         # #533: the last POST /v1/vram reserve (None: the start's)
         self.vram_reserve_asked = False                  # a POST /v1/vram was made (vram_reserve None is then asked)
-        # Live Memory (PR4 Phase 4): the opt-in automatic policy (config "live_memory_policy" or env
-        # STRATA_LIVE_MEMORY_POLICY=1) and the manual memory API share the engine's serialized MEMORY owner
-        self.live_memory_policy_cfg = live_memory_policy.PolicyConfig(
-            enabled=bool(os.environ.get("STRATA_LIVE_MEMORY_POLICY", "").strip().lower() not in ("", "0", "off", "false", "no")))
-        self._memory_policy_stop = threading.Event()
-        self._memory_policy_thread: threading.Thread | None = None
-        self._memory_policy_state = live_memory_policy.MemoryPolicy(self.live_memory_policy_cfg)
         self.vision_held = False                         # an elastic encoder holds VRAM the expert cache gave it
         self.vision_no_shrink = False                    # the engine said its cache never shrinks (no --vram-elastic)
         self.vision_no_shrink_said = False
@@ -4096,9 +4005,13 @@ class Service:
         self.restore_after_load = None                    # a session file an image job saved before it unloaded
         self.stop_ids = end_token_ids(tokenizer)
         self.hy4 = getattr(engine, "hy4_engine", False) is True      # the Hy4-Flash engine: its end tokens, its tagged texts that stay text in a message
+        self.inkling = getattr(engine, "inkling_engine", False) is True   # the Inkling-2-Mini engine: its end tokens & channel tags
         if self.hy4:
             self.stop_ids |= hy4_kind.end_ids(tokenizer)
             self.literals = literal_tags(list(getattr(tokenizer, "control_tokens", ())) + hy4_kind.literal_tags(tokenizer))
+        elif self.inkling:
+            self.stop_ids |= inkling_kind.end_ids(tokenizer)
+            self.literals = literal_tags(list(getattr(tokenizer, "control_tokens", ())) + inkling_kind.literal_tags(tokenizer))
         self.family = None                            # the model family: set_family() below (None: the Qwen form)
         self.parser_cls = parser_for_template(getattr(template, "source", None))   # reads the model's output (reasoning, content, tool calls): by the template's tool-call form
         # #567: a prompt re-encodes only what follows the last special token it shares with a recent prompt (the
@@ -4323,10 +4236,10 @@ class Service:
 
     def has_vision(self) -> bool:
         """Whether this server can read images: either a separate vision encoder (Flash-Next)
-        or an in-process Hy4-Flash engine that reported `images=1`."""
+        or an in-process Hy4-Flash / Inkling-2-Mini engine that reported `images=1`."""
         if self.vision is not None:
             return True
-        return bool(self.hy4 and (getattr(self.engine, "info", None) or {}).get("images") == 1)
+        return bool((self.hy4 or self.inkling) and (getattr(self.engine, "info", None) or {}).get("images") == 1)
 
     def reasoning_budget(self, req) -> int | None:
         """#123: the most tokens this request may think, or None: the request's `reasoning_budget_tokens` (or, as
@@ -4658,60 +4571,6 @@ class Service:
                 ctl.release()
             self.fifo.release()
 
-    # ---- Live Memory (PR4 Phase 4): the manual memory API and the opt-in automatic policy ----
-
-    def memory(self, resident_mib: int | None = None, vram_reserve_mib: int | None = None) -> dict:
-        """POST /v1/memory: one MEMORY request through the engine's serialized owner (the engine stays the
-        final admission authority: its ACK reports the ACTUAL capacity, a PARTIAL/REFUSED rides the answer).
-        None resident_mib: a CAPACITY report only (GET's body).  The vision path and the automatic policy
-        thread use the same engine.request_memory() - one owner, never two cache owners racing."""
-        eng = self.engine
-        if not hasattr(eng, "request_memory"):
-            raise ValueError("this engine has no MEMORY protocol")
-        if resident_mib is None:
-            latest = eng.latest_capacity() if hasattr(eng, "latest_capacity") else None
-            if latest is None:
-                raise ValueError("the engine has not reported CAPACITY yet")
-            return {"status": "ok", **latest}
-        # the reserve rides unchanged at its current reported value unless this request names one
-        latest = eng.latest_capacity() if hasattr(eng, "latest_capacity") else None
-        reserve = vram_reserve_mib
-        if reserve is None:
-            reserve = (latest or {}).get("vram_reserve_mib", self.vram_reserve or 0)
-        out = eng.request_memory(int(resident_mib), int(reserve))
-        print(f"[strata] MEMORY {out.get('state')}: RAM tier {out.get('ram_resident_mib', '?')} MiB, "
-              f"expert cache {out.get('vram_committed_mib', '?')} MiB committed, reserve "
-              f"{out.get('vram_reserve_mib', '?')} MiB", flush=True)
-        return {"status": "ok", **out}
-
-    def start_memory_policy(self) -> None:
-        """The opt-in automatic policy (config "live_memory_policy" / STRATA_LIVE_MEMORY_POLICY=1): a thread
-        that watches the engine's CAPACITY reports and sends bounded MEMORY requests.  Off until an engine
-        that runs the MEMORY protocol is up (INFO live_memory=1); never started when disabled."""
-        if not self.live_memory_policy_cfg.enabled or self._memory_policy_thread is not None:
-            return
-        self._memory_policy_thread = threading.Thread(target=self._memory_policy_loop, daemon=True,
-                                                      name="strata-memory-policy")
-        self._memory_policy_thread.start()
-
-    def _memory_policy_loop(self) -> None:
-        cfg = self.live_memory_policy_cfg
-        while not self._memory_policy_stop.wait(cfg.interval_s):
-            eng = self.engine
-            if not hasattr(eng, "request_memory") or not getattr(eng, "has_live_memory", lambda: False)():
-                continue                        # an engine without the protocol: nothing to drive
-            request = self._memory_policy_state.observe(eng.latest_capacity() if hasattr(eng, "latest_capacity") else None)
-            if request is None:
-                continue
-            try:
-                out = eng.request_memory(request.resident_mib, request.vram_reserve_mib)
-                self._memory_policy_state.note_ack(out.get("state", "PARTIAL"))
-                print(f"[strata] memory policy: {request.reason}: RAM tier target {request.resident_mib} MiB -> "
-                      f"{out.get('state')} ({out.get('ram_resident_mib', '?')} MiB)", flush=True)
-            except (ValueError, EngineDied) as e:
-                self._memory_policy_state.note_ack("REFUSED")
-                print(f"[strata] memory policy: {request.reason}: the engine said no ({e})", flush=True)
-
     def _say_died(self, e: Exception) -> None:
         """The server window's line for an engine that died (or was ended, #481) in the middle of a request."""
         note = self.engine.death_note() if hasattr(self.engine, "death_note") else ""
@@ -4838,6 +4697,8 @@ class Service:
     def effort_default(self) -> str | None:
         """The thinking level of a request that names none: the Chat settings shared with apps first, then the config's
         "reasoning_effort" (#1641).  Every API reads it here (the Responses API did not: 0.1.44.1)."""
+        if self.inkling:
+            return None
         return self.shared.get("reasoning_effort") or self.config_effort
 
     def with_shared(self, req: dict, api: str) -> dict:
@@ -5112,6 +4973,8 @@ class Service:
         empty thinking block).  The engine (--tail-role-token) checkpoints in front of that turn."""
         if self.hy4:                                   # Hy4's template reads reasoning_effort no_think | high | max (serve/hy4_dialect.py)
             return self.template.render(messages, tools=tools, **hy4_dialect.template_kwargs(kwargs))
+        if self.inkling:                               # Inkling-2-Mini reads reasoning_effort none|minimal|low|medium|high|max (serve/inkling_dialect.py)
+            return self.template.render(inkling_dialect.prepare_messages(messages), tools=tools, **inkling_dialect.template_kwargs(kwargs))
         effort = kwargs.get("reasoning_effort")
         off = kwargs.get("enable_thinking") is False
         if not self.effort_end or (not off and effort in (None, "", "xhigh", "high")):
@@ -5230,14 +5093,20 @@ class Service:
         self.embeddings.path = None
         self.embeddings.keys = None
         images = images_of(messages)
-        self.embeddings.hy4 = self._drop_hy4_images(getattr(self.embeddings, "hy4", None))      # an earlier pass of this request left its files: gone first
-        if images and self.hy4:                                       # Hy4-Flash: the engine reads the pictures itself (INFO images=1); never the separate picture reader
+        self.embeddings.hy4 = self._drop_hy4_images(getattr(self.embeddings, "hy4", None))
+        self.embeddings.inkling = self._drop_hy4_images(getattr(self.embeddings, "inkling", None))      # an earlier pass of this request left its files: gone first
+        if images and (self.hy4 or self.inkling):                     # Hy4-Flash / Inkling-2-Mini: in-process engine reads pictures directly (INFO images=1)
+            kind_mod = inkling_kind if self.inkling else hy4_kind
             if (getattr(self.engine, "info", None) or {}).get("images") != 1:
-                raise ValueError(hy4_kind.NO_IMAGES_REPLY)
+                raise ValueError(kind_mod.NO_IMAGES_REPLY)
             if self.offline and any(src.startswith(("http://", "https://")) for src in images):
                 raise ValueError("offline mode cannot download an image URL; send a data: image instead")
-            self.embeddings.hy4 = hy4_kind.write_images(
+            written = kind_mod.write_images(
                 images, lambda s: fetched[s] if s in fetched else Vision.load(s), Vision.normalize, cancel)
+            if self.inkling:
+                self.embeddings.inkling = written
+            else:
+                self.embeddings.hy4 = written
             images = []
         if images:
             if self.offline and any(src.startswith(("http://", "https://")) for src in images):
@@ -5426,6 +5295,7 @@ class Service:
         if path is not None:
             Path(path).unlink(missing_ok=True)
         self.embeddings.hy4 = self._drop_hy4_images(getattr(self.embeddings, "hy4", None))
+        self.embeddings.inkling = self._drop_hy4_images(getattr(self.embeddings, "inkling", None))
 
     @staticmethod
     def _drop_hy4_images(paths):
@@ -5578,6 +5448,9 @@ class Service:
         hy4_images = getattr(self.embeddings, "hy4", None)                 # Hy4-Flash: the picture files of this request (kept until drop_embeddings)
         if hy4_images:
             sampling = {**(sampling or {}), "strata_hy4_images": list(hy4_images)}
+        inkling_images = getattr(self.embeddings, "inkling", None)         # Inkling-2-Mini: the picture files of this request
+        if inkling_images:
+            sampling = {**(sampling or {}), "strata_inkling_images": list(inkling_images)}
         # Only a DONE line replaces engine.last, so a request that died, errored or was disconnected must not have
         # the PREVIOUS request's decode figures recorded as its own: each pass keeps its own DONE (a segment) if
         # one arrived.  A reasoning-budget continuation is another native generation, not another API request,
@@ -7241,15 +7114,6 @@ def make_handler(svc: Service):
             elif path == "/v1/status":
                 if self._authorized():
                     self._json(200, svc.v1_status())
-            elif path == "/v1/memory":
-                # Live Memory (PR4): the newest CAPACITY report and the automatic policy's state (read-only)
-                if self._authorized():
-                    eng = svc.engine
-                    latest = eng.latest_capacity() if hasattr(eng, "latest_capacity") else None
-                    self._json(200, {"live_memory": bool(getattr(eng, "has_live_memory", lambda: False)()),
-                                     "policy": {"enabled": svc.live_memory_policy_cfg.enabled,
-                                                "cooldown_s": svc._memory_policy_state._cooldown_s},
-                                     "capacity": latest})
             else:
                 self._json(404, {"error": {"message": "not found"}})
 
@@ -7362,18 +7226,6 @@ def make_handler(svc: Service):
                         raise ValueError("reserve_mib: a whole number of MiB (0 or more), or null for the start's")
                     try:
                         self._json(200, svc.vram(r))
-                    except EngineDied as e:
-                        self._json(503, {"error": {"type": "server_error", "message": str(e)}})
-                    return
-                if path == "/v1/memory":                     # Live Memory (PR4): the acknowledged capacity API
-                    if not self._own_page("the memory tiers can be changed"):
-                        return
-                    ram, vram = req.get("resident_mib"), req.get("vram_reserve_mib")
-                    for name, value in (("resident_mib", ram), ("vram_reserve_mib", vram)):
-                        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
-                            raise ValueError(f"{name}: a whole number of MiB (0 or more), or null to keep it")
-                    try:
-                        self._json(200, svc.memory(ram, vram))
                     except EngineDied as e:
                         self._json(503, {"error": {"type": "server_error", "message": str(e)}})
                     return
@@ -8154,7 +8006,6 @@ def host_names_for(bind_host: str, allowed_hosts=(), trusted_origins=()) -> set[
 def serve(svc: Service, host="127.0.0.1", port=8095) -> ThreadingHTTPServer:
     svc.host_names = host_names_for(host, svc.allowed_hosts, svc.trusted_origins)
     svc.start_telemetry()
-    svc.start_memory_policy()   # Live Memory (PR4): opt-in; idles until an engine with the MEMORY protocol is up
     httpd = Server((host, port), make_handler(svc))
     httpd.svc = svc
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -8526,7 +8377,7 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
     if _ds:                                             # DeepSeek: this Strata no longer runs it; stop before the engine starts (retired.py)
         print(retired.server_line(_ds), flush=True)
         return 2
-    if a.config and a.engine == "strata" and not hy4_kind.is_hy4(cfg):     # (the Hy4-Flash engine has no tuning knobs)
+    if a.config and a.engine == "strata" and not hy4_kind.is_hy4(cfg) and not inkling_kind.is_inkling(cfg):     # (custom shape engines have no Flash-Next tuning knobs)
         cfg = apply_saved_tuning(cfg)
     attestation_key = os.environ.pop("STRATA_OWNER_ATTEST_KEY", None)
     launch_attestation = None
@@ -8747,13 +8598,15 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
     svc.queue_timeout_s = float(queue_timeout) if queue_timeout is not None else None
     if a.engine == "strata":                            # the model card's sampling when nothing else is said (see MODEL_CARD_SAMPLING)
         svc.model_arch = cfg.get("arch") or "qwen4exp"
-        svc.set_family("hy4" if svc.hy4 else None)
+        svc.set_family("hy4" if svc.hy4 else "inkling2" if svc.inkling else None)
         if svc.hy4:
             svc._force_text = hy4_dialect.force_text
+        elif svc.inkling:
+            svc._force_text = inkling_dialect.force_text
         requested = cfg.get("parallel")
         if requested is None:
             args = cfg.get("args", [])
-            for flag in ("--batch", "--slots"):
+            for flag in ("--batch", "--slots", "--parallel"):
                 if flag in args and args.index(flag) + 1 < len(args):
                     try:
                         requested = int(args[args.index(flag) + 1])
@@ -8763,19 +8616,6 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
         svc.requested_slots = per_replica * len(groups) if groups else per_replica
     svc.answer_room = cfg.get("answer_room") is not False
     svc.reasoning_close_retry = cfg.get("reasoning_close_retry") is True    # #1053: opt-in, off by default
-    # Live Memory (PR4 Phase 4): the config's "live_memory_policy" (or env STRATA_LIVE_MEMORY_POLICY=1)
-    # turns the automatic policy thread on; the tuning sub-keys ride the same shape as the engine's
-    lm = cfg.get("live_memory_policy")
-    if lm not in (None, False):
-        sub = lm if isinstance(lm, dict) else {}
-        cfg_policy = svc.live_memory_policy_cfg
-        cfg_policy.enabled = True
-        for key in ("interval_s", "low_watermark_mib", "high_watermark_mib", "debounce_n", "cooldown_s",
-                    "max_shrink_mib", "max_grow_mib", "max_age_s"):
-            value = sub.get(key)
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                setattr(cfg_policy, key, value)
-        svc._memory_policy_state = live_memory_policy.MemoryPolicy(cfg_policy)   # the state carries the same config
     if cfg.get("images"):                               # image generation (serve/images.py), set up by setup --images
         icfg = {k: (os.path.abspath(os.path.join(cfg.get("cwd") or ".", v))
                     if k in ("exe", "diffusion_model", "vae", "llm", "out_dir") and isinstance(v, str)
