@@ -59,4 +59,6 @@
 
 ## 与当前仓库的关系
 
-当前活动栈的 Live Memory、运行时 Delta 和关机存档保留各自的历史与功能边界。新识图方案从上游视觉生命周期和专家缓存关系出发单独实现。新性能基线优先组合 `tq-cpu`、`tq-ampere`、`qsa-imma` 三个可独立验证的补丁，存档能力按需要另行接入。
+这是未实现的设计。当前活动栈采用旧PR5500 V2/V3完整增量存档、BF16 PLE、SM86分派与宽lookup；Live Memory、Runtime KV Storage、Shutdown Persistent Cache目录仅作reference，未启用。不要把历史文档中的“保留”理解为这些功能正在日常运行。
+
+2026-11-23静态复核仍见上游VRAM命令拒绝complement resident模式；因此本设计还不是可直接开启的识图功能。现状见 [跨模块复核](../GLOBAL_REVIEW_AND_VISION.md)。

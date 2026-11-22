@@ -20,7 +20,8 @@
   "overlays": [],
   "python_modules": [
     "l2.test_controller",
-    "l2.test_startup_benchmark"
+    "l2.test_startup_benchmark",
+    "l2.test_runtime_config"
   ],
   "settings_generation": false
 }

@@ -12,23 +12,13 @@
 
 本次接入用于单卡 CUDA serve / Chat Completions，CLI 同步草稿调用也接入了桥接。没有扩展多卡 taps landing、batch slot 的异步 launch/finish 或 DFlash2 主体行数；没有验证其他后端。
 
-## 无头队列
+## 手动无头对比
 
-配合 legacy-session-archive 的 supervisor hook，在正常 backend 与对外 listener 启动前读取 startup benchmark 输出目录内的 `spec-shape-lookup.request.json`。请求包含已选引擎的 SHA256 和 `budget_s`；一次领取后移入私有结果目录，失败或中断不会在每次重启重复测试。测试失败会记录原因并继续日常基线；用户中断则退出。
+正常supervisor不执行基准、不读取旧请求队列。显式命令 `sudo ~/.local/bin/strata-headless-compare` 在无头环境暂停服务，运行比较后恢复日常服务；`strata-headless-compare --plan` 只显示计划。源码入口为 `terminal/l2/manual_compare.py`，运行时以模型用户和无限memlock执行，不以root运行模型。
 
-16组按回文顺序执行，每组全新引擎、固定 expert profile 副本，禁用 profile 保存与会话缓存：
+默认50组，包含旧/新日常组合、新旧形状、QKV TC与DP4A、spec6/4/3、lookup上限8/12/16、Dense短窗TC、lookup草稿延后与单行/成对行。关键交互用二维参数矩阵，正反顺序平衡冷热与先后；完整定义见 [日常配置与对比计划](../../DAILY_CONFIGURATION.md)。每组3072-token代码和1536-token长上下文输出，默认三小时预算，测试不会自动修改日常配置。
 
-| 对比 | 顺序 | 固定项 |
-|---|---|---|
-| spec | 6/4/3/3/4/6 | 旧形状表，lookup上限8，sizes=2..8 |
-| SM86形状 | 旧/新/新/旧 | spec6、lookup上限8 |
-| lookup上限 | 8/12/16/16/12/8 | spec6、新形状表 |
-
-prior=.5、confidence=.8、成对行、BF16 PLE、15 workers、正式专家预算与上下文设置保持不变。每组64-token热身，3072-token代码输出与1536-token长上下文输出。长输出提前结束到不足75%会标无效；报告不自动选择获胜配置。
-
-报告包括首个内容到达时间、引擎吞吐、HTTP内容块间隔p50/p95/p99、完整窗口耗时按来源/宽度的p50/p95/p99、实际宽度分布、分别的神经/lookup接受数及输出散列。HTTP内容块不是单个token；窗口时间包含这一轮的验证与草稿，不是纯GPU kernel时间。原始 trace 含令牌，留在本机私有目录，发布时只导出聚合计数。
-
-只在 SDDM inactive、无其他引擎或编译任务时运行。可用内存低于1GiB、新增swap超过1GiB或达到预算会结束试验。要求完整RAM专家补集page-lock，且每个请求确认零专家文件blob读取，才计入有效性能组。每组关闭所有引擎子进程后才启动下一组。
+保留完整驻留、零专家文件读取确认、内存/swap限制、流式与窗口延迟、输出散列及接受率报告。报告记录实际是否使用>8行，不能将“打开开关”当作已测到宽行收益。依赖legacy-session-archive提供统一runtime selection与正常supervisor，engine桥接本身仍是独立opt-in补丁。
 
 ## 验证及边界
 
@@ -38,4 +28,4 @@ prior=.5、confidence=.8、成对行、BF16 PLE、15 workers、正式专家预�
 - 桌面模型检查有专家文件读取，不能据此判定内核或无头吞吐优劣。shape8与wide12输出发生分叉，来源尚未隔离；wide16与参考的长输出散列相同。不能把分叉直接叫作质量降低，也不能声称已完成质量等价验收。
 - ring恢复附加检查发现：开启上游批量context时，关闭新形状表也不逐位一致；`STRATA_DF2_CTX_BATCH=0` 则通过。批量context的TC与窄行重建不是同一累加路径。桥接只使用窄行context，未更改生产prompt批处理默认，也未声称解决上游所有ring精度问题。原始对照保存在 validation。
 
-本机保留旧形状表、spec6与默认lookup8作为日常基线；新表和宽窗口等待完整无头16组结果。引擎二进制SHA256：`85a8b3084262d90b671ba5442bab6a0885bfb7faf34cc76e775b0f12ab4f7569`。编译和GPU测试依次执行，未切换桌面或网络。
+本机按用户选择采用理论优先日常组合，明确标注未经无头组合验证；测试改为显式命令触发，详见统一配置文档。引擎二进制SHA256：`85a8b3084262d90b671ba5442bab6a0885bfb7faf34cc76e775b0f12ab4f7569`。编译和GPU测试依次执行，未切换桌面或网络。

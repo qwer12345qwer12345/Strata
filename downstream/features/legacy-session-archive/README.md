@@ -23,7 +23,7 @@ python ../Strata-prepared/terminal/l2/managed_server.py --profile /path/to/profi
 
 profile 的 `exe` 应指向上述可执行文件，`cwd` 指向 prepared 的 `terminal`；保留用户的模型/量化/采样设置。`slot_save_path` 应使用新版本专用目录。wrapper 默认启用 V2/V3、文件后备和同步写入（`STRATA_L2_WRITER_BUDGET_MIB=0`），显式 profile 环境项除 writer budget 外优先。可通过 `l2_disk_budget_mib` 改变磁盘预算。模型/配置 identity 不符时会拒绝恢复并重新预填充。
 
-启用启动基准时，基准先在内部端口执行，通过后再提供外部服务；基准流量不进入会话档案。独立使用本包不强制安装内核或工具保护；完整活动栈另含这两类补丁。未使用已退役的 Live Memory 方案。
+正常启动不发送基准请求、不执行旧队列；内部服务ready后直接对外提供服务。显式手动性能测试的流量不进入日常会话档案。统一runtime selection负责环境项、BF16表和参数覆盖，未测试组合会写入状态提示。独立使用本包不强制安装内核或工具保护；完整活动栈另含这两类补丁。未使用已退役的 Live Memory 方案。
 
 ## 验证边界
 

@@ -10,7 +10,8 @@
   },
   "overlays": [],
   "python_modules": [
-    "l2.test_headless_experiments"
+    "l2.test_headless_experiments",
+    "l2.test_manual_compare"
   ],
   "settings_generation": false
 }

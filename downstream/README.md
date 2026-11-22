@@ -260,3 +260,7 @@ python downstream/scripts/test.py --feature example \
 ## 6. 当前验证边界
 
 活动栈目前包含三个原有计算优化包、一个完整存档包、一个工具边界保护包，以及 BF16 PLE、SM86 分派和 opt-in DFlash2 宽 lookup 三项新包。独立包与完整栈的 Git tree、SHA256 均校验；硬件与真实模型验收范围见各包 validation。存档迁移依据用户选定的旧方案，未启用 Live Memory 或未完成的 Runtime KV Storage。CI 的补丁校验不能替代真实 GPU、跨重启恢复与无头长上下文峰值验收。
+
+当前本机日常配置与手动无头对比命令见 [DAILY_CONFIGURATION.md](DAILY_CONFIGURATION.md)。正常启动不再执行基准或请求队列。
+
+关键参数交互与识图当前边界见 [GLOBAL_REVIEW_AND_VISION.md](GLOBAL_REVIEW_AND_VISION.md)。

@@ -15,8 +15,8 @@
   ],
   "tests": "tests/test.json",
   "environment": {
-    "STRATA_DF2_AMPERE_TUNING": "1",
-    "STRATA_DF2_GEMM_TC": "2",
+    "STRATA_DF2_AMPERE_TUNING": "2",
+    "STRATA_DF2_GEMM_TC": "0",
     "STRATA_DENSE_I8_AMPERE_SHAPES": "1"
   }
 }

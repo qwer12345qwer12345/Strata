@@ -352,10 +352,10 @@ index 000000000..95e38a2e7
 +    main()
 diff --git a/terminal/l2/headless_experiments.py b/terminal/l2/headless_experiments.py
 new file mode 100644
-index 000000000..0dc14ca77
+index 000000000..376dba718
 --- /dev/null
 +++ b/terminal/l2/headless_experiments.py
-@@ -0,0 +1,350 @@
+@@ -0,0 +1,365 @@
 +"""One-shot headless spec, SM86 shape and wide lookup comparisons. Never select a winner automatically."""
 +import datetime
 +import hashlib
@@ -372,7 +372,7 @@ index 000000000..0dc14ca77
 +from collections import defaultdict
 +from pathlib import Path
 +from l2.chat_latency import measure, workloads
-+REQUEST = 'spec-shape-lookup.request.json'
++from l2.runtime_config import DAILY, PREVIOUS, set_options
 +WINDOW = re.compile(r'strata decode timing: (\d+) windows, avg T ([\d.]+), ([\d.]+) tokens/window, ([\d.]+) ms/window')
 +
 +def meminfo():
@@ -563,16 +563,34 @@ index 000000000..0dc14ca77
 +        (folder / 'result.json').write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n')
 +    return report
 +
-+def arms():
-+    # Palindromic ordering balances clock, temperature and startup order.
-+    specs = [(f'spec{v}', v, 1, 8) for v in (6, 4, 3, 3, 4, 6)]
-+    shapes = [(f'shape{v}', 6, v, 8) for v in (1, 2, 2, 1)]
-+    wide = [(f'lookup{v}', 6, 2, v) for v in (8, 12, 16, 16, 12, 8)]
-+    return specs + shapes + wide
++def arms(groups=None):
++    def arm(group, label, changes):
++        return {**DAILY, **changes, 'group':group, 'name':label}
++    def mirror(group, fields, cases):
++        return [arm(group, group+'-'+('-'.join(map(str, values))),dict(zip(fields,values)))
++                for values in list(cases)+list(reversed(cases))]
++    result = [arm('combined','combined-'+label,cfg) for label,cfg in
++              [('previous',PREVIOUS),('daily',DAILY),('daily',DAILY),('previous',PREVIOUS)]]
++    # Cross the interacting choices instead of assuming each local winner composes.
++    spec_lookup = [(spec,lookup) for i,spec in enumerate((6,4,3))
++                   for lookup in ((8,12,16) if i%2==0 else (16,12,8))]
++    result += mirror('spec-lookup',('spec','lookup'),spec_lookup)
++    result += mirror('shape-qkv',('shapes','tc'),[(1,2),(1,0),(2,0),(2,2)])
++    result += mirror('dense-lookup',('dense','lookup'),[(0,8),(1,8),(1,16),(0,16)])
++    result += mirror('skip-lookup',('skip','lookup'),[(0,8),(8,8),(8,16),(0,16)])
++    result += mirror('rows',('rows',),[(2,),(0,)])
++    if groups:
++        aliases = {'spec':'spec-lookup','lookup':'spec-lookup','shape':'shape-qkv',
++                   'qkv-tc':'shape-qkv','dense':'dense-lookup','lookup-skip':'skip-lookup'}
++        wanted = {aliases.get(group,group) for group in groups}
++        unknown = wanted - {r['group'] for r in result}
++        if unknown:raise ValueError('Unknown comparison groups: '+', '.join(sorted(unknown)))
++        result = [r for r in result if r['group'] in wanted]
++    return result
 +
 +
 +def configure(base, arm, folder, seed, port):
-+    label, spec, shape, lookup = arm
++    spec, shape, lookup = arm['spec'], arm['shapes'], arm['lookup']
 +    cfg = json.loads(json.dumps(base))
 +    args = cfg['args']
 +    for flag in ('--expert-profile-save', '--expert-profile', '--conversation-cache-mib',
@@ -592,9 +610,9 @@ index 000000000..0dc14ca77
 +               drafting='dflash2', mtp=False, user_args=options, engine_ready_s=180)
 +    if str(cfg['env'].get('STRATA_ROUTE_PRIOR')) != '0.5':
 +        raise ValueError('prior=0.5 is required')
-+    cfg['env'].update(STRATA_TQ_AMPERE_ROWS='2', STRATA_DRAFT_LOG='1', STRATA_DECODE_TIMING='1',
-+                      STRATA_DF2_AMPERE_TUNING=str(shape), STRATA_DENSE_I8_AMPERE_SHAPES='0',
-+                      STRATA_DF2_GEMM_TC='2', STRATA_DF2_WIDE_CONTEXT='1' if lookup > 8 else '0',
++    cfg['env'].update(STRATA_TQ_AMPERE_ROWS=str(arm['rows']), STRATA_DRAFT_LOG='1', STRATA_DECODE_TIMING='1',
++                      STRATA_DF2_AMPERE_TUNING=str(shape), STRATA_DENSE_I8_AMPERE_SHAPES=str(arm['dense']),
++                      STRATA_DF2_GEMM_TC=str(arm['tc']), STRATA_DF2_LOOKUP_SKIP=str(arm['skip']), STRATA_DF2_WIDE_CONTEXT='1' if lookup > 8 else '0',
 +                      STRATA_SPEC_TRACE=str(folder / 'spec.trace'),
 +                      STRATA_CONV_DISK_DIR=str(folder / 'parked'))
 +    return cfg
@@ -652,38 +670,34 @@ index 000000000..0dc14ca77
 +    return result
 +
 +
-+def run_queued(root, cfg, directory, port):
-+    queued = directory / REQUEST
-+    if not queued.is_file():
-+        return
++def run_comparison(root, cfg, directory, port, request):
++    sequence = arms(request.get("groups"))
 +    work = directory / ('spec-shape-lookup-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
 +    work.mkdir(mode=0o700, parents=True)
-+    # Claim once before launching: an interrupted run never loops at every boot.
-+    queued.rename(work / 'request.json')
-+    report = {'status': 'failed', 'runs': [], 'sequence': arms(), 'suite': 'spec-shape-lookup-v1'}
++    (work / 'request.json').write_text(json.dumps(request, indent=2)+'\n')
++    report = {'status': 'failed', 'runs': [], 'sequence': sequence, 'suite': 'manual-theory-v2'}
 +    try:
-+        request = json.loads((work / 'request.json').read_text())
 +        check_environment()
 +        exe = Path(cfg['exe'])
 +        digest = hashlib.sha256(exe.read_bytes()).hexdigest()
 +        if request['engine_sha256'] != digest:
-+            raise ValueError('queued engine hash differs from the selected baseline')
++            raise ValueError('requested engine hash differs from the selected baseline')
 +        report['engine_sha256'] = digest
 +        args = cfg['args']
 +        seed = work / 'expert-profile.bin'
 +        seed.write_bytes(Path(args[args.index('--expert-profile') + 1]).read_bytes())
 +        report['seed_sha256'] = hashlib.sha256(seed.read_bytes()).hexdigest()
-+        deadline = time.monotonic() + min(3600, max(60, int(request.get('budget_s', 2700))))
++        deadline = time.monotonic() + min(14400, max(60, int(request.get('budget_s', 10800))))
 +        # Warmup plus 3072-token output and 1536-token long-context output.
 +        cases = workloads()[:3]
-+        print(f'Strata 开始 spec/形状/宽 lookup 无头对比，共 {len(arms())} 组；完成后开放服务。报告 {work}', flush=True)
-+        for i, arm in enumerate(arms(), 1):
-+            folder = work / f'{i:02d}-{arm[0]}'
++        print(f'Strata 开始 spec/形状/宽 lookup 无头对比，共 {len(sequence)} 组；完成后开放服务。报告 {work}', flush=True)
++        for i, arm in enumerate(sequence, 1):
++            folder = work / f'{i:02d}-{arm["name"]}'
 +            trial_cfg = configure(cfg, arm, folder, seed, port)
 +            # run_phase owns every child and closes it before the next arm.
-+            result = run_phase(root, trial_cfg, arm[0], folder, seed, port, deadline,
++            result = run_phase(root, trial_cfg, arm['name'], folder, seed, port, deadline,
 +                               workloads=cases, launch_profile=trial_cfg, stream_latency=True)
-+            result['settings'] = dict(spec=arm[1], shapes=arm[2], lookup_max_t=arm[3])
++            result['settings'] = dict(arm)
 +            if result['status'] == 'passed' and any(
 +                r['timings']['predicted_n'] < r['target_tokens'] * .75
 +                for r in result['cases'] if r['case'] != 'warmup'
@@ -695,23 +709,120 @@ index 000000000..0dc14ca77
 +            result['trace'] = trace_summary(folder / 'spec.trace')
 +            report['runs'].append(result)
 +            (work / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
-+            print(f'Strata 对比进度 {i}/{len(arms())}: {arm[0]} {result["status"]}', flush=True)
++            print(f'Strata 对比进度 {i}/{len(sequence)}: {arm["name"]} {result["status"]}', flush=True)
 +            if result['status'] == 'failed' or time.monotonic() >= deadline:
 +                break
 +        report['summary'] = summarize(report['runs'])
-+        report['status'] = 'passed' if len(report['runs']) == len(arms()) and all(
++        report['status'] = 'passed' if len(report['runs']) == len(sequence) and all(
 +            r['status'] == 'passed' for r in report['runs']) else 'incomplete'
 +    except Exception as exc:
 +        report['error'] = str(exc)
 +    finally:
 +        (work / 'results.json').write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n')
-+        print(f'Strata 无头对比 {report["status"]}，继续日常基线启动。报告 {work / "results.json"}', flush=True)
++        print(f'Strata 手动无头对比 {report["status"]}。报告 {work / "results.json"}', flush=True)
++    return report
+diff --git a/terminal/l2/manual_compare.py b/terminal/l2/manual_compare.py
+new file mode 100644
+index 000000000..fe93c124f
+--- /dev/null
++++ b/terminal/l2/manual_compare.py
+@@ -0,0 +1,90 @@
++"""Explicit headless comparison; normal startup never imports this module."""
++import argparse
++import json
++import os
++from pathlib import Path
++import pwd
++import resource
++import signal
++import subprocess
++import sys
++import tempfile
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
++from l2 import headless_experiments as experiments
++from l2 import runtime_config
++
++
++def main(argv=None):
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--profile', type=Path, default=Path('/etc/strata/server.json'))
++    parser.add_argument('--state-dir', type=Path)
++    parser.add_argument('--group', action='append', help='combined/spec-lookup/shape-qkv/dense-lookup/skip-lookup/rows; default all')
++    parser.add_argument('--budget-s', type=int, default=10800)
++    parser.add_argument('--plan', action='store_true', help='show the comparison plan without stopping or starting anything')
++    parser.add_argument('--worker', type=Path, help=argparse.SUPPRESS)
++    args = parser.parse_args(argv)
++    if args.worker:
++        payload = json.loads(args.worker.read_text())
++        report = experiments.run_comparison(Path(payload['root']), payload['cfg'], Path(payload['directory']),
++                                            payload['port'], payload['request'])
++        return 0 if report['status'] == 'passed' else 1
++    cfg = json.loads(args.profile.read_text())
++    directory = args.state_dir or Path(cfg.get('startup_benchmark', {}).get(
++        'output_dir', str(Path.home()/'.local/state/strata/startup-benchmark')))
++    root, cfg = runtime_config.select(Path(cfg['cwd']), cfg, directory)
++    sequence = experiments.arms(args.group)
++    request = {'engine_sha256': json.loads((directory/'production-baseline.json').read_text())['engine_sha256'],
++               'budget_s': args.budget_s, 'groups': args.group}
++    if args.plan:
++        print(json.dumps({'status':runtime_config.STATUS, 'automatic_tests':False, 'daily':runtime_config.DAILY,
++                          'groups':list(dict.fromkeys(r['group'] for r in sequence)), 'arms':len(sequence),
++                          'output_tokens':[3072,1536], 'budget_s':args.budget_s,
++                          'sequence':sequence}, indent=2, ensure_ascii=False))
++        return 0
++    desktop = subprocess.check_output(['systemctl','show','-p','ActiveState','--value','sddm.service'], text=True).strip()
++    if desktop != 'inactive':
++        parser.error('只在无头环境运行；当前桌面仍在使用，不会停止任何服务。')
++    if os.geteuid() != 0:
++        parser.error('完整专家驻留需要无限memlock并需临时停止/恢复服务，请用 sudo ~/.local/bin/strata-headless-compare；--plan无需sudo。')
++    owner = pwd.getpwuid(directory.stat().st_uid)
++    if owner.pw_uid == 0:
++        parser.error('comparison state directory must belong to the model user')
++    # The worker keeps the service user and RAM locking limit of the system service.
++    # All process-affecting operations occur after the explicit command and preflight.
++    resource.setrlimit(resource.RLIMIT_MEMLOCK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
++    with tempfile.NamedTemporaryFile('w',dir=directory,prefix='manual-compare-',suffix='.json',delete=False) as f:
++        payload_path = Path(f.name)
++        json.dump({'root':str(root),'cfg':cfg,'directory':str(directory),
++                   'port':int(cfg.get('l2_backend_port',8096)),'request':request}, f)
++    os.chown(payload_path,owner.pw_uid,owner.pw_gid)
++    def interrupted(signum, frame):
++        raise KeyboardInterrupt
++    previous_term = signal.signal(signal.SIGTERM, interrupted)
++    stopped = False
++    worker = None
++    try:
++        subprocess.run(['systemctl','stop','strata.service'],check=True)
++        stopped = True
++        worker = subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'--worker',str(payload_path)],
++                                  user=owner.pw_uid,group=owner.pw_gid,
++                                  extra_groups=os.getgrouplist(owner.pw_name,owner.pw_gid),
++                                  start_new_session=True,
++                                  env={**os.environ,'HOME':owner.pw_dir,'USER':owner.pw_name,'LOGNAME':owner.pw_name})
++        try:
++            return worker.wait()
++        except KeyboardInterrupt:
++            worker.send_signal(signal.SIGINT)
++            worker.wait(timeout=60)
++            return 130
++    finally:
++        signal.signal(signal.SIGTERM, previous_term)
++        payload_path.unlink(missing_ok=True)
++        desktop = subprocess.check_output(['systemctl','show','-p','ActiveState','--value','sddm.service'],text=True).strip()
++        if stopped and desktop == 'inactive':
++            subprocess.run(['systemctl','start','strata.service'],check=True)
++            print('Strata 手动对比已结束，已启动日常服务。',flush=True)
++
++
++if __name__ == '__main__':
++    raise SystemExit(main())
 diff --git a/terminal/l2/test_headless_experiments.py b/terminal/l2/test_headless_experiments.py
 new file mode 100644
-index 000000000..55c120716
+index 000000000..32914da3c
 --- /dev/null
 +++ b/terminal/l2/test_headless_experiments.py
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,115 @@
 +import copy
 +import hashlib
 +import json
@@ -760,38 +871,32 @@ index 000000000..55c120716
 +    cfg=h.configure(base,arm,root/'arm',root/'seed',18001)
 +    args=cfg['args'];val=lambda k:args[args.index(k)+1]
 +    self.assertNotIn('--expert-profile-save',args)
-+    self.assertEqual(val('--spec'),str(arm[1]))
-+    self.assertEqual(val('--lookup-max-t'),str(arm[3]))
++    self.assertEqual(val('--spec'),str(arm['spec']))
++    self.assertEqual(val('--lookup-max-t'),str(arm['lookup']))
 +    self.assertEqual(val('--draft-conf'),'0.8')
 +    self.assertEqual(val('--pool-workers'),'15')
 +    self.assertEqual(val('--max-context'),'262144')
 +    self.assertIn('--resident-experts',args)
-+    self.assertEqual(cfg['env']['STRATA_TQ_AMPERE_ROWS'],'2')
-+    self.assertEqual(cfg['env']['STRATA_DF2_WIDE_CONTEXT'],'1' if arm[3]>8 else '0')
-+    if arm[0].startswith('spec'):
-+     self.assertEqual(val('--lookup-sizes'),'2,3,4,5,6,7,8')
-+     self.assertEqual(arm[3],8)
++    self.assertEqual(cfg['env']['STRATA_TQ_AMPERE_ROWS'],str(arm['rows']))
++    self.assertEqual(cfg['env']['STRATA_DF2_WIDE_CONTEXT'],'1' if arm['lookup']>8 else '0')
++    if arm['group']=='spec-lookup':
++     expected='2,3,4,5,6,7,8'+(',10,12' if arm['lookup']>=12 else '')+(',16' if arm['lookup']==16 else '')
++     self.assertEqual(val('--lookup-sizes'),expected)
 +   self.assertEqual(base,old)
-+ def test_claim_once_hash_mismatch_never_runs(self):
++ def test_hash_mismatch_never_starts_a_trial(self):
 +  with tempfile.TemporaryDirectory() as t:
-+   root=Path(t);base=self.base(root);request=root/h.REQUEST
-+   request.write_text(json.dumps({'engine_sha256':'wrong'}))
++   root=Path(t);base=self.base(root)
 +   with patch.object(h,'check_environment'),patch.object(h,'run_phase') as run:
-+    h.run_queued(root,base,root,18001)
-+    h.run_queued(root,base,root,18001)
-+   run.assert_not_called();self.assertFalse(request.exists())
-+   result=json.loads(next(root.glob('spec-shape-lookup-*/results.json')).read_text())
-+   self.assertIn('hash differs',result['error'])
-+ def test_interrupt_claimed_queue_leaves_no_auto_replay(self):
++    report=h.run_comparison(root,base,root,18001,{'engine_sha256':'wrong'})
++   run.assert_not_called();self.assertIn('hash differs',report['error'])
++   self.assertEqual(list(root.glob('*.request.json')),[])
++ def test_interrupt_saves_report_without_queue(self):
 +  with tempfile.TemporaryDirectory() as t:
-+   root=Path(t);base=self.base(root);request=root/h.REQUEST
-+   request.write_text(json.dumps({'engine_sha256':hashlib.sha256(b'engine').hexdigest()}))
-+   def interrupt(*a,**kw):
-+    self.assertFalse(request.exists())
-+    raise KeyboardInterrupt
-+   with patch.object(h,'check_environment'),patch.object(h,'run_phase',side_effect=interrupt):
-+    with self.assertRaises(KeyboardInterrupt):h.run_queued(root,base,root,18001)
++   root=Path(t);base=self.base(root)
++   with patch.object(h,'check_environment'),patch.object(h,'run_phase',side_effect=KeyboardInterrupt):
++    with self.assertRaises(KeyboardInterrupt):h.run_comparison(root,base,root,18001,{'engine_sha256':hashlib.sha256(b'engine').hexdigest(),'groups':['shape']})
 +   self.assertTrue(next(root.glob('spec-shape-lookup-*/results.json')).exists())
++   self.assertEqual(list(root.glob('*.request.json')),[])
 + def test_trace_sources_widths_and_no_tokens(self):
 +  with tempfile.TemporaryDirectory() as t:
 +   p=Path(t)/'trace';p.write_text('# request prompt 3 df2 1 spec 6\nR 3 4 2 0 1.2 4 0 | 0.9 | 789 | 123 | 456\nR 6 12 11 1 2.5 12 32 | 0.9 | 789 | 123 | 456\n')
@@ -807,7 +912,7 @@ index 000000000..55c120716
 +   with socket.socket() as sock:
 +    sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
 +   (root/'strata.py').write_text(FAKE_ENGINE)
-+   folder=root/'trial';cfg=h.configure(base,('shape2',6,2,8),folder,root/'seed',port)
++   folder=root/'trial';cfg=h.configure(base,h.arms(['shape'])[1],folder,root/'seed',port)
 +   with patch.object(h,'check_environment'),patch.object(h,'meminfo',return_value={'MemAvailable':12000,'SwapTotal':1000,'SwapFree':1000}):
 +    result=h.run_phase(root,cfg,'shape2',folder,root/'seed',port,time.monotonic()+15,
 +                       workloads=[('fixture','fixed test prompt',8)],launch_profile=cfg,stream_latency=True)
@@ -820,9 +925,61 @@ index 000000000..55c120716
 +   # The trial's listening port must be reusable before the next arm begins.
 +   with socket.socket() as probe:self.assertNotEqual(probe.connect_ex(('127.0.0.1',port)),0)
 +
-+ def test_queue_balanced(self):
-+  seq=h.arms()
-+  for group in [seq[:6],seq[6:10],seq[10:]]:self.assertEqual(group,group[::-1])
-+  self.assertEqual(len(seq),16)
++ def test_groups_balanced_and_each_ablation_changes_one_field(self):
++  seq=h.arms();self.assertEqual(len(seq),50)
++  for group in {r['group'] for r in seq}:
++   rows=h.arms([group]);self.assertEqual(rows,rows[::-1])
++   if group!='combined':
++    fields={k for k in h.DAILY if len({r[k] for r in rows})>1}
++    expected={'spec-lookup':{'spec','lookup'},'shape-qkv':{'shapes','tc'},'dense-lookup':{'dense','lookup'},'skip-lookup':{'skip','lookup'},'rows':{'rows'}}
++    self.assertEqual(fields,expected[group],group)
++  self.assertEqual(len({(a['spec'],a['lookup']) for a in h.arms(['spec-lookup'])}),9)
++  self.assertEqual(len({(a['shapes'],a['tc']) for a in h.arms(['shape-qkv'])}),4)
++  self.assertEqual(h.arms(['combined'])[1],{**h.DAILY,'group':'combined','name':'combined-daily'})
++
++if __name__=='__main__':unittest.main()
+diff --git a/terminal/l2/test_manual_compare.py b/terminal/l2/test_manual_compare.py
+new file mode 100644
+index 000000000..cb92d9bce
+--- /dev/null
++++ b/terminal/l2/test_manual_compare.py
+@@ -0,0 +1,39 @@
++import contextlib
++import io
++import json
++from pathlib import Path
++import tempfile
++import unittest
++from unittest.mock import patch
++from l2 import manual_compare
++from l2 import test_runtime_config
++
++class ManualComparison(unittest.TestCase):
++ fixture=test_runtime_config.RuntimeConfiguration.fixture
++ def test_plan_never_stops_service_or_runs_model(self):
++  with tempfile.TemporaryDirectory() as t:
++   _,profile,_=self.fixture(Path(t));out=io.StringIO()
++   with patch.object(manual_compare.subprocess,'run') as run,patch.object(manual_compare.subprocess,'Popen') as popen,contextlib.redirect_stdout(out):
++    self.assertEqual(manual_compare.main(['--profile',str(profile),'--plan']),0)
++   run.assert_not_called();popen.assert_not_called()
++   result=json.loads(out.getvalue());self.assertEqual(result['arms'],50);self.assertFalse(result['automatic_tests'])
++ def test_active_desktop_rejected_before_service_stop(self):
++  with tempfile.TemporaryDirectory() as t:
++   _,profile,_=self.fixture(Path(t))
++   with patch.object(manual_compare.subprocess,'check_output',return_value='active\n'),patch.object(manual_compare.subprocess,'run') as run,contextlib.redirect_stderr(io.StringIO()):
++    with self.assertRaises(SystemExit):manual_compare.main(['--profile',str(profile)])
++   run.assert_not_called()
++
++
++ def test_failed_worker_restores_daily_service(self):
++  with tempfile.TemporaryDirectory() as t:
++   _,profile,state=self.fixture(Path(t))
++   with patch.object(manual_compare.os,'geteuid',return_value=0),patch.object(manual_compare.resource,'setrlimit'),patch.object(manual_compare.subprocess,'check_output',return_value='inactive\n'),patch.object(manual_compare.subprocess,'Popen') as popen,patch.object(manual_compare.subprocess,'run') as run,contextlib.redirect_stdout(io.StringIO()):
++    popen.return_value.wait.return_value=1
++    self.assertEqual(manual_compare.main(['--profile',str(profile),'--group','dense']),1)
++   self.assertEqual([call.args[0] for call in run.call_args_list],
++                    [['systemctl','stop','strata.service'],['systemctl','start','strata.service']])
++   self.assertEqual(list(state.glob('manual-compare-*.json')),[])
++
 +
 +if __name__=='__main__':unittest.main()

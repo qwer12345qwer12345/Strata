@@ -8642,17 +8642,17 @@ index 000000000..c803d09c7
 +    return False
 diff --git a/terminal/l2/managed_server.py b/terminal/l2/managed_server.py
 new file mode 100644
-index 000000000..a7794bebe
+index 000000000..cd700dc80
 --- /dev/null
 +++ b/terminal/l2/managed_server.py
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,87 @@
 +#!/usr/bin/env python3
 +"""Supervise the single-slot upstream and streaming L2 adapter together."""
 +import argparse,json,os,signal,subprocess,sys,tempfile,threading,time,urllib.request
 +from pathlib import Path
 +sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 +from l2 import reference_controller as controller
-+from l2 import startup_benchmark
++from l2 import runtime_config
 +
 +def main():
 + ap=argparse.ArgumentParser();ap.add_argument('--profile',required=True);ap.add_argument('--ready-file');ap.add_argument('--shutdown-timeout',default='30');a=ap.parse_args()
@@ -8660,6 +8660,12 @@ index 000000000..a7794bebe
 + if backend_port==port:raise SystemExit('L2 public and backend ports must differ')
 + # PR's async captures can use 2 GiB by default; this 32 GiB host uses synchronous incremental saves.
 + cfg.setdefault('env',{})['STRATA_L2_WRITER_BUDGET_MIB']='0'
++ settings=cfg.get('startup_benchmark') or {}
++ output=Path(settings.get('output_dir',str(Path.home()/'.local/state/strata/startup-benchmark')))
++ ready=Path(a.ready_file) if a.ready_file else None
++ if ready:ready.unlink(missing_ok=True)
++ root,cfg=runtime_config.select(Path(__file__).resolve().parents[1],cfg,output)
++ cfg.pop('startup_benchmark',None)
 + archive = Path(cfg.get('slot_save_path') or Path.home()/'.local/share/strata/sessions-pr5500-0.1.65').expanduser().resolve()
 + archive.mkdir(mode=0o700, parents=True, exist_ok=True)
 + cfg['slot_save_path'] = str(archive)
@@ -8668,22 +8674,9 @@ index 000000000..a7794bebe
 + cfg['env'].setdefault('STRATA_CONV_DISK', '1')
 + cfg['env'].setdefault('STRATA_CONV_DISK_DIR', str(archive / '.parked'))
 + Path(cfg['env']['STRATA_CONV_DISK_DIR']).mkdir(mode=0o700, parents=True, exist_ok=True)
-+ benchmark=cfg.get('startup_benchmark')
-+ ready=Path(a.ready_file) if a.ready_file else None
-+ if ready:ready.unlink(missing_ok=True)
-+ root=Path(__file__).resolve().parents[1]
 + def stop(signum,frame):raise KeyboardInterrupt
 + signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
-+ if benchmark and (Path(benchmark['output_dir'])/'spec-shape-lookup.request.json').is_file():
-+  try:
-+   from l2 import headless_experiments
-+   headless_experiments.run_queued(root,cfg,Path(benchmark['output_dir']),backend_port)
-+  except KeyboardInterrupt:
-+   return
-+  except Exception as exc:
-+   print(f'Strata spec/形状/lookup 对比结束，继续日常基线启动。{exc}',flush=True)
-+ seed=startup_benchmark.profile_seed(cfg) if benchmark else None
-+ if benchmark:cfg['env']['STRATA_DRAFT_LOG']='1'
++ if cfg.get('configuration_status'):print('Strata '+cfg['configuration_status']+'；正常启动不运行测试。',flush=True)
 + backend=dict(cfg,host='127.0.0.1',port=backend_port)
 + parent=ready.parent if ready else Path(tempfile.gettempdir());parent.mkdir(mode=0o700,parents=True,exist_ok=True)
 + with tempfile.NamedTemporaryFile('w',dir=parent,prefix='strata-l2-backend-',suffix='.json',delete=False) as f:json.dump(backend,f);runtime=Path(f.name)
@@ -8706,7 +8699,6 @@ index 000000000..a7794bebe
 +   except OSError:pass
 +   time.sleep(0.25)
 +  else:raise RuntimeError('Upstream readiness timeout')
-+  result=startup_benchmark.run_suite(upstream,cfg,benchmark,seed) if benchmark else None
 +  if proc.poll() is not None:raise RuntimeError(f'Upstream exited: {proc.returncode}')
 +  controller.ENGINE_URL=upstream;controller.LISTEN_HOST=cfg.get('host','0.0.0.0');controller.LISTEN_PORT=port
 +  controller.SESSION_DIR=cfg['slot_save_path'];controller.INDEX_FILE=str(Path(controller.SESSION_DIR)/'index.json')
@@ -8715,7 +8707,7 @@ index 000000000..a7794bebe
 +  if ready:
 +   record=dict(backend_record)
 +   record.update(backend_api_url=record.get('api_url'),backend_pid=record.get('pid'),pid=os.getpid(),bound_host=controller.LISTEN_HOST,bound_port=port,api_url=f'http://127.0.0.1:{port}')
-+   if result:record['startup_benchmark']={'suite':result['suite'],'run':result['run'],'status':result['status']}
++   if cfg.get('configuration_status'):record['configuration_status']=cfg['configuration_status']
 +   with tempfile.NamedTemporaryFile('w',dir=ready.parent,delete=False) as f:json.dump(record,f);tmp=Path(f.name)
 +   os.replace(tmp,ready)
 +  def watch():
@@ -8925,6 +8917,66 @@ index 000000000..486a4c4b8
 + print(f'[l2] streaming Chat Completions {LISTEN_HOST}:{LISTEN_PORT} -> {ENGINE_URL}',flush=True)
 + server.serve_forever()
 +if __name__=='__main__':main()
+diff --git a/terminal/l2/runtime_config.py b/terminal/l2/runtime_config.py
+new file mode 100644
+index 000000000..5c808cb4b
+--- /dev/null
++++ b/terminal/l2/runtime_config.py
+@@ -0,0 +1,54 @@
++"""Apply the one user-owned runtime selection. Reading it never runs a benchmark."""
++import copy
++import hashlib
++import json
++from pathlib import Path
++
++DAILY = dict(spec=4, shapes=2, lookup=16, tc=0, dense=1, skip=8, rows=2)
++PREVIOUS = dict(spec=6, shapes=1, lookup=8, tc=2, dense=0, skip=0, rows=2)
++STATUS = '理论优先配置；组合尚未完成无头性能与质量验证（NOT TESTED）'
++
++
++def set_options(args, overrides):
++    args = list(args)
++    for flag, value in overrides.items():
++        while flag in args:
++            at = args.index(flag)
++            del args[at:at + 2]
++        args.extend([flag, str(value)])
++    return args
++
++
++def select(root, cfg, directory):
++    path = directory / 'production-baseline.json'
++    if not path.is_file():
++        return root, copy.deepcopy(cfg)
++    data = json.loads(path.read_text())
++    if data.get('base_exe') and data['base_exe'] != cfg['exe']:
++        return root, copy.deepcopy(cfg)
++    root = Path(data['root'])
++    exe = root / 'build/strata'
++    with exe.open('rb') as source:
++        if hashlib.file_digest(source, 'sha256').hexdigest() != data['engine_sha256']:
++            raise ValueError('Selected Strata engine changed on disk')
++    if not (root / 'strata.py').is_file():
++        raise ValueError('Selected Strata server source is missing')
++    result = copy.deepcopy(cfg)
++    args = result['args']
++    overrides = dict(data.get('argument_overrides', {}))
++    if data.get('ple_gguf'):
++        if not Path(data['ple_gguf']).is_file():
++            raise ValueError('Selected BF16 PLE table is missing')
++        overrides['--ple-gguf'] = data['ple_gguf']
++    result['args'] = set_options(args, overrides)
++    if isinstance(result.get('user_args'), list):
++        result['user_args'] = set_options(result['user_args'], overrides)
++    rows = data.get('ampere_rows', '2')
++    if rows not in ('0', '2'):
++        raise ValueError('Ampere expert rows must be 0 or 2')
++    result.setdefault('env', {}).update(STRATA_TQ_AMPERE_ROWS=rows,
++                                      STRATA_PF_FUSED_TQ='1', STRATA_PF_GROUP_SCRATCH='0')
++    result['env'].update(data.get('environment', {}))
++    result.update(exe=str(exe), cwd=str(root), log=data['log'], slot_save_path=data['archive_dir'],
++                  configuration_status=data.get('configuration_status', STATUS))
++    return root, result
 diff --git a/terminal/l2/startup_benchmark.py b/terminal/l2/startup_benchmark.py
 new file mode 100644
 index 000000000..2e8d14d59
@@ -9196,12 +9248,58 @@ index 000000000..912f54794
 +    except TimeoutError:data=b''
 +   finally:sock.close();self.release.set()
 +   self.assertIn(b'504',data.split(b'\r\n')[0])
+diff --git a/terminal/l2/test_runtime_config.py b/terminal/l2/test_runtime_config.py
+new file mode 100644
+index 000000000..6aff6e756
+--- /dev/null
++++ b/terminal/l2/test_runtime_config.py
+@@ -0,0 +1,40 @@
++import contextlib
++import copy
++import hashlib
++import io
++import json
++from pathlib import Path
++import tempfile
++import unittest
++from unittest.mock import patch
++from l2 import runtime_config as runtime
++
++class RuntimeConfiguration(unittest.TestCase):
++ def fixture(self, root):
++  engine=root/'runtime';(engine/'build').mkdir(parents=True)
++  (engine/'strata.py').write_text('')
++  (engine/'build/strata').write_bytes(b'engine')
++  ple=root/'bf16.gguf';ple.write_bytes(b'bf16')
++  state=root/'state';state.mkdir()
++  profile={'exe':'previous-engine','cwd':str(engine),'args':['--spec','6','--spec','6','--ple-gguf','old'],
++           'user_args':['--spec','6'],'env':{'STRATA_ROUTE_PRIOR':'0.5'},
++           'startup_benchmark':{'output_dir':str(state)}}
++  selection={'base_exe':'previous-engine','root':str(engine),
++   'engine_sha256':hashlib.sha256(b'engine').hexdigest(),'log':str(root/'engine.log'),
++   'archive_dir':str(root/'archives'),'ple_gguf':str(ple),'ampere_rows':'2',
++   'environment':{'STRATA_DF2_AMPERE_TUNING':'2','STRATA_DF2_GEMM_TC':'0'},
++   'argument_overrides':{'--spec':'4','--lookup-max-t':'16'},'configuration_status':'NOT TESTED'}
++  (state/'production-baseline.json').write_text(json.dumps(selection))
++  file=root/'profile.json';file.write_text(json.dumps(profile))
++  return profile,file,state
++ def test_single_selection_overrides_duplicate_old_values(self):
++  with tempfile.TemporaryDirectory() as t:
++   root=Path(t);profile,_,state=self.fixture(root);before=copy.deepcopy(profile)
++   _,cfg=runtime.select(root,profile,state)
++   self.assertEqual(cfg['args'].count('--spec'),1)
++   self.assertEqual(cfg['args'][cfg['args'].index('--spec')+1],'4')
++   self.assertEqual(cfg['user_args'][cfg['user_args'].index('--spec')+1],'4')
++   self.assertEqual(cfg['env']['STRATA_DF2_GEMM_TC'],'0')
++   self.assertEqual(cfg['configuration_status'],'NOT TESTED')
++   self.assertEqual(profile,before)
++if __name__=='__main__':unittest.main()
 diff --git a/terminal/l2/test_startup_benchmark.py b/terminal/l2/test_startup_benchmark.py
 new file mode 100644
-index 000000000..de4ebb503
+index 000000000..ed5eec5e6
 --- /dev/null
 +++ b/terminal/l2/test_startup_benchmark.py
-@@ -0,0 +1,174 @@
+@@ -0,0 +1,169 @@
 +import json
 +import os
 +import shutil
@@ -9267,7 +9365,7 @@ index 000000000..de4ebb503
 +    def launch(self, root, fail, delayed_save=False):
 +        here = Path(__file__).resolve().parent
 +        (root / 'l2').mkdir()
-+        for name in ('managed_server.py', 'reference_controller.py', 'startup_benchmark.py'):
++        for name in ('managed_server.py', 'reference_controller.py', 'startup_benchmark.py', 'runtime_config.py'):
 +            shutil.copyfile(here / name, root / 'l2' / name)
 +        if delayed_save:
 +            with (root / 'l2/reference_controller.py').open('a') as f:
@@ -9294,9 +9392,7 @@ index 000000000..de4ebb503
 +                              '--ready-file', str(root / 'ready.json'), '--shutdown-timeout', '1'],
 +                             stdout=output, stderr=subprocess.STDOUT)
 +        self.addCleanup(self.stop, p)
-+        wait_until(lambda: (root / 'bench-entered').exists(), p)
-+        self.assert_closed(front)
-+        self.assertFalse((root / 'ready.json').exists())
++        wait_until(lambda: (root / 'ready.json').exists(), p)
 +        (root / 'release').touch()
 +        return front, p
 +
@@ -9311,19 +9407,18 @@ index 000000000..de4ebb503
 +        with self.assertRaises(ConnectionRefusedError):
 +            socket.create_connection(('127.0.0.1', port), timeout=.5).close()
 +
-+    def test_external_port_waits_for_baseline(self):
++    def test_normal_startup_serves_without_model_requests(self):
 +        with tempfile.TemporaryDirectory() as tmp:
-+            root = Path(tmp)
-+            port, p = self.launch(root, False)
-+            wait_until(lambda: (root / 'ready.json').exists(), p)
-+            with urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=2) as response:
-+                self.assertEqual(response.status, 200)
-+            report = json.loads((root / 'results' / 'baseline-dflash2.json').read_text())
-+            self.assertEqual(report['status'], 'passed')
-+            self.assertEqual([r['case'] for r in report['cases']], ['warmup', 'decode', 'context'])
-+            # Startup may prepare file-backed scratch, but must not archive benchmark turns.
-+            self.assertFalse((root / 'archives' / 'index.json').exists())
-+            self.assertFalse(any((root / 'archives' / '.parked').iterdir()))
++            root=Path(tmp)
++            (root/'results').mkdir()
++            # Old pending requests cannot cause automatic comparisons anymore.
++            (root/'results'/'spec-shape-lookup.request.json').write_text('{}')
++            port,p=self.launch(root,False)
++            with urllib.request.urlopen(f'http://127.0.0.1:{port}/health',timeout=2) as response:
++                self.assertEqual(response.status,200)
++            self.assertFalse((root/'bench-entered').exists())
++            self.assertFalse((root/'results'/'latest.json').exists())
++            self.assertFalse((root/'archives'/'index.json').exists())
 +            self.stop(p)
 +
 +    def test_shutdown_drains_completed_stream_archive(self):
@@ -9356,15 +9451,13 @@ index 000000000..de4ebb503
 +            self.assertEqual(errors, [])
 +            self.assertTrue((root / 'save-done').exists())
 +
-+    def test_truncated_stream_leaves_external_port_closed(self):
++    def test_bad_model_stream_does_not_turn_startup_into_benchmark(self):
 +        with tempfile.TemporaryDirectory() as tmp:
-+            root = Path(tmp)
-+            port, p = self.launch(root, True)
-+            self.assertNotEqual(p.wait(timeout=8), 0)
-+            self.assert_closed(port)
-+            self.assertFalse((root / 'ready.json').exists())
-+            self.assertFalse((root / 'results' / 'baseline-dflash2.json').exists())
-+            self.assertEqual(json.loads((root / 'results' / 'latest.json').read_text())['status'], 'failed')
++            root=Path(tmp);port,p=self.launch(root,True)
++            self.assertFalse((root/'bench-entered').exists())
++            self.assertIsNone(p.poll())
++            self.assertFalse((root/'results'/'latest.json').exists())
++            self.stop(p)
 +
 +    def test_first_baseline_is_preserved(self):
 +        with tempfile.TemporaryDirectory() as tmp:
