@@ -190,15 +190,32 @@ public:
     bool open_persistent(const std::filesystem::path& root, uint64_t model, uint64_t config, std::string& error) {
         close();
         std::error_code ec;
+        if (std::filesystem::exists(root, ec) && std::filesystem::is_symlink(root, ec)) {
+            error = "persistent spill root " + root.string() + " must not be a link";
+            return false;
+        }
+        std::filesystem::create_directories(root, ec);
+        if (ec || !std::filesystem::is_directory(root, ec) || std::filesystem::is_symlink(root, ec)) {
+            error = "persistent spill root " + root.string() + " cannot be used" +
+                    (ec ? ": " + ec.message() : std::string());
+            return false;
+        }
         const auto persistent_root = root / "persistent";
+        if (std::filesystem::exists(persistent_root, ec) && std::filesystem::is_symlink(persistent_root, ec)) {
+            error = "persistent spill folder " + persistent_root.string() + " must not be a link";
+            return false;
+        }
         std::filesystem::create_directories(persistent_root, ec);
-        if (ec || !std::filesystem::is_directory(root, ec) || std::filesystem::is_symlink(root, ec) ||
-            !std::filesystem::is_directory(persistent_root, ec) || std::filesystem::is_symlink(persistent_root, ec)) {
+        if (ec || !std::filesystem::is_directory(persistent_root, ec) || std::filesystem::is_symlink(persistent_root, ec)) {
             error = "persistent spill folder " + persistent_root.string() + " cannot be used" +
                     (ec ? ": " + ec.message() : std::string());
             return false;
         }
         const auto dir = persistent_root / (std::to_string(model) + "-" + std::to_string(config));
+        if (std::filesystem::exists(dir, ec) && std::filesystem::is_symlink(dir, ec)) {
+            error = "persistent spill folder " + dir.string() + " must not be a link";
+            return false;
+        }
         std::filesystem::create_directories(dir, ec);
         if (ec || !std::filesystem::is_directory(dir, ec) || std::filesystem::is_symlink(dir, ec)) {
             error = "persistent spill folder " + dir.string() + " cannot be used" +
@@ -351,7 +368,8 @@ public:
                 for (const auto& cp : meta.checkpoints) entry.checkpoints.push_back(stub(cp));
                 entries_.push_back(std::move(entry));
                 budget_.used += file_bytes + meta_bytes;
-                if (serial >= next_serial_ && serial != UINT64_MAX) next_serial_ = serial + 1;
+                if (serial == UINT64_MAX) next_serial_ = 0;
+                else if (serial >= next_serial_) next_serial_ = serial + 1;
             }
             // Remove session files left by a crash between the payload publish and metadata publish.
             for (std::filesystem::directory_iterator it(ns_.dir(), ec), end; !ec && it != end; it.increment(ec)) {
@@ -401,8 +419,11 @@ public:
                     const uint64_t n = (uint64_t) cp.bytes();
                     meta_bytes = n > UINT64_MAX - meta_bytes ? UINT64_MAX : meta_bytes + n;
                 }
-                need = meta_bytes > UINT64_MAX - need - (uint64_t(1) << 20)
-                    ? UINT64_MAX : need + meta_bytes + (uint64_t(1) << 20);
+                const uint64_t overhead = uint64_t(1) << 20;
+                if (meta_bytes > UINT64_MAX - overhead || need > UINT64_MAX - (meta_bytes + overhead))
+                    need = UINT64_MAX;
+                else
+                    need += meta_bytes + overhead;
             }
         }
         uint64_t serial = 0;
