@@ -46,6 +46,7 @@ downstream/features/<feature-id>/
 | `qsa-imma` | K8V4 Q*K split-INT8 IMMA | 关闭，环境变量 opt-in |
 | `live-memory` | Live Memory 容量所有者：VMM 初始 commit、事务性 resize、live-slot 守卫、可独立释放的 RAM blocks、Engine MEMORY/ACK/CAPACITY 协议与 safe-point 调度、Server 自动容量策略与 Vision 统一 VRAM 管理 | 默认关闭（STRATA_LIVE_MEMORY=1 / config "live_memory"） |
 | `runtime-kv-storage` | Immutable Base + Delta 文件核心（Patch 1） | 已加入活动栈；ConversationSpill 接入待完成 |
+| `shutdown-persistent-cache` | Engine 正常关闭时持久化 RAM 会话，下次启动按 metadata 重建索引 | 关闭，环境变量 opt-in（STRATA_SHUTDOWN_CACHE_MIB） |
 
 ### 1.3 Patch 只保存生产改动
 
@@ -254,4 +255,4 @@ python downstream/scripts/test.py --feature example \
 
 ## 6. 当前验证边界
 
-本次迁移保存了 PR #1～#4 中仍在功能栈内的生产实现和相关测试源代码。L2 旧功能包已从活动功能栈移除。Patch A 的 Session Delta Core 已作为独立 Feature Package 加入活动栈；目前只提供 Delta 文件读写/应用核心与 Host 测试，尚未接入 ConversationSpill 生命周期，因此当前运行时 SSD 写入行为尚未改变。Patch A 后续 Snapshot provenance、Spill lease/chain 和 compaction 阶段仍待实现。Patch B 仍是独立占位计划，不参与 stack.json。CI 当前验证的是维护脚本语法、补丁哈希和 Git tree 指纹；并未在 CI 中编译全部 C++/CUDA 目标，也没有替代真实 SM86、AVX-VNNI 或 CUDA VMM 硬件验收。live-memory 的 CPU 测试（策略、RAM blocks、Settings 扫描器）与 Python 测试（策略、协议）已在迁移机器通过；CUDA VMM、safe-point 与硬件验收仍待对应设备。每项活动功能的具体待测项见对应的 validation/README.md。
+本次迁移保存了 PR #1～#4 中仍在功能栈内的生产实现和相关测试源代码。L2 旧功能包已从活动功能栈移除。Patch A 的 Session Delta Core 已作为独立 Feature Package 加入活动栈；目前只提供 Delta 文件读写/应用核心与 Host 测试，尚未接入 ConversationSpill 生命周期，因此当前运行时 SSD 写入行为尚未改变。Patch A 后续 Snapshot provenance、Spill lease/chain 和 compaction 阶段仍待实现。Patch B 已作为 shutdown-persistent-cache Feature Package 加入活动功能栈（环境变量 opt-in，默认关闭）：正常关闭时把 RAM 会话写入官方 session file + 轻量 sidecar，下次启动仅凭 metadata 重建索引、命中才读 payload；其 CPU Host 测试已在本地编译运行通过，真实模型上的 serve 验收仍待执行。CI 当前验证的是维护脚本语法、补丁哈希和 Git tree 指纹；并未在 CI 中编译全部 C++/CUDA 目标，也没有替代真实 SM86、AVX-VNNI 或 CUDA VMM 硬件验收。live-memory 的 CPU 测试（策略、RAM blocks、Settings 扫描器）与 Python 测试（策略、协议）已在迁移机器通过；CUDA VMM、safe-point 与硬件验收仍待对应设备。每项活动功能的具体待测项见对应的 validation/README.md。
