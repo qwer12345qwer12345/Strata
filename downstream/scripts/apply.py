@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 
 from common import (
-    ROOT, load_stack, load_feature, resolve_features, patch_items,
-    tree_from_worktree, git,
+    load_stack, load_feature, resolve_features, patch_items,
+    sha256_file, tree_from_worktree, git,
 )
 
 
@@ -41,7 +41,14 @@ def main():
 
     for feature_id in selected:
         _, meta = load_feature(feature_id, stack)
-        for patch_id, patch, _ in patch_items(feature_id, stack):
+        if meta.get("base_commit") != base:
+            raise RuntimeError(f"{feature_id}: base_commit differs from stack.json")
+        for patch_id, patch, expected_hash in patch_items(feature_id, stack):
+            actual_hash = sha256_file(patch)
+            if actual_hash != expected_hash:
+                raise RuntimeError(
+                    f"{feature_id}/{patch_id}: SHA256 mismatch; expected {expected_hash}, got {actual_hash}"
+                )
             git(["apply", "--check", "--whitespace=nowarn", patch], cwd=source)
             git(["apply", "--whitespace=nowarn", patch], cwd=source)
             print(f"applied {feature_id}/{patch_id}")

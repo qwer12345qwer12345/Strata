@@ -31,6 +31,10 @@ def main():
     if git(["cat-file", "-e", f"{base}^{{commit}}"], check=False).returncode:
         git(["fetch", "--no-tags", stack["upstream"]["url"], base])
 
+    # Verify all package hashes and tree fingerprints before creating or changing a worktree.
+    verify_script = DOWNSTREAM / "scripts" / "verify.py"
+    subprocess.run([sys.executable, str(verify_script)], cwd=ROOT, check=True)
+
     target = Path(args.target).expanduser().resolve() if args.target else ROOT.parent / f"{ROOT.name}-prepared"
     if target.exists():
         raise RuntimeError(

@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from common import DOWNSTREAM, load_stack, load_feature, git
+from common import load_stack, load_feature, patch_items, git
 
 
 def run(command, cwd):
@@ -36,6 +36,10 @@ def main():
     base = stack["base_commit"]
     if git(["rev-parse", "HEAD"], cwd=source).stdout.strip() != base:
         raise RuntimeError(f"source HEAD is not the pinned base commit {base}")
+
+    # Reverse-check the package patches so tests cannot silently run against an unpatched source tree.
+    for patch_id, patch, _ in patch_items(args.feature, stack):
+        git(["apply", "--reverse", "--check", "--whitespace=nowarn", patch], cwd=source)
 
     test_config_path = feature_dir / meta["tests"]
     config = json.loads(test_config_path.read_text(encoding="utf-8"))
