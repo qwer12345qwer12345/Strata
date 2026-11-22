@@ -15,7 +15,7 @@
     {
       "id": "live-memory-transactional-resize",
       "path": "patches/0002-live-memory-transactional-resize.patch",
-      "sha256": "e4b9931affd9fbaeb7b1f0ab7143af1fe057a819861fd015a00a624ff4360e72"
+      "sha256": "a82a376defdb3971ffacb5a7d399ef37196d9ebe1e6e419ba6da3a80ad2a03d1"
     }
   ],
   "tests": "tests/test.json",
