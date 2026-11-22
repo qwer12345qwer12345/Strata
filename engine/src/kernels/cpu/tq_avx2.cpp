@@ -11,6 +11,7 @@
 // shuffles instead (VPSHUFB / VPSRLVD per 8 states) and moving them to GPRs or through memory was slower (60-80),
 // and ggml-cpu's AVX2 vec_dot for these types (agentionai llama.cpp, the same state table) takes about 2.3x as long.
 #include "strata/kernels/cpu/tq_cpu.hpp"
+#include "strata/kernels/cpu/expert_layout.hpp"
 
 #include "tq_states.hpp"
 
@@ -30,7 +31,21 @@ inline __m256i rows4(const long long* tab, uint32_t s0, uint32_t s1, uint32_t s2
     return _mm256_blend_epi32(v, _mm256_set1_epi64x(tab[s3]), 0xC0);
 }
 
-template <int KB>
+template<bool VNNI>
+inline __m256i dot_pair(__m256i w0, __m256i q0, __m256i w1, __m256i q1) {
+    __m256i sum = _mm256_madd_epi16(w0, q0);
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(_MSC_VER)
+    if constexpr (VNNI) {
+        // VEX-encoded AVX-VNNI is independent of AVX-512.  vpdpwssd is non-saturating,
+        // so it preserves the exact int32 result of madd(w0,q0) + madd(w1,q1).
+        asm("%{vex%} vpdpwssd %2, %1, %0" : "+x"(sum) : "x"(w1), "x"(q1));
+        return sum;
+    }
+#endif
+    return _mm256_add_epi32(sum, _mm256_madd_epi16(w1, q1));
+}
+
+template <int KB, bool VNNI = false>
 void rows_t(const int16_t* table, const uint8_t* w, size_t row_bytes, int n, const TqAct* const* a, int nt, float* const* out, int r0,
             int r1) {
     const int nb = n / 128;
@@ -54,14 +69,10 @@ void rows_t(const int16_t* table, const uint8_t* w, size_t row_bytes, int n, con
             const __m128 dx = _mm_set1_ps(tq_half_to_float(tq_ld16(blk)));
             for (int t = 0; t < nt; ++t) {
                 const __m256i* q = (const __m256i*) (a[t]->q + 128 * i);
-                const __m256i p0 = _mm256_add_epi32(_mm256_madd_epi16(wv[0], _mm256_load_si256(q + 0)),
-                                                    _mm256_madd_epi16(wv[1], _mm256_load_si256(q + 1)));
-                const __m256i p1 = _mm256_add_epi32(_mm256_madd_epi16(wv[2], _mm256_load_si256(q + 2)),
-                                                    _mm256_madd_epi16(wv[3], _mm256_load_si256(q + 3)));
-                const __m256i p2 = _mm256_add_epi32(_mm256_madd_epi16(wv[4], _mm256_load_si256(q + 4)),
-                                                    _mm256_madd_epi16(wv[5], _mm256_load_si256(q + 5)));
-                const __m256i p3 = _mm256_add_epi32(_mm256_madd_epi16(wv[6], _mm256_load_si256(q + 6)),
-                                                    _mm256_madd_epi16(wv[7], _mm256_load_si256(q + 7)));
+                const __m256i p0 = dot_pair<VNNI>(wv[0], _mm256_load_si256(q + 0), wv[1], _mm256_load_si256(q + 1));
+                const __m256i p1 = dot_pair<VNNI>(wv[2], _mm256_load_si256(q + 2), wv[3], _mm256_load_si256(q + 3));
+                const __m256i p2 = dot_pair<VNNI>(wv[4], _mm256_load_si256(q + 4), wv[5], _mm256_load_si256(q + 5));
+                const __m256i p3 = dot_pair<VNNI>(wv[6], _mm256_load_si256(q + 6), wv[7], _mm256_load_si256(q + 7));
                 // per 128-bit lane [p0, p1, p2, p3] partial sums, then the two lanes added: S[0..3], exact
                 const __m256i h = _mm256_hadd_epi32(_mm256_hadd_epi32(p0, p1), _mm256_hadd_epi32(p2, p3));
                 const __m128i s = _mm_add_epi32(_mm256_castsi256_si128(h), _mm256_extracti128_si256(h, 1));
@@ -209,6 +220,14 @@ void tq_rows_avx2_tqp(int kb, const uint8_t* w, size_t row_bytes, int n, const T
 
 void tq_rows_avx2(int kb, const int16_t* table, const uint8_t* w, size_t row_bytes, int n, const TqAct* const* a, int nt,
                   float* const* out, int r0, int r1) {
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(_MSC_VER)
+    static const bool vnni = [] {
+        const char* v = std::getenv("STRATA_TQ_AVXVNNI");
+        return v && v[0] == '1' && v[1] == '\0' && cpu_avxvnni_ok();
+    }();
+    if (vnni && kb == 6) return rows_t<6, true>(table, w, row_bytes, n, a, nt, out, r0, r1);
+    if (vnni && kb == 7) return rows_t<7, true>(table, w, row_bytes, n, a, nt, out, r0, r1);
+#endif
     if (kb == 8) rows_t<8>(table, w, row_bytes, n, a, nt, out, r0, r1);
     else if (kb == 6) rows_t<6>(table, w, row_bytes, n, a, nt, out, r0, r1);
     else if (kb == 5) rows_t<5>(table, w, row_bytes, n, a, nt, out, r0, r1);   // experimental TQK5X
