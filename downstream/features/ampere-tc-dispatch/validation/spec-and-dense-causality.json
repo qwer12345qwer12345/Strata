@@ -1,0 +1,340 @@
+{
+  "token_comparison_reference": "df2-tuned without Dense TC vs same drafter tuning with Dense TC; separate launches, fixed expert slots/adaptation",
+  "cap_replay_warning": "These count clipping events on the observed trace, not counterfactual throughput: future proposals, lookup choice and cost policy would change.",
+  "cap_replay": [
+    {
+      "arm": "compact",
+      "header": "# request prompt 22 df2 1 spec 6",
+      "neural_rounds": 23,
+      "lookup_rounds": 0,
+      "neural_T_hist": {
+        "1": 10,
+        "4": 6,
+        "3": 5,
+        "2": 2
+      },
+      "caps": [
+        {
+          "cap": 3,
+          "affected_rounds": 6,
+          "affected_fraction": 0.2608695652173913,
+          "rows_not_verified_on_same_trace": 6,
+          "committed_tokens_lost_on_same_trace": 3
+        },
+        {
+          "cap": 4,
+          "affected_rounds": 0,
+          "affected_fraction": 0.0,
+          "rows_not_verified_on_same_trace": 0,
+          "committed_tokens_lost_on_same_trace": 0
+        },
+        {
+          "cap": 5,
+          "affected_rounds": 0,
+          "affected_fraction": 0.0,
+          "rows_not_verified_on_same_trace": 0,
+          "committed_tokens_lost_on_same_trace": 0
+        }
+      ]
+    },
+    {
+      "arm": "compact",
+      "header": "# request prompt 89 df2 1 spec 6",
+      "neural_rounds": 57,
+      "lookup_rounds": 148,
+      "neural_T_hist": {
+        "4": 5,
+        "3": 31,
+        "5": 2,
+        "6": 2,
+        "2": 7,
+        "1": 10
+      },
+      "caps": [
+        {
+          "cap": 3,
+          "affected_rounds": 9,
+          "affected_fraction": 0.15789473684210525,
+          "rows_not_verified_on_same_trace": 15,
+          "committed_tokens_lost_on_same_trace": 4
+        },
+        {
+          "cap": 4,
+          "affected_rounds": 4,
+          "affected_fraction": 0.07017543859649122,
+          "rows_not_verified_on_same_trace": 6,
+          "committed_tokens_lost_on_same_trace": 0
+        },
+        {
+          "cap": 5,
+          "affected_rounds": 2,
+          "affected_fraction": 0.03508771929824561,
+          "rows_not_verified_on_same_trace": 2,
+          "committed_tokens_lost_on_same_trace": 0
+        }
+      ]
+    },
+    {
+      "arm": "compact",
+      "header": "# request prompt 6027 df2 1 spec 6",
+      "neural_rounds": 112,
+      "lookup_rounds": 0,
+      "neural_T_hist": {
+        "3": 19,
+        "1": 40,
+        "2": 30,
+        "4": 12,
+        "6": 10,
+        "5": 1
+      },
+      "caps": [
+        {
+          "cap": 3,
+          "affected_rounds": 23,
+          "affected_fraction": 0.20535714285714285,
+          "rows_not_verified_on_same_trace": 44,
+          "committed_tokens_lost_on_same_trace": 38
+        },
+        {
+          "cap": 4,
+          "affected_rounds": 11,
+          "affected_fraction": 0.09821428571428571,
+          "rows_not_verified_on_same_trace": 21,
+          "committed_tokens_lost_on_same_trace": 18
+        },
+        {
+          "cap": 5,
+          "affected_rounds": 10,
+          "affected_fraction": 0.08928571428571429,
+          "rows_not_verified_on_same_trace": 10,
+          "committed_tokens_lost_on_same_trace": 8
+        }
+      ]
+    },
+    {
+      "arm": "dense-tc",
+      "header": "# request prompt 22 df2 1 spec 6",
+      "neural_rounds": 21,
+      "lookup_rounds": 0,
+      "neural_T_hist": {
+        "1": 9,
+        "4": 4,
+        "3": 4,
+        "2": 1,
+        "6": 2,
+        "5": 1
+      },
+      "caps": [
+        {
+          "cap": 3,
+          "affected_rounds": 7,
+          "affected_fraction": 0.3333333333333333,
+          "rows_not_verified_on_same_trace": 12,
+          "committed_tokens_lost_on_same_trace": 6
+        },
+        {
+          "cap": 4,
+          "affected_rounds": 3,
+          "affected_fraction": 0.14285714285714285,
+          "rows_not_verified_on_same_trace": 5,
+          "committed_tokens_lost_on_same_trace": 1
+        },
+        {
+          "cap": 5,
+          "affected_rounds": 2,
+          "affected_fraction": 0.09523809523809523,
+          "rows_not_verified_on_same_trace": 2,
+          "committed_tokens_lost_on_same_trace": 0
+        }
+      ]
+    },
+    {
+      "arm": "dense-tc",
+      "header": "# request prompt 89 df2 1 spec 6",
+      "neural_rounds": 248,
+      "lookup_rounds": 21,
+      "neural_T_hist": {
+        "4": 22,
+        "3": 34,
+        "6": 116,
+        "2": 26,
+        "1": 37,
+        "5": 13
+      },
+      "caps": [
+        {
+          "cap": 3,
+          "affected_rounds": 151,
+          "affected_fraction": 0.6088709677419355,
+          "rows_not_verified_on_same_trace": 396,
+          "committed_tokens_lost_on_same_trace": 324
+        },
+        {
+          "cap": 4,
+          "affected_rounds": 129,
+          "affected_fraction": 0.5201612903225806,
+          "rows_not_verified_on_same_trace": 245,
+          "committed_tokens_lost_on_same_trace": 192
+        },
+        {
+          "cap": 5,
+          "affected_rounds": 116,
+          "affected_fraction": 0.46774193548387094,
+          "rows_not_verified_on_same_trace": 116,
+          "committed_tokens_lost_on_same_trace": 90
+        }
+      ]
+    },
+    {
+      "arm": "dense-tc",
+      "header": "# request prompt 6027 df2 1 spec 6",
+      "neural_rounds": 115,
+      "lookup_rounds": 1,
+      "neural_T_hist": {
+        "3": 25,
+        "1": 39,
+        "2": 30,
+        "4": 9,
+        "5": 3,
+        "6": 9
+      },
+      "caps": [
+        {
+          "cap": 3,
+          "affected_rounds": 21,
+          "affected_fraction": 0.1826086956521739,
+          "rows_not_verified_on_same_trace": 42,
+          "committed_tokens_lost_on_same_trace": 31
+        },
+        {
+          "cap": 4,
+          "affected_rounds": 12,
+          "affected_fraction": 0.10434782608695652,
+          "rows_not_verified_on_same_trace": 21,
+          "committed_tokens_lost_on_same_trace": 15
+        },
+        {
+          "cap": 5,
+          "affected_rounds": 9,
+          "affected_fraction": 0.0782608695652174,
+          "rows_not_verified_on_same_trace": 9,
+          "committed_tokens_lost_on_same_trace": 6
+        }
+      ]
+    },
+    {
+      "arm": "df2-tuned",
+      "header": "# request prompt 22 df2 1 spec 6",
+      "neural_rounds": 23,
+      "lookup_rounds": 0,
+      "neural_T_hist": {
+        "1": 9,
+        "4": 5,
+        "3": 5,
+        "2": 3,
+        "6": 1
+      },
+      "caps": [
+        {
+          "cap": 3,
+          "affected_rounds": 6,
+          "affected_fraction": 0.2608695652173913,
+          "rows_not_verified_on_same_trace": 8,
+          "committed_tokens_lost_on_same_trace": 3
+        },
+        {
+          "cap": 4,
+          "affected_rounds": 1,
+          "affected_fraction": 0.043478260869565216,
+          "rows_not_verified_on_same_trace": 2,
+          "committed_tokens_lost_on_same_trace": 0
+        },
+        {
+          "cap": 5,
+          "affected_rounds": 1,
+          "affected_fraction": 0.043478260869565216,
+          "rows_not_verified_on_same_trace": 1,
+          "committed_tokens_lost_on_same_trace": 0
+        }
+      ]
+    },
+    {
+      "arm": "df2-tuned",
+      "header": "# request prompt 89 df2 1 spec 6",
+      "neural_rounds": 57,
+      "lookup_rounds": 178,
+      "neural_T_hist": {
+        "4": 6,
+        "3": 31,
+        "6": 2,
+        "2": 7,
+        "1": 10,
+        "5": 1
+      },
+      "caps": [
+        {
+          "cap": 3,
+          "affected_rounds": 9,
+          "affected_fraction": 0.15789473684210525,
+          "rows_not_verified_on_same_trace": 14,
+          "committed_tokens_lost_on_same_trace": 4
+        },
+        {
+          "cap": 4,
+          "affected_rounds": 3,
+          "affected_fraction": 0.05263157894736842,
+          "rows_not_verified_on_same_trace": 5,
+          "committed_tokens_lost_on_same_trace": 0
+        },
+        {
+          "cap": 5,
+          "affected_rounds": 2,
+          "affected_fraction": 0.03508771929824561,
+          "rows_not_verified_on_same_trace": 2,
+          "committed_tokens_lost_on_same_trace": 0
+        }
+      ]
+    }
+  ],
+  "token_comparison": [
+    {
+      "request_index": 0,
+      "first_emitted_token_divergence_position": 49,
+      "compared_start_position": 22,
+      "common_observed_tokens_before_divergence": 27,
+      "max_drafter_probability_delta_on_equal_window_start_before_divergence": 0.14129999999999998,
+      "different_window_sizes_before_token_divergence": []
+    },
+    {
+      "request_index": 1,
+      "first_emitted_token_divergence_position": 118,
+      "compared_start_position": 89,
+      "common_observed_tokens_before_divergence": 29,
+      "max_drafter_probability_delta_on_equal_window_start_before_divergence": 0.5101,
+      "different_window_sizes_before_token_divergence": [
+        102
+      ]
+    }
+  ],
+  "dense_tc_mixture": {
+    "comparison": "same tuned drafter, Dense short-window TC off vs on; 1024-token code output differs",
+    "off": {
+      "neural_accepted": 89,
+      "neural_offered": 101,
+      "lookup_accepted": 699,
+      "lookup_offered": 700,
+      "aggregate": 0.9837702871410736,
+      "lookup_offer_share": 0.8739076154806492
+    },
+    "on": {
+      "neural_accepted": 695,
+      "neural_offered": 792,
+      "lookup_accepted": 59,
+      "lookup_offered": 76,
+      "aggregate": 0.868663594470046,
+      "lookup_offer_share": 0.08755760368663594
+    },
+    "counterfactual_new_source_mix_at_old_source_rates": 0.8914659201272332,
+    "note": "Arithmetic decomposition only. Because free-running texts differ, this does not estimate same-prefix kernel quality or causal probability of acceptance."
+  }
+}
