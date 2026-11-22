@@ -44,6 +44,18 @@ int run(int fmt, int64_t ctx, int64_t nq, int reps) {   // fmt 1 int8, 0 fp16, 2
     const bool hybrid = fmt == 3;
     const bool check_imma = fmt == 1 || hybrid;
 #if !defined(__HIPCC__) && !defined(STRATA_USE_HIP)
+    if (hybrid) {
+        int dev = 0, major = 0, minor = 0;
+        ck(cudaGetDevice(&dev), "device");
+        ck(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, dev), "cc major");
+        ck(cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, dev), "cc minor");
+        if (major != 8 || minor != 6) {
+            std::printf("SKIP K8V4 IMMA: this path is restricted to SM86 (device is SM%d%d)\n", major, minor);
+            return 77;
+        }
+    }
+#endif
+#if !defined(__HIPCC__) && !defined(STRATA_USE_HIP)
     if (fmt == 2) {   // mode 4 (Q4_0 KV) runs on sm_80 and newer only: below that the dispatcher keeps the old kernel
         int dev = 0, major = 0;
         ck(cudaGetDevice(&dev), "device");
