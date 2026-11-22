@@ -15,11 +15,13 @@ The existing `ConversationSpill` remains process-scoped by default. A separate o
 
 The metadata sidecar deliberately uses the current session-file format and identity validation rather than introducing a second ad-hoc metadata serializer.
 
+Activation: set `STRATA_L2_PERSISTENT=1` for the Engine serve process. The existing serve loop computes the current `SessionFileIdentity` before opening the tier, uses the stable persistent namespace, and continues to use the existing background writer and `ConversationCache::set_evict_sink()` path. When unset, the process-scoped SSD spill behavior remains unchanged.
+
 ## Why this is staged
 
 The older branch's V2/V3 archive and L2 control code was coupled to its older `conversation_file.cpp` internals. Upstream main has a different session-file implementation and already has a process-scoped SSD spill tier with a writer thread and `ConversationCache::set_evict_sink()`.
 
-This branch first establishes durable ownership and restart-safe indexing using the current APIs. It does **not** yet claim the old branch's incremental V3 behavior.
+This branch now establishes durable ownership and restart-safe indexing in the live serve loop using the current APIs. It does **not** yet claim the old branch's incremental V3 behavior.
 
 ## Remaining work
 
