@@ -1,0 +1,293 @@
+diff --git a/engine/include/strata/kernels/qsa_prompt_attn.hpp b/engine/include/strata/kernels/qsa_prompt_attn.hpp
+index 6191df085f2..903413e85ac 100644
+--- a/engine/include/strata/kernels/qsa_prompt_attn.hpp
++++ b/engine/include/strata/kernels/qsa_prompt_attn.hpp
+@@ -51,6 +51,8 @@ bool qsa_decode_attn_split(const float* q, const QsaAttnPools& pools, const int3
+                            void* stream);
+ /// Tests: the int8-KV kernel on INT8 tensor cores (1), v2 (0), or as STRATA_PROMPT_ATTN_IMMA says (-1).
+ void qsa_prompt_attn_set_imma(int on);
++/// Test override for the SM86 K8V4 Q*K INT8 IMMA path (-1 uses STRATA_K8V4_QK_IMMA).
++void qsa_prompt_attn_set_hybrid_imma(int on);
+ /// HIP: STRATA_HIP_WMMA asks for the matrix-core prompt attention (=1 or =auto) and this device is a gfx11 / gfx12 matrix-core part
+ /// that has not switched it off after a failed launch.  The prompt path's 96-slot expert ring follows it.  False off HIP.
+ bool qsa_prompt_attn_matrix_cores_requested();
+diff --git a/engine/src/kernels/cuda/qsa_prompt_attn.cu b/engine/src/kernels/cuda/qsa_prompt_attn.cu
+index 1b9e701ccc3..c64ebd776e2 100644
+--- a/engine/src/kernels/cuda/qsa_prompt_attn.cu
++++ b/engine/src/kernels/cuda/qsa_prompt_attn.cu
+@@ -87,21 +87,28 @@ __device__ __forceinline__ uint32_t pack_h2(float lo_k, float hi_k) {   // eleme
+     return *reinterpret_cast<uint32_t*>(&h);
+ }
+ 
++// Same signed and unsigned byte fragments as the pure INT8 attention kernel.
++__device__ __forceinline__ void imma16832(int* c, const uint32_t* a, const uint32_t* b);
++__device__ __forceinline__ void imma16832_us(int* c, const uint32_t* a, const uint32_t* b);
++__device__ __forceinline__ void split3(float x, int& h, int& l, int& m);
++__device__ __forceinline__ float join3(int h, int l, int m);
++
+ // KV_MODE 1: int8 codes + fp16 scale per 64 values. KV_MODE 0: fp16 values (scales 1).
+ // KV_MODE 3 (hybrid K8V4): K as mode 1, V as mode 0 - the row's q4_0 blocks are dequantized to fp16 at
+ // gather, so everything downstream of the load is the mode-0 V path; the caller un-rotates the output.
+ // KV_MODE 4 (Q4_0 K and V, `--kv q4_0`): mode 1 with a scale per 32 values - each q4_0 block's codes enter as exact
+ // int8 (code - 8) and its fp16 scale is applied in FP32, as mode 1's are; the caller rotates q and un-rotates the
+ // output (kv_q4.hpp).
+-template <int KV_MODE, bool PF = false>
++template <int KV_MODE, bool PF = false, bool HYBRID_IMMA = false>
+ struct Smem {
+     using KElem = typename std::conditional<KV_MODE == 0, __half, int8_t>::type;
+     using VElem = typename std::conditional<KV_MODE == 1 || KV_MODE == 4, int8_t, __half>::type;
+     static constexpr int KROW = KV_MODE == 0 ? HD + 8 : HD + 16;   // elements; 16-byte aligned rows, banks spread
+     static constexpr int VROW = (KV_MODE == 1 || KV_MODE == 4) ? HD + 16 : HD + 8;
+     static constexpr int NG = KV_MODE == 4 ? HD / QK4_0 : 4;      // scale groups per row (q4_0: 8 of 32, else 4 of 64)
+-    __half qh[16][QS];
+-    __half ql[16][QS];
++    struct HalfQuery { __half qh[16][QS], ql[16][QS]; };
++    struct ByteQuery { int8_t part[3][16][HD + 16]; float inv[16][4]; };
++    typename std::conditional<HYBRID_IMMA, ByteQuery, HalfQuery>::type query;
+     // int8 K/V (mode 1): K is read only by the scores and V only by p.v, so they share one buffer - V is stored over K
+     // after the scores (prompt_attn_kernel).  37.9 -> 29.2 KB: two blocks fit an SM's 64 KB on Turing instead of one.
+     struct Rows { KElem k[CH][KROW]; VElem v[CH][VROW]; };
+@@ -117,14 +124,14 @@ struct Smem {
+     long long row[CH];
+ };
+ 
+-template <int KV_MODE, bool PF = false>
++template <int KV_MODE, bool PF = false, bool HYBRID_IMMA = false>
+ __global__ void __launch_bounds__(THREADS) prompt_attn_kernel(const float* __restrict__ q, QsaAttnPools p,
+                                                               const int32_t* __restrict__ ids,
+                                                               const int32_t* __restrict__ steps, int n_kv_heads,
+                                                               int page_size, float scale_log2, float* __restrict__ attn,
+                                                               int cap) {
+     extern __shared__ __align__(16) unsigned char smem_raw[];
+-    Smem<KV_MODE, PF>& S = *reinterpret_cast<Smem<KV_MODE, PF>*>(smem_raw);
++    Smem<KV_MODE, PF, HYBRID_IMMA>& S = *reinterpret_cast<Smem<KV_MODE, PF, HYBRID_IMMA>*>(smem_raw);
+     const int qi = blockIdx.x, kvh = blockIdx.y;
+     const int n_head = n_kv_heads * G;
+     q += (size_t) qi * n_head * HD + (size_t) kvh * G * HD;
+@@ -134,24 +141,47 @@ __global__ void __launch_bounds__(THREADS) prompt_attn_kernel(const float* __res
+     const int t = threadIdx.x, lane = t & 31, warp = t >> 5;
+     const int gid = lane >> 2, tig = lane & 3;
+ 
+-    // q: 12 heads + 4 zero rows, scaled by a power of two that puts its largest value near 2^14 (exact, and the
+-    // lo halves stay out of FP16's subnormal range), then split into hi + lo halves
+-    float qm = 0.0f;
+-    for (int i = t; i < G * HD; i += THREADS) qm = fmaxf(qm, fabsf(q[i]));
+-#pragma unroll
+-    for (int o = 16; o > 0; o >>= 1) qm = fmaxf(qm, __shfl_xor_sync(0xffffffffu, qm, o));
+-    if (lane == 0) S.qmax[warp] = qm;
+-    __syncthreads();
+-    qm = fmaxf(fmaxf(S.qmax[0], S.qmax[1]), fmaxf(S.qmax[2], S.qmax[3]));
+-    int qe = 0;
+-    if (qm > 0.0f) frexpf(qm, &qe);                 // qm < 2^qe
+-    const float qup = ldexpf(1.0f, 14 - qe), qdown = ldexpf(scale_log2, qe - 14);
+-    for (int i = t; i < 16 * HD; i += THREADS) {
+-        const int h = i / HD, d = i % HD;
+-        const float x = h < G ? q[(size_t) h * HD + d] * qup : 0.0f;
+-        const __half hi = __float2half_rn(x);
+-        S.qh[h][d] = hi;
+-        S.ql[h][d] = __float2half_rn(x - __half2float(hi));
++    float qdown = scale_log2;
++    if constexpr (HYBRID_IMMA) {
++        static_assert(KV_MODE == 3 && HD == 256 && THREADS == 128);
++        // Two lanes stage each 64-value group. The three bytes retain the
++        // existing INT8 attention path's 24-bit representation of the query.
++        const int h = t / 8, group = (t / 2) % 4, half = t % 2;
++        const int base = group * 64 + half * 32;
++        float mx = 0.f;
++        if (h < G) for (int i = 0; i < 32; ++i) mx = fmaxf(mx, fabsf(q[h * HD + base + i]));
++        mx = fmaxf(mx, __shfl_xor_sync(0xffffffffu, mx, 1));
++        const float up = mx > 0.f ? 127.f / mx : 0.f;
++        if (half == 0) S.query.inv[h][group] = mx * (1.f / 127.f);
++        for (int i = 0; i < 32; ++i) {
++            const int d = base + i;
++            int hi, lo, mid;
++            split3(h < G ? q[h * HD + d] * up : 0.f, hi, lo, mid);
++            S.query.part[0][h][d] = (int8_t) hi;
++            S.query.part[1][h][d] = (int8_t) lo;
++            S.query.part[2][h][d] = (int8_t) mid;
++        }
++    } else {
++        // q: 12 heads + 4 zero rows, scaled by a power of two that puts its largest value near 2^14 (exact, and the
++        // lo halves stay out of FP16's subnormal range), then split into hi + lo halves
++        float qm = 0.0f;
++        for (int i = t; i < G * HD; i += THREADS) qm = fmaxf(qm, fabsf(q[i]));
++    #pragma unroll
++        for (int o = 16; o > 0; o >>= 1) qm = fmaxf(qm, __shfl_xor_sync(0xffffffffu, qm, o));
++        if (lane == 0) S.qmax[warp] = qm;
++        __syncthreads();
++        qm = fmaxf(fmaxf(S.qmax[0], S.qmax[1]), fmaxf(S.qmax[2], S.qmax[3]));
++        int qe = 0;
++        if (qm > 0.0f) frexpf(qm, &qe);                 // qm < 2^qe
++        const float qup = ldexpf(1.0f, 14 - qe);
++        qdown = ldexpf(scale_log2, qe - 14);
++        for (int i = t; i < 16 * HD; i += THREADS) {
++            const int h = i / HD, d = i % HD;
++            const float x = h < G ? q[(size_t) h * HD + d] * qup : 0.0f;
++            const __half hi = __float2half_rn(x);
++            S.query.qh[h][d] = hi;
++            S.query.ql[h][d] = __float2half_rn(x - __half2float(hi));
++        }
+     }
+     if (t < 16) { S.mrow[t] = -INFINITY; S.lsum[t] = 0.0f; }
+ 
+@@ -326,29 +356,53 @@ __global__ void __launch_bounds__(THREADS) prompt_attn_kernel(const float* __res
+ #pragma unroll
+             for (int g = 0; g < NG; ++g) {
+                 float tg[4] = {0.f, 0.f, 0.f, 0.f};
+-#pragma unroll
+-                for (int kk = 0; kk < KPG; ++kk) {
+-                    const int k0 = (g * KPG + kk) * 16;
+-                    uint32_t ah[4], al[4], b[2];
+-                    ah[0] = *reinterpret_cast<const uint32_t*>(&S.qh[gid][k0 + 2 * tig]);
+-                    ah[1] = *reinterpret_cast<const uint32_t*>(&S.qh[gid + 8][k0 + 2 * tig]);
+-                    ah[2] = *reinterpret_cast<const uint32_t*>(&S.qh[gid][k0 + 2 * tig + 8]);
+-                    ah[3] = *reinterpret_cast<const uint32_t*>(&S.qh[gid + 8][k0 + 2 * tig + 8]);
+-                    al[0] = *reinterpret_cast<const uint32_t*>(&S.ql[gid][k0 + 2 * tig]);
+-                    al[1] = *reinterpret_cast<const uint32_t*>(&S.ql[gid + 8][k0 + 2 * tig]);
+-                    al[2] = *reinterpret_cast<const uint32_t*>(&S.ql[gid][k0 + 2 * tig + 8]);
+-                    al[3] = *reinterpret_cast<const uint32_t*>(&S.ql[gid + 8][k0 + 2 * tig + 8]);
+-                    if constexpr (KV_MODE != 0) {   // modes 1 and 3: the K side is INT8 codes
+-                        b[0] = i8x2_to_h2(*reinterpret_cast<const uint16_t*>(&S.kv.k[cb + gid][k0 + 2 * tig]));
+-                        b[1] = i8x2_to_h2(*reinterpret_cast<const uint16_t*>(&S.kv.k[cb + gid][k0 + 2 * tig + 8]));
+-                    } else {
+-                        b[0] = *reinterpret_cast<const uint32_t*>(&S.kv.k[cb + gid][k0 + 2 * tig]);
+-                        b[1] = *reinterpret_cast<const uint32_t*>(&S.kv.k[cb + gid][k0 + 2 * tig + 8]);
++if constexpr (HYBRID_IMMA) {
++                    int partial[3][4] = {};
++#pragma unroll
++                    for (int step = 0; step < 2; ++step) {
++                        const int d = g * 64 + step * 32 + 4 * tig;
++                        const auto* key = S.kv.k[cb + gid];
++                        const uint32_t b[2] = {*reinterpret_cast<const uint32_t*>(key + d),
++                                               *reinterpret_cast<const uint32_t*>(key + d + 16)};
++#pragma unroll
++                        for (int part = 0; part < 3; ++part) {
++                            const auto& bytes = S.query.part[part];
++                            const uint32_t a[4] = {*reinterpret_cast<const uint32_t*>(bytes[gid] + d),
++                                *reinterpret_cast<const uint32_t*>(bytes[gid + 8] + d),
++                                *reinterpret_cast<const uint32_t*>(bytes[gid] + d + 16),
++                                *reinterpret_cast<const uint32_t*>(bytes[gid + 8] + d + 16)};
++                            if (part == 2) imma16832_us(partial[part], a, b);
++                            else imma16832(partial[part], a, b);
++                        }
+                     }
+-                    mma16816(tg, ah, b);
++#pragma unroll
++                    for (int j = 0; j < 4; ++j)
++                        tg[j] = join3(partial[0][j], partial[1][j], partial[2][j]) * S.query.inv[gid + (j / 2) * 8][g];
++                } else {
++#pragma unroll
++                    for (int kk = 0; kk < KPG; ++kk) {
++                        const int k0 = (g * KPG + kk) * 16;
++                        uint32_t ah[4], al[4], b[2];
++                        ah[0] = *reinterpret_cast<const uint32_t*>(&S.query.qh[gid][k0 + 2 * tig]);
++                        ah[1] = *reinterpret_cast<const uint32_t*>(&S.query.qh[gid + 8][k0 + 2 * tig]);
++                        ah[2] = *reinterpret_cast<const uint32_t*>(&S.query.qh[gid][k0 + 2 * tig + 8]);
++                        ah[3] = *reinterpret_cast<const uint32_t*>(&S.query.qh[gid + 8][k0 + 2 * tig + 8]);
++                        al[0] = *reinterpret_cast<const uint32_t*>(&S.query.ql[gid][k0 + 2 * tig]);
++                        al[1] = *reinterpret_cast<const uint32_t*>(&S.query.ql[gid + 8][k0 + 2 * tig]);
++                        al[2] = *reinterpret_cast<const uint32_t*>(&S.query.ql[gid][k0 + 2 * tig + 8]);
++                        al[3] = *reinterpret_cast<const uint32_t*>(&S.query.ql[gid + 8][k0 + 2 * tig + 8]);
++                        if constexpr (KV_MODE != 0) {   // modes 1 and 3: the K side is INT8 codes
++                            b[0] = i8x2_to_h2(*reinterpret_cast<const uint16_t*>(&S.kv.k[cb + gid][k0 + 2 * tig]));
++                            b[1] = i8x2_to_h2(*reinterpret_cast<const uint16_t*>(&S.kv.k[cb + gid][k0 + 2 * tig + 8]));
++                        } else {
++                            b[0] = *reinterpret_cast<const uint32_t*>(&S.kv.k[cb + gid][k0 + 2 * tig]);
++                            b[1] = *reinterpret_cast<const uint32_t*>(&S.kv.k[cb + gid][k0 + 2 * tig + 8]);
++                        }
++                        mma16816(tg, ah, b);
+ #ifndef D1_NO_QLO
+-                    mma16816(tg, al, b);
++                        mma16816(tg, al, b);
+ #endif
++                    }
+                 }
+                 const float s0 = S.ks[cb + 2 * tig][g], s1 = S.ks[cb + 2 * tig + 1][g];
+                 sc[0] = fmaf(tg[0], s0, sc[0]);
+@@ -1431,16 +1485,16 @@ bool launch_i8v3(const float* q, const QsaAttnPools& pools, const int32_t* ids,
+     return true;
+ }
+ 
+-template <int KV_MODE, bool PF = false>
++template <int KV_MODE, bool PF = false, bool HYBRID_IMMA = false>
+ bool launch(const float* q, const QsaAttnPools& pools, const int32_t* ids, const int32_t* steps, int64_t cap,
+             const QsaShapes& s, float* attn, int64_t n_q, cudaStream_t st) {
+     static bool attr[64] = {};   // per device, as above
+     int dev = 0;
+     cudaGetDevice(&dev);
+-    const int bytes = (int) sizeof(Smem<KV_MODE, PF>);
++    const int bytes = (int) sizeof(Smem<KV_MODE, PF, HYBRID_IMMA>);
+     if (dev < 0 || dev >= 64) return false;
+     if (!attr[dev]) {
+-        if (cudaFuncSetAttribute(prompt_attn_kernel<KV_MODE, PF>, cudaFuncAttributeMaxDynamicSharedMemorySize, bytes) !=
++        if (cudaFuncSetAttribute(prompt_attn_kernel<KV_MODE, PF, HYBRID_IMMA>, cudaFuncAttributeMaxDynamicSharedMemorySize, bytes) !=
+             cudaSuccess) {
+             cudaGetLastError();
+             return false;
+@@ -1450,7 +1504,7 @@ bool launch(const float* q, const QsaAttnPools& pools, const int32_t* ids, const
+     const float scale_log2 = 1.4426950408889634f / sqrtf((float) HD);
+     for (int64_t q0 = 0; q0 < n_q; q0 += 65535) {
+         const int64_t nb = n_q - q0 < 65535 ? n_q - q0 : 65535;
+-        prompt_attn_kernel<KV_MODE, PF><<<dim3((unsigned) nb, (unsigned) s.n_head_kv), THREADS, bytes, st>>>(
++        prompt_attn_kernel<KV_MODE, PF, HYBRID_IMMA><<<dim3((unsigned) nb, (unsigned) s.n_head_kv), THREADS, bytes, st>>>(
+             q + q0 * s.n_head * HD, pools, ids + q0 * cap, steps + q0 * kStepCount, (int) s.n_head_kv,
+             (int) s.page_size, scale_log2, attn + q0 * s.n_head * HD, (int) cap);
+     }
+@@ -2468,10 +2522,13 @@ bool qsa_prompt_attn_batch_gated(const float* q, const QsaAttnPools& pools, cons
+     return false;
+ }
+ 
++static int g_pa_hybrid_imma = -1;   // parity override, -1 uses the opt-in environment switch
++void qsa_prompt_attn_set_hybrid_imma(int on) { g_pa_hybrid_imma = on; }
++
+ bool qsa_prompt_attn_batch(const float* q, const QsaAttnPools& pools, const int32_t* ids, const int32_t* steps,
+                            int64_t cap, const QsaShapes& s, float* attn, int64_t n_q, void* stream) {
+     if (n_q <= 0) return true;
+-    bool volta = false, turing = false, t75 = false;   // per call, from the CURRENT device (a layer split can mix Turing with newer cards)
++    bool volta = false, turing = false, t75 = false, ampere86 = false;   // per call, from the CURRENT device (a layer split can mix Turing with newer cards)
+     {   // sm_75 or newer: the MMA above compiles for both.  sm_80+ runs the cp.async kernel (launch_i8); Turing has
+         // no cp.async, so it runs the v1 kernel (launch<1>, same accuracy, another summation order).  An older card
+         // keeps the old kernel.
+@@ -2500,12 +2557,13 @@ bool qsa_prompt_attn_batch(const float* q, const QsaAttnPools& pools, const int3
+         if (cc[dev] < 70) return false;
+         volta = cc[dev] < 75;     // sm_70: the m8n8k4 kernel (STRATA_PA_VOLTA); STRATA_QSA_WARP=1 still forces the old one
+         turing = cc[dev] < 80;
++        ampere86 = cc[dev] == 86;
+         t75 = cc[dev] == 75;      // a Turing card, or one run as such (STRATA_EMULATE_CC=75, STRATA_QSA_WARP=1)
+     }
+ #if defined(__HIPCC__)
+     // the tensor-core kernels are compiled out on AMD (its major version is not a CUDA sm); RDNA4 has its own int8-KV
+     // matrix-core kernel, opt-in (STRATA_HIP_WMMA=1); everything else keeps the old kernel
+-    (void) turing; (void) volta;
++    (void) turing; (void) volta; (void) ampere86;
+     if (pools.k_q != nullptr && pools.v_q != nullptr && pools.k_scale != nullptr && pools.v_scale != nullptr &&
+         pools.k_q4 == nullptr && pools.v_q4 == nullptr && s.head_dim == HD && s.n_head == (int64_t) G * s.n_head_kv &&
+         cap > 0 && ids && steps && pools.page_table && hip_wmma_usable(n_q, cap))
+@@ -2532,6 +2590,12 @@ bool qsa_prompt_attn_batch(const float* q, const QsaAttnPools& pools, const int3
+     if (pools.k_q != nullptr && pools.v_q4 != nullptr) {   // hybrid K8V4: int8 K + dequantized-q4 V
+         if (!pools.k_scale) return false;
+         if (volta) return launch70<3>(q, pools, ids, steps, cap, s, attn, n_q, st);
++        static const bool hybrid_imma = [] {
++            const char* v = std::getenv("STRATA_K8V4_QK_IMMA");
++            return v && std::strcmp(v, "1") == 0;
++        }();
++        if (ampere86 && (g_pa_hybrid_imma >= 0 ? g_pa_hybrid_imma == 1 : hybrid_imma) &&
++            launch<3, false, true>(q, pools, ids, steps, cap, s, attn, n_q, st)) return true;
+         return launch<3>(q, pools, ids, steps, cap, s, attn, n_q, st);
+     }
+     if (pools.k_q != nullptr) {
+diff --git a/engine/cmake/backends/cuda.cmake b/engine/cmake/backends/cuda.cmake
+index d90788f4cb2..3b17ba96759 100644
+--- a/engine/cmake/backends/cuda.cmake
++++ b/engine/cmake/backends/cuda.cmake
+@@ -115,6 +115,10 @@ endmacro()
+ # the prompt kernels' tests: the fused experts' (linked to ${_strata_pf_tests_lib})
+ macro(strata_cuda_prompt_tests)
+     if(STRATA_BUILD_TESTS)
++      # SM86 K8V4: int8 K x split-INT8 query on IMMA, with the q4_0 V gather path unchanged.
++      add_test(NAME qsa_prompt_attn_parity_k8v4 COMMAND qsa_prompt_attn_parity 4096 512 2 --k8v4)
++      set_tests_properties(qsa_prompt_attn_parity_k8v4 PROPERTIES
++                           ENVIRONMENT "STRATA_K8V4_QK_IMMA=1" SKIP_RETURN_CODE 77 TIMEOUT 600)
+       # P4-SPLIT: the engine and Strata's prompt library hold none of llama.cpp's MMQ (names in the bytes, nm, cuobjdump; tools/check_no_mmq.py)
+       # The cuobjdump look is named, so a device look that did not run fails the test (exit 3, "NOT RUN (<why>)" in its output).  Each tool
+       # gets 600 s (--tool-timeout), under the test's own limit: a slow cuobjdump ends as a named NOT RUN, not as a test killed with no line.

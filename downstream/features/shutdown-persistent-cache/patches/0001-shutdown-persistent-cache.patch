@@ -1,0 +1,700 @@
+diff --git a/engine/CMakeLists.txt b/engine/CMakeLists.txt
+index 62382932c..e7cbb6ee0 100644
+--- a/engine/CMakeLists.txt
++++ b/engine/CMakeLists.txt
+@@ -228,6 +228,14 @@ if(STRATA_BUILD_CONVERSATION_TESTS)
+   add_executable(session_save_reclaim_test src/core/session_save_reclaim_test.cpp src/core/conversation_file.cpp)
+   target_include_directories(session_save_reclaim_test PRIVATE include)
+   add_test(NAME session_save_reclaim_test COMMAND session_save_reclaim_test)
++  # Shutdown Persistent Cache (Patch B of the downstream L2 split; host-only).  The test source rides the feature
++  # package's overlay, so a prepared tree without it configures without the target.
++  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/conversation_persist_test.cpp")
++    add_executable(conversation_persist_test tests/core/conversation_persist_test.cpp src/core/conversation_file.cpp)
++    target_include_directories(conversation_persist_test PRIVATE include)
++    target_compile_features(conversation_persist_test PRIVATE cxx_std_17)
++    add_test(NAME conversation_persist_test COMMAND conversation_persist_test)
++  endif()
+ endif()
+ 
+ if(STRATA_HIP_GFX906)
+diff --git a/engine/include/strata/core/conversation_cache.hpp b/engine/include/strata/core/conversation_cache.hpp
+index cd2ebaaf9..bf68ca705 100644
+--- a/engine/include/strata/core/conversation_cache.hpp
++++ b/engine/include/strata/core/conversation_cache.hpp
+@@ -370,6 +370,12 @@ public:
+         return out;
+     }
+ 
++    /// A read-only view of parked entry `i` (nullptr when out of range), valid until the cache changes.  The
++    /// shutdown persistent cache flushes the entries it holds with it; nothing here parks, evicts or takes.
++    const SavedConversation* entry_at(size_t i) const {
++        return i < entries_.size() ? &entries_[i] : nullptr;
++    }
++
+     // A checkpoint inside a parked conversation that a NEW conversation starts with - a sibling subagent sharing the
+     // system prompt and tool list, a compacted history - is borrowed: restored from the entry, which stays parked.
+     // take() would move the whole conversation into the session and the new request would overwrite everything after
+diff --git a/engine/include/strata/core/conversation_persist.hpp b/engine/include/strata/core/conversation_persist.hpp
+new file mode 100644
+index 000000000..910c99286
+--- /dev/null
++++ b/engine/include/strata/core/conversation_persist.hpp
+@@ -0,0 +1,489 @@
++#pragma once
++// include/strata/core/conversation_persist.hpp - the shutdown persistent cache (Patch B of the L2 patch split,
++// downstream/patch-plans/shutdown-persistent-cache): keeps the RAM conversation cache's parked conversations across
++// a normal engine restart.  Patch A (runtime-kv-storage) reduces what a park writes while the engine runs; this
++// tier answers a different question: what happens to the conversations still parked in RAM when the serve loop
++// ends.  Without it the answer is "gone": the runtime spill tier lives in a per-process folder that an orderly exit
++// removes, so the conversations a client parked before a server restart are read from the prompt again.
++//
++// What it does: at a NORMAL end of the serve loop - while the RAM cache still holds its entries and nothing is in
++// flight - each parked image is written as an official session file plus a small sidecar that carries everything
++// matching needs (the token ids and picture keys of the live state and of each checkpoint, like ConversationSpill's
++// entries).  At the next start the sidecars rebuild the prefix index without reading any K/V payload; only a record
++// this prompt actually matches is read whole, under the session RESTORE's own limits.  A restore never consumes its
++// record: it stays until a new snapshot of the same conversation replaces it or the budget drops it, so it can
++// answer the next restart too.
++//
++// What it does not do: it does not survive a crash or a power cut (only the orderly end of the serve loop writes),
++// it does not take over the runtime spill tier, it does not scan or move another engine's spill files, and it adds
++// no second session-file format - the payload is the official format, bound to the same SessionFileIdentity
++// (model x config) the SAVE/RESTORE pair already checks.  Every failure on the way - a full disk, a missing or
++// corrupt sidecar, a payload that no longer reads - costs only the cache hit it would have been: the prompt is
++// read again, exactly as with a tier that is off.
++//
++// Namespace: one folder per identity under `<root>/conversation-persist`, named `<model>-<config>` in 16 hex
++// digits each, so two models (or two configurations of one model) never hit each other's records.  A `.lock` file
++// held for the length of one shutdown flush serializes the writers (two engines may serve the same model at the
++// same time); a scan never takes it - a sidecar exists only once its rename has published it.
++
++#include "strata/core/conversation_cache.hpp"
++#include "strata/core/conversation_file.hpp"
++#include "strata/core/conversation_spill.hpp"   // spill_detail's namespace lock (a file nobody else holds)
++
++#include <algorithm>
++#include <cstdint>
++#include <cstdio>
++#include <cstring>
++#include <filesystem>
++#include <mutex>
++#include <optional>
++#include <random>
++#include <string>
++#include <system_error>
++#include <utility>
++#include <vector>
++
++namespace strata::core {
++
++/// The shutdown persistent cache for one identity namespace.  Header-only and host-only: like ConversationSpill it
++/// touches no GPU state, and every payload byte goes through the official session-file writer.
++class ShutdownPersist {
++public:
++    /// What matching needs of one persisted conversation.  `live`/`checkpoints` carry ids and image keys only; the
++    /// K/V stays in `file` until a request matches this record and reads it.
++    struct Entry {
++        uint64_t serial = 0;
++        std::filesystem::path file;                      // the payload (an official session file)
++        uint64_t bytes = 0;                              // the payload's exact size on the disk
++        bool cvec = false;
++        ConversationCheckpoint live;                     // ids and images only
++        std::vector<ConversationCheckpoint> checkpoints; // ids and images only
++    };
++
++    /// Opens (and creates) `<root>/conversation-persist/<model>-<config>`, indexes the valid sidecars and retires
++    /// whatever the budget no longer admits.  `cap` of 0 turns the tier off.  False (with `error`) leaves the tier
++    /// off: every later call is a miss, never a failure of the engine.
++    bool open(const std::filesystem::path& root, const SessionFileIdentity& id, uint64_t cap, std::string& error) {
++        std::lock_guard<std::mutex> lk(mu_);
++        entries_.clear();
++        used_ = 0;
++        next_serial_ = 1;
++        dir_.clear();
++        id_ = id;
++        cap_ = cap;
++        if (cap == 0) return true;
++        std::error_code ec;
++        const std::filesystem::path ns = namespace_dir(root, id);
++        std::filesystem::create_directories(ns, ec);
++        if (ec || !std::filesystem::is_directory(ns, ec) || std::filesystem::is_symlink(ns, ec)) {
++            error = "persistent cache folder " + ns.string() + " cannot be used" +
++                    (ec ? ": " + ec.message() : std::string());
++            cap_ = 0;
++            return false;
++        }
++        dir_ = ns;
++        scan_locked();
++        while (used_ > cap_ && !entries_.empty()) drop_locked(0);   // (the budget may have been lowered)
++        return true;
++    }
++    void close() {
++        std::lock_guard<std::mutex> lk(mu_);
++        entries_.clear();
++        used_ = 0;
++        dir_.clear();
++        cap_ = 0;
++    }
++    bool enabled() const { std::lock_guard<std::mutex> lk(mu_); return cap_ != 0 && !dir_.empty(); }
++    /// this identity's folder (an empty path while off), for the engine's logs
++    std::filesystem::path dir() const { std::lock_guard<std::mutex> lk(mu_); return dir_; }
++    size_t size() const { std::lock_guard<std::mutex> lk(mu_); return entries_.size(); }
++    uint64_t bytes() const { std::lock_guard<std::mutex> lk(mu_); return used_; }
++    /// the record `i` (a copy, oldest serial first), or none when out of range
++    std::optional<Entry> entry(size_t i) const {
++        std::lock_guard<std::mutex> lk(mu_);
++        return i < entries_.size() ? std::optional<Entry>(entries_[i]) : std::nullopt;
++    }
++    /// the record `serial` (a copy), if it is still indexed
++    std::optional<Entry> find(uint64_t serial) const {
++        std::lock_guard<std::mutex> lk(mu_);
++        const size_t i = index_locked(serial);
++        return i == SIZE_MAX ? std::nullopt : std::optional<Entry>(entries_[i]);
++    }
++
++    /// The best prefix any indexed record gives `prompt`, by the RAM cache's rule (its live state or a checkpoint,
++    /// same pictures, same steering; ties prefer the newest).  A record of another steering mode never matches.
++    template <class Token>
++    ConversationCache::Match best(const std::vector<Token>& prompt, const std::vector<ConversationImageKey>& images,
++                                  bool cvec) const {
++        std::lock_guard<std::mutex> lk(mu_);
++        ConversationCache::Match m;
++        for (size_t i = entries_.size(); i-- > 0;) {
++            const Entry& e = entries_[i];
++            if (e.cvec != cvec) continue;
++            auto consider = [&](const ConversationCheckpoint& c, bool live) {
++                const int64_t n = conversation_prefix(c, prompt, images);
++                if (n > m.tokens) m = {i, n, live, e.serial};
++            };
++            consider(e.live, true);
++            for (const auto& c : e.checkpoints) consider(c, false);
++        }
++        return m;
++    }
++
++    /// Reads record `serial` whole into `out` (bounded by `limits`, the identity checked again by the session-file
++    /// reader).  The record stays indexed: a restore consumes nothing, so the record answers the next restart too.
++    /// False: `out` is unchanged and the record is gone - a payload that no longer reads back is not tried again.
++    bool read_serial(uint64_t serial, const SessionReadLimits& limits, SavedConversation& out, std::string& error) {
++        std::filesystem::path f;
++        {
++            std::lock_guard<std::mutex> lk(mu_);
++            const size_t i = index_locked(serial);
++            if (i == SIZE_MAX) { error = "no such persisted conversation"; return false; }
++            f = entries_[i].file;
++        }
++        SavedConversation image;
++        size_t read = 0;
++        if (!session_file_read(f.string(), id_, image, read, error, limits)) {
++            drop_serial(serial);   // (a payload that cannot be read would fail every next time too)
++            return false;
++        }
++        out = std::move(image);
++        return true;
++    }
++
++    /// Drops record `serial` and its files; false when it was not indexed.
++    bool drop_serial(uint64_t serial) {
++        std::lock_guard<std::mutex> lk(mu_);
++        const size_t i = index_locked(serial);
++        if (i == SIZE_MAX) return false;
++        drop_locked(i);
++        return true;
++    }
++
++    /// The shutdown flush: writes every image of a normal end's RAM cache (oldest first, so the conversations the
++    /// client used last win the budget).  Each record lands beside the records earlier runs left: a restore never
++    /// deleted one, and a conversation this run never touched keeps its record until the budget or a new snapshot
++    /// of the same conversation retires it.  The namespace lock is held for the whole flush, so two engines
++    /// shutting down together cannot interleave; one that cannot take it writes nothing and reports 0 - the other
++    /// engine's records are exactly as they were.  Returns how many went.
++    size_t save_all(const std::vector<const SavedConversation*>& images) {
++        std::lock_guard<std::mutex> lk(mu_);
++        if (cap_ == 0 || dir_.empty()) return 0;
++        const spill_detail::LockHandle lock = spill_detail::try_lock(dir_ / ".lock");
++        if (lock == spill_detail::no_lock()) return 0;   // (another engine is writing its own flush right now)
++        size_t wrote = 0;
++        for (const SavedConversation* image : images)
++            if (image != nullptr && save_locked(*image)) ++wrote;
++        spill_detail::unlock(lock);
++        return wrote;
++    }
++
++private:
++    size_t index_locked(uint64_t serial) const {
++        for (size_t i = 0; i < entries_.size(); ++i)
++            if (entries_[i].serial == serial) return i;
++        return SIZE_MAX;
++    }
++    static std::filesystem::path namespace_dir(const std::filesystem::path& root, const SessionFileIdentity& id) {
++        char name[64];
++        std::snprintf(name, sizeof name, "%016llx-%016llx",
++                      (unsigned long long) id.model, (unsigned long long) id.config);
++        return root / "conversation-persist" / std::filesystem::path(name);
++    }
++    static std::string hex_nonce(unsigned n) {
++        char b[16];
++        std::snprintf(b, sizeof b, "%08x", n);
++        return std::string(b);
++    }
++    static ConversationCheckpoint stub(const ConversationCheckpoint& c) {
++        ConversationCheckpoint s;
++        s.ids = c.ids;
++        s.imgs = c.imgs;
++        return s;
++    }
++
++    /// One image of the flush, under the namespace lock and the tier's mutex.  False: nothing of this image is on
++    /// the disk, and whatever it supersedes is exactly as it was.
++    bool save_locked(const SavedConversation& image) {
++        // a whole-session file holds one stage's image only (conversation_file.hpp): a layer split's stage images
++        // are not this tier's business, exactly as they are not the runtime spill's
++        if (image.live.ids.empty() || !image.stage_images.empty()) return false;
++        const bool cvec = image.cvec;
++        const std::vector<int32_t> live_ids = image.live.ids;   // (the superseded check reads it after the write)
++        const uint64_t need = (uint64_t) image.bytes() + (uint64_t(1) << 20);   // the payload and the file's own tables
++        if (need > cap_) return false;
++        while (used_ + need > cap_) {
++            if (entries_.empty()) return false;
++            drop_locked(0);   // the oldest record goes first, whole
++        }
++        std::random_device rd;
++        const unsigned nonce = rd() ^ (rd() << 17);   // (serial plus nonce: two engines never pick one name)
++        const uint64_t serial = next_serial_++;
++        const std::filesystem::path f = dir_ / ("persist-" + std::to_string(serial) + "-" + hex_nonce(nonce) + ".session");
++        const std::filesystem::path m = dir_ / ("persist-" + std::to_string(serial) + "-" + hex_nonce(nonce) + ".meta");
++        size_t written = 0;
++        std::string error;
++        if (!session_file_write(f.string(), image, id_, written, error)) {
++            std::error_code ec;
++            std::filesystem::remove(f, ec);
++            return false;
++        }
++        if (!write_sidecar(m, id_, serial, written, image)) {
++            std::error_code ec;
++            std::filesystem::remove(f, ec);
++            std::filesystem::remove(m, ec);
++            return false;
++        }
++        used_ += written;
++        Entry e;
++        e.serial = serial;
++        e.file = f;
++        e.bytes = written;
++        e.cvec = cvec;
++        e.live = stub(image.live);
++        for (const auto& c : image.checkpoints) e.checkpoints.push_back(stub(c));
++        entries_.push_back(std::move(e));
++        // an older parked state of the SAME conversation (the same live tokens, the same steering) is superseded
++        // by the new snapshot; it is retired only once the new one is complete, so a failure above leaves it
++        // standing.  A different conversation that shares a long prefix keeps its record: only the ids being equal
++        // retires one, so a sibling that borrows the shared root is never dropped by another's flush.
++        for (size_t i = 0; i + 1 < entries_.size();) {
++            const Entry& old = entries_[i];
++            if (old.cvec == cvec && old.live.ids == live_ids) { drop_locked(i); continue; }
++            ++i;
++        }
++        while (used_ > cap_ && entries_.size() > 1) drop_locked(0);   // (a file larger than its estimate)
++        return true;
++    }
++
++    /// The scan's half of open(): index the sidecars of this namespace, oldest serial first.  A sidecar that does
++    /// not pass - magic, version, reserved fields, hashes, end marker, identity, stub shape, or whose payload is
++    /// gone, is a link, or has another size - is ignored, alone: a restart with a damaged record is a miss on that
++    /// record, never a failure of the tier.
++    void scan_locked() {
++        std::error_code ec;
++        for (std::filesystem::directory_iterator it(dir_, ec), end; !ec && it != end; it.increment(ec)) {
++            const std::filesystem::path p = it->path();
++            std::error_code e2;
++            if (it->is_symlink(e2) || !it->is_regular_file(e2)) continue;
++            const std::string name = p.filename().string();
++            // `persist-<serial>-<nonce>.meta`, at its shortest "persist-1-00000000.meta"
++            if (name.size() < 23 || name.compare(0, 7, "persist") != 0 ||
++                name.compare(name.size() - 5, 5, ".meta") != 0)
++                continue;
++            Entry e;
++            if (!read_sidecar(p, id_, e)) continue;
++            std::error_code e3;
++            if (!std::filesystem::is_regular_file(e.file, e3) || std::filesystem::is_symlink(e.file, e3) ||
++                std::filesystem::file_size(e.file, e3) != e.bytes)
++                continue;
++            used_ += e.bytes;
++            entries_.push_back(std::move(e));
++        }
++        std::sort(entries_.begin(), entries_.end(),
++                  [](const Entry& a, const Entry& b) { return a.serial < b.serial; });
++        for (const Entry& e : entries_) next_serial_ = std::max(next_serial_, e.serial + 1);
++    }
++
++    /// One record's sidecar, written to a unique temporary name and renamed into place: a scan sees either the old
++    /// record or the complete new one, never a half-written file.  False leaves nothing behind.
++    static bool write_sidecar(const std::filesystem::path& path, const SessionFileIdentity& id, uint64_t serial,
++                              uint64_t payload_bytes, const SavedConversation& image) {
++        std::vector<uint8_t> body;
++        put_sidecar_body(body, id, serial, payload_bytes, image);
++        if (body.size() > 0xFFFFFFFEu) return false;
++        std::error_code ec;
++        const std::filesystem::path tmp =
++            path.string() + ".tmp-" + hex_nonce((unsigned) session_hash64(body.data(), body.size(), serial));
++#if defined(_WIN32)
++        {
++            const HANDLE h = CreateFileW(tmp.wstring().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
++                                         FILE_ATTRIBUTE_NORMAL, nullptr);
++            if (h == INVALID_HANDLE_VALUE) return false;
++            const DWORD n = (DWORD) body.size();
++            DWORD done = 0;
++            const bool ok = WriteFile(h, body.data(), n, &done, nullptr) && done == n;
++            CloseHandle(h);
++            if (!ok) { std::filesystem::remove(tmp, ec); return false; }
++        }
++#else
++        {
++            const int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
++            if (fd < 0) return false;
++            size_t done = 0;
++            while (done < body.size()) {
++                const ssize_t w = ::write(fd, body.data() + done, body.size() - done);
++                if (w <= 0) { ::close(fd); std::filesystem::remove(tmp, ec); return false; }
++                done += (size_t) w;
++            }
++            ::close(fd);
++        }
++#endif
++        std::filesystem::rename(tmp, path, ec);
++        if (ec) {
++            // (Windows: a rename onto an existing name fails.  The old record is superseded: retire it first.)
++            std::filesystem::remove(path, ec);
++            std::filesystem::rename(tmp, path, ec);
++            if (ec) {
++                std::filesystem::remove(tmp, ec);
++                return false;
++            }
++        }
++        return true;
++    }
++
++    /// The sidecar's bytes: a versioned header (identity, serial, payload size, steering, reserved) with its own
++    /// hash, then the stub (the ids and image keys of the live state and of every checkpoint, in the session
++    /// order), the stub's hash and an end marker.  Everything is little-endian fixed width, like session file v1;
++    /// the hashes detect corruption, they do not authenticate a sidecar.
++    static void put_sidecar_body(std::vector<uint8_t>& body, const SessionFileIdentity& id, uint64_t serial,
++                                 uint64_t payload_bytes, const SavedConversation& image) {
++        std::vector<uint8_t> stub;
++        auto put_u32 = [&](std::vector<uint8_t>& v, uint32_t x) {
++            for (int i = 0; i < 4; ++i) v.push_back((uint8_t) (x >> (8 * i)));
++        };
++        auto put_u64 = [&](std::vector<uint8_t>& v, uint64_t x) {
++            for (int i = 0; i < 8; ++i) v.push_back((uint8_t) (x >> (8 * i)));
++        };
++        auto put_stub = [&](std::vector<uint8_t>& v, const ConversationCheckpoint& c) {
++            put_u32(v, (uint32_t) c.ids.size());
++            for (int32_t t : c.ids) put_u32(v, (uint32_t) t);
++            put_u32(v, (uint32_t) c.imgs.size());
++            for (const auto& k : c.imgs) { put_u64(v, (uint64_t) k.start); put_u64(v, k.hash); }
++        };
++        put_stub(stub, image.live);
++        put_u32(stub, (uint32_t) image.checkpoints.size());
++        for (const auto& c : image.checkpoints) put_stub(stub, c);
++
++        const uint8_t magic[8] = {'S', 'T', 'R', 'S', 'C', 'A', 'R', '\x01'};
++        body.insert(body.end(), magic, magic + 8);   // offset 0
++        put_u32(body, 1);                            // offset 8:  format version
++        put_u32(body, 80);                           // offset 12: header size
++        put_u64(body, id.model);                     // offset 16
++        put_u64(body, id.config);                    // offset 24
++        put_u64(body, serial);                       // offset 32
++        put_u64(body, payload_bytes);                // offset 40: the payload's exact size (a scan refuses another)
++        put_u64(body, image.cvec ? 1 : 0);           // offset 48: flags, bit 0 = steering
++        body.insert(body.end(), 16, 0);              // offsets 56..72: reserved (a reader refuses non-zero)
++        const uint64_t hh = session_hash64(body.data(), 72, 0);
++        put_u64(body, hh);                           // offset 72: the header's own hash
++        body.insert(body.end(), stub.begin(), stub.end());
++        put_u64(body, session_hash64(stub.data(), stub.size(), 0));   // the stub's hash
++        const uint8_t end[8] = {'S', 'T', 'R', 'S', 'C', 'E', 'N', 'D'};
++        body.insert(body.end(), end, end + 8);
++    }
++
++    /// The reader of put_sidecar_body.  Every check runs before `e` is touched, so a refused file changes nothing.
++    static bool read_sidecar(const std::filesystem::path& path, const SessionFileIdentity& expected, Entry& e) {
++        std::error_code ec;
++        const uint64_t size = std::filesystem::file_size(path, ec);
++        if (ec || size < 80 + 8 + 8) return false;   // (a header, one stub hash, the end marker)
++        std::FILE* f = nullptr;
++#if defined(_WIN32)
++        if (_wfopen_s(&f, path.wstring().c_str(), L"rb") != 0 || f == nullptr) return false;
++#else
++        f = std::fopen(path.string().c_str(), "rb");
++        if (f == nullptr) return false;
++#endif
++        std::vector<uint8_t> body((size_t) size);
++        const size_t got = std::fread(body.data(), 1, body.size(), f);
++        std::fclose(f);
++        if (got != body.size()) return false;
++        const uint8_t magic[8] = {'S', 'T', 'R', 'S', 'C', 'A', 'R', '\x01'};
++        const uint8_t end[8] = {'S', 'T', 'R', 'S', 'C', 'E', 'N', 'D'};
++        if (std::memcmp(body.data(), magic, 8) != 0) return false;
++        auto u32_at = [&](size_t at) {
++            return (uint32_t) body[at] | ((uint32_t) body[at + 1] << 8) | ((uint32_t) body[at + 2] << 16) |
++                   ((uint32_t) body[at + 3] << 24);
++        };
++        auto u64_at = [&](size_t at) {
++            uint64_t x = 0;
++            for (int i = 7; i >= 0; --i) x = (x << 8) | body[at + (size_t) i];
++            return x;
++        };
++        if (u32_at(8) != 1 || u32_at(12) != 80) return false;
++        if (u64_at(16) != expected.model || u64_at(24) != expected.config) return false;
++        for (size_t at = 56; at < 72; at += 4)
++            if (u32_at(at) != 0) return false;   // reserved
++        uint64_t hh = 0;
++        std::memcpy(&hh, body.data() + 72, 8);
++        if (hh != session_hash64(body.data(), 72, 0)) return false;
++        if (std::memcmp(body.data() + body.size() - 8, end, 8) != 0) return false;
++        const size_t stub_at = 80, stub_end = body.size() - 16;
++        if (stub_end < stub_at || u64_at(body.size() - 16) != session_hash64(body.data() + stub_at, stub_end - stub_at, 0))
++            return false;
++        size_t at = stub_at;
++        auto get_u32 = [&](uint32_t& x) {
++            if (at + 4 > stub_end) return false;
++            x = u32_at(at);
++            at += 4;
++            return true;
++        };
++        auto get_u64 = [&](uint64_t& x) {
++            if (at + 8 > stub_end) return false;
++            x = u64_at(at);
++            at += 8;
++            return true;
++        };
++        auto get_stub = [&](ConversationCheckpoint& c) {
++            uint32_t n = 0;
++            if (!get_u32(n) || n > kMaxStubTokens) return false;
++            c.ids.resize(n);
++            for (uint32_t i = 0; i < n; ++i) {
++                uint32_t t = 0;
++                if (!get_u32(t)) return false;
++                c.ids[i] = (int32_t) t;
++            }
++            if (!get_u32(n) || n > kMaxStubImages) return false;
++            c.imgs.resize(n);
++            for (uint32_t i = 0; i < n; ++i) {
++                uint64_t start = 0, hash = 0;
++                if (!get_u64(start) || !get_u64(hash)) return false;
++                c.imgs[i] = ConversationImageKey{(int64_t) start, hash};
++            }
++            return true;
++        };
++        ConversationCheckpoint live;
++        if (!get_stub(live)) return false;
++        uint32_t ncks = 0;
++        if (!get_u32(ncks) || ncks > kMaxStubCheckpoints) return false;
++        Entry out;
++        out.serial = u64_at(32);
++        out.bytes = u64_at(40);
++        out.cvec = u64_at(48) != 0;
++        out.live = std::move(live);
++        out.checkpoints.reserve(ncks);
++        for (uint32_t i = 0; i < ncks; ++i) {
++            ConversationCheckpoint c;
++            if (!get_stub(c)) return false;
++            out.checkpoints.push_back(std::move(c));
++        }
++        if (at != stub_end) return false;
++        if (out.serial == 0 || out.bytes == 0) return false;
++        // `persist-<serial>-<nonce>.meta`: the payload keeps the same stem, so a sidecar alone never lists a file
++        out.file = path.parent_path() / std::filesystem::path(path.filename().string()).replace_extension(".session");
++        e = std::move(out);
++        return true;
++    }
++
++    void drop_locked(size_t i) {
++        std::error_code ec;
++        const Entry& e = entries_.at(i);
++        std::filesystem::remove(e.file, ec);
++        std::filesystem::remove(std::filesystem::path(e.file).replace_extension(".meta"), ec);
++        used_ -= std::min(used_, e.bytes);
++        entries_.erase(entries_.begin() + (std::ptrdiff_t) i);
++    }
++
++    static constexpr uint32_t kMaxStubTokens = 1u << 26;      // (a 67M-token stub is not a conversation)
++    static constexpr uint32_t kMaxStubImages = 1u << 20;
++    static constexpr uint32_t kMaxStubCheckpoints = 4096;
++
++    mutable std::mutex mu_;
++    std::filesystem::path dir_;
++    SessionFileIdentity id_{};
++    uint64_t cap_ = 0, used_ = 0, next_serial_ = 1;
++    std::vector<Entry> entries_;   // oldest serial first; the flush appends, the scan sorts
++};
++
++}  // namespace strata::core
+diff --git a/engine/src/program/generate.cpp b/engine/src/program/generate.cpp
+index 40aa44885..108ee6eeb 100644
+--- a/engine/src/program/generate.cpp
++++ b/engine/src/program/generate.cpp
+@@ -51,6 +51,7 @@
+ #include "strata/core/session_save_reclaim.hpp"
+ #include "strata/core/conversation_memory.hpp"
+ #include "strata/core/conversation_spill.hpp"
++#include "strata/core/conversation_persist.hpp"
+ #include "strata/core/park_pool_policy.hpp"
+ #include "strata/core/auto_cache.hpp"
+ #include "strata/core/ple_residency.hpp"
+@@ -498,6 +499,19 @@ bool park_async_env() {   // STRATA_PARK_ASYNC (strata/core/conversation_snapsho
+     static const bool on = [] { const char* v = std::getenv("STRATA_PARK_ASYNC"); return v != nullptr && v[0] == '1'; }();
+     return on;
+ }
++// STRATA_SHUTDOWN_CACHE_MIB=N (the shutdown persistent cache, conversation_persist.hpp): read once.  Unset or 0: off.
++// N: a NORMAL end of the serve loop writes the RAM cache's parked conversations to a persistent folder under the data
++// folder, and the next start reads a record back only when a prompt matches it (never on a crash: the write runs in
++// the orderly-exit code, so a killed engine keeps exactly what its last orderly exit left).
++int shutdown_cache_env_mib() {
++    static const int mib = [] {
++        const char* v = std::getenv("STRATA_SHUTDOWN_CACHE_MIB");
++        if (v == nullptr) return -1;
++        const long long n = std::atoll(v);
++        return n > 0 ? (int) std::min<long long>(n, 1 << 20) : -1;
++    }();
++    return mib;
++}
+ // STRATA_CKPT_POOL: unset = the engine's default (on in a single-stage serve with a conversation cache: park_pool_plan), 0 = off, any
+ // other value = on.  -1 unset, 0 off, 1 on (read once)
+ int ckpt_pool_env_state() {
+@@ -13603,6 +13617,54 @@ int main(int argc, char** argv) {
+             }
+             return n + spill.clear();
+         };
++        // The shutdown persistent cache (Patch B of the L2 split, conversation_persist.hpp): STRATA_SHUTDOWN_CACHE_MIB=N
++        // turns it on.  At a normal end of the serve loop the RAM cache's parked conversations go to a persistent
++        // folder under the data folder (STRATA_SHUTDOWN_CACHE_DIR sets one), and the next start indexes them from
++        // their sidecars and reads one back only when a prompt matches it.  The folder is bound to the model's
++        // SessionFileIdentity, like the spill tier's files; the identity is fingerprinted here, once, on the serve
++        // thread - the same one-time cost the SSD tier pays on its first write.  A single-stage serve only, like the
++        // spill tier: a layer split's stage images are not this tier's business.
++        strata::core::ShutdownPersist persist;
++        bool persist_on = stages.empty() && shutdown_cache_env_mib() > 0;
++        std::optional<strata::core::SessionFileIdentity> persist_id;
++        auto persist_open = [&]() -> bool {
++            if (persist.enabled()) return true;
++            if (!persist_on) return false;
++            std::filesystem::path root;
++            const char* dir = std::getenv("STRATA_SHUTDOWN_CACHE_DIR");
++            if (dir != nullptr && dir[0] != '\0') {
++                root = dir;
++            } else if (!o.pack.empty()) {
++                std::filesystem::path p = std::filesystem::path(o.pack).lexically_normal();
++                if (p.filename().empty()) p = p.parent_path();   // (a trailing separator)
++                if (p.parent_path().filename() == "packs") root = p.parent_path().parent_path();
++            }
++            if (root.empty()) {
++                std::fprintf(stderr, "strata serve: conversation cache: shutdown persistent cache off: no data folder "
++                                     "(--pack is not under <data>/packs; STRATA_SHUTDOWN_CACHE_DIR sets one)\n");
++                persist_on = false;
++                return false;
++            }
++            std::string e;
++            strata::core::SessionFileIdentity id;
++            if (!session_identity(id, e, {})) {
++                std::fprintf(stderr, "strata serve: conversation cache: shutdown persistent cache off: the model cannot be "
++                                     "fingerprinted (%s)\n", e.c_str());
++                persist_on = false;
++                return false;
++            }
++            persist_id = id;
++            const uint64_t cap = (uint64_t) shutdown_cache_env_mib() << 20;
++            if (!persist.open(root, id, cap, e)) {
++                std::fprintf(stderr, "strata serve: conversation cache: shutdown persistent cache off: %s\n", e.c_str());
++                persist_on = false;
++                return false;
++            }
++            std::fprintf(stderr, "strata serve: conversation cache: shutdown persistent cache in %s, up to %d MiB, "
++                                 "%zu records of earlier runs\n", persist.dir().string().c_str(),
++                         shutdown_cache_env_mib(), persist.size());
++            return true;
++        };
+         // What a park captures: the main session's conversation (park_current) or an idle batch slot's (park_slot:
+         // the reply it decoded, before an admission overwrites it).  One budget / admission / snapshot path for both.
+         struct ParkSource {
+@@ -18760,6 +18822,54 @@ int main(int argc, char** argv) {
+                     }
+                 }
+             }
++            // The shutdown persistent cache (Patch B): a conversation the last run parked at its NORMAL end gives
++            // this prompt a longer start than the session, a batch slot and every RAM entry, and the runtime SSD
++            // tier did not win this request.  The record is read whole under the RESTORE's limits and stays
++            // persisted: a restore consumes nothing, so the record answers the next restart too.  One that does not
++            // read back is dropped and the prompt is read again - exactly the miss the tier promises.
++            if (!from_ssd && stages.empty() && persist_on && persist_open() && persist.size() > 0) {
++                const auto pm = persist.best(ids, req_imgs, want_cvec);
++                if (pm.tokens > std::max({resume, slot_tokens, parked.tokens}) && persist_id) {
++                    const auto t0 = Clock::now();
++                    const auto record = persist.find(pm.serial);
++                    strata::core::SavedConversation image;
++                    std::string why;
++                    try {
++                        strata::core::SessionReadLimits limits;
++                        const uint64_t floor = (uint64_t) o.conversation_cache_min_free_mib << 20;
++                        pools_budget.shrink((size_t) -1);
++                        limits.admit = [floor, &o](uint64_t need, std::string& w) {
++                            const auto mem = strata::core::sample_host_memory();
++                            if (strata::core::conversation_memory_admit(mem ? std::optional<uint64_t>(mem->available) : std::nullopt,
++                                                                        need, floor)) return true;
++                            w = "not enough RAM to read it (" + std::to_string(need >> 20) + " MiB plus a floor of " +
++                                std::to_string((long long) o.conversation_cache_min_free_mib) + " MiB needed, " + ram_note(mem) + ")";
++                            return false;
++                        };
++                        if (strata::core::conversation_session_read_limits(
++                                limits, ss, g, use_mtp ? &mtp.kv_state() : nullptr,
++                                (uint64_t) o.max_context, (uint64_t) std::max(o.prompt_cache, 1), why) &&
++                            persist.read_serial(pm.serial, limits, image, why)) {
++                            std::fprintf(stderr, "strata serve: conversation cache: read %zu tokens back from the shutdown "
++                                                 "persistent cache in %.1f ms (this prompt starts with %lld of them); "
++                                                 "persisted %zu, %llu MiB\n", record ? record->live.ids.size() : 0,
++                                         std::chrono::duration<double, std::milli>(Clock::now() - t0).count(),
++                                         (long long) pm.tokens, persist.size(), (unsigned long long) (persist.bytes() >> 20));
++                            incoming.emplace(std::move(image));
++                            taken = pm;       // (the restore below resumes at the record's prefix, not the RAM tier's)
++                            from_ssd = true;  // (not the RAM tier's either: no borrowing, no take from it)
++                        } else {
++                            std::fprintf(stderr, "strata serve: conversation cache: could not read %zu tokens back from the "
++                                                 "shutdown persistent cache (%s); the prompt is read again\n",
++                                         record ? record->live.ids.size() : 0, why.c_str());
++                        }
++                    } catch (const std::bad_alloc&) {
++                        std::fprintf(stderr, "strata serve: conversation cache: not enough RAM to read the shutdown "
++                                             "persistent cache's record; the prompt is read again\n");
++                        persist.drop_serial(pm.serial);   // (the record cannot be read here either)
++                    }
++                }
++            }
+             bool borrow = !from_ssd && stages.empty() && parked.tokens > std::max(resume, slot_tokens) &&
+                           conversations.borrows(parked);
+             if (!from_ssd && parked.tokens > std::max(resume, slot_tokens) && !borrow)
+@@ -23011,6 +23121,26 @@ int main(int argc, char** argv) {
+                 helper_bytes_before = bytes;
+             }
+         }
++        // The shutdown persistent cache's flush (Patch B, conversation_persist.hpp): a NORMAL end of the serve loop
++        // (the server closed stdin, or QUIT) - the request loop is over, the RAM tier still holds its parked
++        // conversations and nothing is in flight.  While the feature is on they go to the persistent folder now,
++        // oldest first so the conversations the client used last win the budget; the next start indexes them from
++        // their sidecars and reads one back only when a prompt matches it.  A crash skips this code, which is the
++        // boundary the tier promises: it never claims to save the conversations of a process that did not end
++        // orderly, and a record of an earlier run stays exactly as it was.
++        if (persist_on && stages.empty() && conversations.size() > 0) {
++            persist_open();
++            std::vector<const strata::core::SavedConversation*> parked;
++            parked.reserve(conversations.size());
++            for (size_t i = 0; i < conversations.size(); ++i)
++                if (const strata::core::SavedConversation* image = conversations.entry_at(i)) parked.push_back(image);
++            const size_t wrote = persist.save_all(parked);
++            if (persist.enabled())
++                std::fprintf(stderr, "strata serve: conversation cache: shutdown: persisted %zu of %zu parked conversations "
++                                     "for the next start (%zu records, %llu MiB in %s)\n", wrote, parked.size(),
++                             persist.size(), (unsigned long long) (persist.bytes() >> 20),
++                             persist.dir().string().c_str());
++        }
+         save_profile("exit");   // #477: QUIT, or the server closed stdin
+ #if defined(STRATA_USE_HIP) && defined(__linux__)
+         kfdq_exit::g_stop.store(nullptr);   // the flag goes with this scope

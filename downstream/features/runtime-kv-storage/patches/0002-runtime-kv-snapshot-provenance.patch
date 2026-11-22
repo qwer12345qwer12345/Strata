@@ -1,0 +1,174 @@
+diff --git a/engine/cmake/strata_gpu_engine.cmake b/engine/cmake/strata_gpu_engine.cmake
+index 6d6d90723..fa5457c47 100644
+--- a/engine/cmake/strata_gpu_engine.cmake
++++ b/engine/cmake/strata_gpu_engine.cmake
+@@ -429,6 +429,16 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+     target_link_libraries(conversation_snapshot_test PRIVATE strata_engine)
+     add_test(NAME conversation_snapshot_test COMMAND conversation_snapshot_test)
+     set_tests_properties(conversation_snapshot_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
++    # Runtime KV Storage (Patch 2 of the downstream L2 split): the provenance adapter's acceptance gate - a restored
++    # image's keep lengths drive a Base -> Delta -> materialize round trip that is byte for byte the full capture,
++    # through the Snapshot's own validate and restore.  The test source rides the feature package's overlay, so a
++    # prepared tree without it configures without the target; it skips (77) without a CUDA device.
++    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/core/conversation_delta_roundtrip_test.cpp")
++      add_executable(conversation_delta_roundtrip_test tests/core/conversation_delta_roundtrip_test.cpp)
++      target_link_libraries(conversation_delta_roundtrip_test PRIVATE strata_engine)
++      add_test(NAME conversation_delta_roundtrip_test COMMAND conversation_delta_roundtrip_test)
++      set_tests_properties(conversation_delta_roundtrip_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
++    endif()
+     # the same test with a GDN state over 1 MiB and the opt-in background checkpoint copy (STRATA_CKPT_ASYNC=1), alone and with
+     # recent states kept in VRAM (STRATA_CKPT_VRAM_SLOTS): every checkpoint, capture and restore must give the same bytes
+     add_test(NAME conversation_snapshot_test_ckpt_async COMMAND conversation_snapshot_test)
+diff --git a/engine/include/strata/core/conversation_delta_keep.hpp b/engine/include/strata/core/conversation_delta_keep.hpp
+new file mode 100644
+index 000000000..f8bf48426
+--- /dev/null
++++ b/engine/include/strata/core/conversation_delta_keep.hpp
+@@ -0,0 +1,147 @@
++#pragma once
++// include/strata/core/conversation_delta_keep.hpp - the Delta provenance adapter (Patch 2 of the Runtime KV Storage
++// plan, downstream/patch-plans/runtime-kv-storage): what one park may reuse of the K/V an image lent it, as keep
++// lengths the Delta file format (session_delta_write / session_delta_apply, conversation_file.hpp) stores.
++//
++// The retained K/V (`ConversationKvReuse`) is storage an image actually restored into this session; the official
++// reuse contract bounds `unchanged_tokens` by every rewrite since, and the capture keeps only complete unchanged
++// pages or indexer rows.  Below that boundary the restored session's cells are the image's bytes verbatim, and the
++// identity layout packs cells first (conversation_kv_restore_prefix), so the image can lend exactly:
++//   - K, V and their scales: its leading bytes for the complete pages below `unchanged_tokens`;
++//   - the pooled indexer state: its complete rows below `unchanged_tokens` (its moving spare row never: it is
++//     in-flight, and the checkpoint/rewind machinery reconstructs it).
++// Everything past the boundary comes from the new state itself, so the materialized layer is the new state's own
++// bytes byte for byte - the round trip the plan's acceptance gate asks for.
++//
++// Every unit count and byte length here comes from the layers' own recorded metadata and buffer sizes (the same
++// values a session file stores) and from the caller's `idx_block` (kernels' qsa_real_shapes, the official indexer
++// block).  Nothing derives bytes from token counts: a part whose size does not divide into its recorded units, a
++// layout that changed, a rewind or truncation (the new extent below the captured one), a missing provenance, or a
++// boundary that yields no complete unit is a refusal - and a refusal means "write a new Base", never a guess.
++//
++// Header-only and host-only: no CUDA calls, no state reads.  The park path (Patch 3) feeds it the official
++// `conversation_kv_source` streams and the reuse it already holds.
++
++#include "strata/core/conversation_cache.hpp"
++#include "strata/core/conversation_file.hpp"
++
++#include <array>
++#include <cstdint>
++#include <memory>
++#include <string>
++#include <utility>
++#include <vector>
++
++namespace strata::core {
++
++/// Where a restored conversation's K/V came from: the spill chain that lent it and the generation it carries.
++/// A chain of 0 is no lineage: the next park writes a new Base.  (Patch 3 attaches real chain IDs; the plan and
++/// the adapter carry the field from here on.)
++struct SessionDeltaLineage {
++    uint64_t chain = 0;
++    uint64_t generation = 0;
++};
++
++/// One plan's outcome: the keep table (one five-part row per K/V layer, in the layers' order) and whether a Delta
++/// may be written at all.  `ok == false` means every length is unusable: the caller writes a new Base, and `why`
++/// says what was missing (for the park's log).
++struct SessionDeltaKeepPlan {
++    SessionDeltaKeep keep;   ///< per layer: the parent's lendable leading bytes (0: that part is a full replacement)
++    bool ok = false;         ///< false: write a new Base
++    std::string why;         ///< the refusal's reason; empty when ok
++};
++
++/// The new state's official source narrowed to what one Delta stores: the tail bytes only.  The Delta writer
++/// streams every part from offset 0 (Out::source, conversation_file.cpp), so a part whose keep length is `keep`
++/// is written as a source of `size - keep` bytes whose offset `t` is the full part's offset `keep + t`; a keep of
++/// 0 (a full replacement, or a parent with nothing to lend) leaves the source exactly as it was.
++inline SessionKvSource session_delta_tail_source(const SessionKvSource& full, const std::array<uint64_t, 5>& keep) {
++    SessionKvSource tail = full;
++    auto state = std::make_shared<std::pair<SessionKvSource, std::array<uint64_t, 5>>>(full, keep);
++    for (size_t part = 0; part < 5; ++part) {
++        if (keep[part] > state->first.sizes[part]) return SessionKvSource{};   // (the plan's own check said no)
++        tail.sizes[part] = state->first.sizes[part] - keep[part];
++    }
++    tail.read = [state](size_t part, size_t offset, void* dst, size_t n) {
++        if (part >= 5) return false;
++        const uint64_t keep = state->second[part];
++        const uint64_t tail_bytes = state->first.sizes[part] - keep;
++        if (offset > tail_bytes || n > tail_bytes - offset) return false;
++        return state->first.read && state->first.read(part, (size_t) keep + offset, dst, n);
++    };
++    return tail;
++}
++
++/// The keep plan for parking `reuse`'s conversation again, against the new state's official `sources` (one per K/V
++/// layer, main layers then the draft - the order conversation_snapshot_sources and the reuse's layers share).
++/// `idx_block` is the indexer's row block (qsa_real_shapes().idx_block).  Never throws; a refusal is an answer.
++inline SessionDeltaKeepPlan conversation_delta_keep_plan(const ConversationKvReuse& reuse,
++                                                         const std::vector<SessionKvSource>& sources,
++                                                         uint64_t idx_block) {
++    SessionDeltaKeepPlan plan;
++    const auto refuse = [&plan](const char* why) {
++        plan.keep.clear();
++        plan.ok = false;
++        plan.why = why;
++        return plan;
++    };
++    if (reuse.stages.size() != 0)
++        return refuse("a layer split's stage K/V is not a Delta's parent");
++    if (reuse.kv.size() != sources.size())
++        return refuse("the retained K/V and the new state's layer counts differ");
++    if (reuse.captured_tokens <= 0)
++        return refuse("the retained K/V records no captured extent");
++    if (reuse.unchanged_tokens < 0 || reuse.unchanged_tokens > reuse.captured_tokens)
++        return refuse("the unchanged prefix is not within the captured extent");
++    if (idx_block == 0)
++        return refuse("the indexer block is unknown");
++
++    plan.keep.resize(sources.size());
++    bool any = false;
++    for (size_t i = 0; i < sources.size(); ++i) {
++        const ConversationKv& parent = reuse.kv[i];
++        const SessionKvSource& next = sources[i];
++        // the layout must be the same one the Delta file format refuses to cross (session_delta_apply's own
++        // check), the new extent must hold the captured one (a rewind or truncation is a new Base), and every
++        // part must divide exactly into the units its metadata records
++        if (parent.format != next.format || parent.heads != next.heads || parent.head_dim != next.head_dim ||
++            parent.page_size != next.page_size || parent.idx_dim != next.idx_dim)
++            return refuse("the K/V layout changed; a new Base is required");
++        if (next.cells < parent.cells || parent.cells <= 0 || parent.page_size <= 0)
++            return refuse("the new extent is below the captured one, or the recorded units are invalid");
++        const std::array<const ConversationBuffer*, 5> parts = {&parent.k, &parent.v, &parent.k_scale,
++                                                                &parent.v_scale, &parent.pooled};
++        for (size_t part = 0; part < 5; ++part) {
++            const uint64_t bytes = (uint64_t) parts[part]->size();
++            // the pooled part of a layer without an indexer (the draft's attention has none) is empty on both
++            // sides: it lends nothing and needs no units
++            const uint64_t units = part < 4 ? (uint64_t) parent.cells
++                                            : (uint64_t) parent.pooled_rows;   // (0: no indexer rows at all)
++            if (units == 0) {
++                if (bytes != 0) return refuse("a K/V part's bytes do not divide into its recorded units");
++                plan.keep[i][part] = 0;
++                continue;
++            }
++            const uint64_t complete = part < 4
++                ? ((uint64_t) reuse.unchanged_tokens / (uint64_t) parent.page_size) * (uint64_t) parent.page_size
++                : (uint64_t) reuse.unchanged_tokens / idx_block;
++            if (bytes % units != 0 || complete > units)
++                return refuse("a K/V part's bytes do not divide into its recorded units");
++            const uint64_t keep = complete * (bytes / units);
++            if (keep > (uint64_t) next.sizes[part])
++                return refuse("a keep length exceeds the new state's part");
++            plan.keep[i][part] = keep;
++            any = any || keep > 0;
++        }
++    }
++    if (!any) {
++        plan.keep.clear();
++        plan.ok = false;
++        plan.why = "no complete unchanged page or row is retained; a new Base carries the state";
++        return plan;
++    }
++    plan.ok = true;
++    return plan;
++}
++
++}  // namespace strata::core

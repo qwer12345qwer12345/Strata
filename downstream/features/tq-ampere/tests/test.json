@@ -1,0 +1,16 @@
+{
+  "cmake_args": [
+    "-DSTRATA_BUILD_TESTS=ON",
+    "-DSTRATA_NATIVE_EXPERTS=ON",
+    "-DSTRATA_ENABLE_CUDA=ON"
+  ],
+  "targets": [
+    "tq_pascal_bench"
+  ],
+  "optional_targets": {},
+  "ctest_regex": "^(tq_pascal_bench|tq_pascal_bench_ampere_pair)$",
+  "optional_ctest_regex": {},
+  "overlays": [],
+  "python_tests": [],
+  "settings_generation": false
+}

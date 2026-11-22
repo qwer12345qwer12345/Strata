@@ -1,0 +1,21 @@
+{
+  "id": "shutdown-persistent-cache",
+  "name": "Shutdown Persistent Cache \u2014 park RAM conversations across a normal restart",
+  "version": "0.1.0",
+  "status": "active",
+  "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
+  "patched_tree": "8475f156e3b26f2b11234088c8f02704e18134c5",
+  "requires": [],
+  "patches": [
+    {
+      "id": "shutdown-persistent-cache",
+      "path": "patches/0001-shutdown-persistent-cache.patch",
+      "sha256": "9ba57a524507acf5103c5684fa249a0fe6697a9edc204c1b0c90aa6e10c635aa"
+    }
+  ],
+  "tests": "tests/test.json",
+  "environment": {
+    "STRATA_SHUTDOWN_CACHE_MIB": "<N MiB, unset or 0: off>",
+    "STRATA_SHUTDOWN_CACHE_DIR": "<optional persist root>"
+  }
+}

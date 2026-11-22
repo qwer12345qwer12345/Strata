@@ -1,0 +1,36 @@
+{
+  "cmake_args": [
+    "-DSTRATA_BUILD_CONVERSATION_TESTS=ON",
+    "-DSTRATA_BUILD_TESTS=ON",
+    "-DSTRATA_NATIVE_EXPERTS=ON"
+  ],
+  "targets": [
+    "live_memory_policy_test",
+    "live_ram_blocks_test"
+  ],
+  "optional_targets": {
+    "cuda": [
+      "expert_cache_segmented_test"
+    ]
+  },
+  "ctest_regex": "^(live_memory_policy_test|live_ram_blocks_test)$",
+  "optional_ctest_regex": {
+    "cuda": "^expert_cache_segmented_test$"
+  },
+  "overlays": [
+    "overlay/engine/tests/core/live_memory_policy_test.cpp",
+    "overlay/engine/tests/core/live_ram_blocks_test.cpp",
+    "overlay/engine/tests/core/expert_cache_segmented_test.cpp",
+    "overlay/tools/test_settings_register.py",
+    "overlay/terminal/serve/test_live_memory_policy.py",
+    "overlay/terminal/serve/test_live_memory_protocol.py"
+  ],
+  "python_tests": [
+    "tools/test_settings_register.py"
+  ],
+  "settings_generation": true,
+  "python_modules": [
+    "serve.test_live_memory_policy",
+    "serve.test_live_memory_protocol"
+  ]
+}

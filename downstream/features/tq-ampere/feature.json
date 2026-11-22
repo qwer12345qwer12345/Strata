@@ -1,0 +1,20 @@
+{
+  "id": "tq-ampere",
+  "name": "TQ Ampere paired Gate/Up Kernel",
+  "version": "0.1.0",
+  "status": "active",
+  "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
+  "patched_tree": "aac1f0c73f9fa22f686dbb6ca5cabae1140c3c3f",
+  "requires": [],
+  "patches": [
+    {
+      "id": "tq-ampere-paired-kernel",
+      "path": "patches/0001-tq-ampere-paired-kernel.patch",
+      "sha256": "15109ff87b7045cf63410c2865a50911acb74b441730195bdccb8edc4862969f"
+    }
+  ],
+  "tests": "tests/test.json",
+  "environment": {
+    "STRATA_TQ_AMPERE_ROWS": "2"
+  }
+}
