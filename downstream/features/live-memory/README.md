@@ -6,7 +6,7 @@ This package migrates the first Live Memory capacity-owner step:
 
 - request grammar and capacity-policy helpers in `live_memory.hpp`;
 - an opt-in initial committed prefix for the ExpertCache CUDA VMM arena;
-- transactional VMM grow/shrink with rollback, exact mapped-byte reporting and a guard against unmapping resident tail slots;
+- transactional VMM grow/shrink with rollback, exact mapped-byte reporting, resident-tail protection and live-slot bounds on admission and device pointers;
 - the `STRATA_LIVE_MEMORY_INITIAL_MIB` environment entry point;
 - Settings scanner support for `std::from_chars`;
 - CPU policy and CUDA segmented-cache regression tests.

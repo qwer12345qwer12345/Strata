@@ -1,10 +1,10 @@
 {
   "id": "live-memory",
   "name": "Live Memory VMM and transactional resize",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "status": "active",
   "base_commit": "6e38f588a646c0ee6948a74afbe670eb75896106",
-  "patched_tree": "44ab1fd4e7a9e26a8fe5b257e6da6b155155ead1",
+  "patched_tree": "b6811ad43b99490d52461896be76e432fe24e667",
   "requires": [],
   "patches": [
     {
@@ -16,6 +16,11 @@
       "id": "live-memory-transactional-resize",
       "path": "patches/0002-live-memory-transactional-resize.patch",
       "sha256": "586e0f3fada95b41988c5350422f7885c8359589ae4c402be5901f11b85f1688"
+    },
+    {
+      "id": "live-memory-live-slot-guards",
+      "path": "patches/0003-live-memory-live-slot-guards.patch",
+      "sha256": "cbd16136d63680e9673b8c631dc42ee344dc44123aec3e1b8d7f44b81c157599"
     }
   ],
   "tests": "tests/test.json",

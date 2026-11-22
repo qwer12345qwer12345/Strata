@@ -1,6 +1,6 @@
 # Live Memory implementation plan
 
-Status: the request grammar and CPU-only policy tests are in place. ExpertCache supports an opt-in partially committed VMM prefix at startup and now has `resize_transactional()` with rollback on partial VMM failures, a resident-tail guard, and CUDA fault-injection coverage. Engine MEMORY/ACK/CAPACITY handling, independently releasable RAM blocks, and Server policy are still not implemented. This branch is opt-in and does not change the default allocator.
+Status: the request grammar and CPU-only policy tests are in place. ExpertCache supports an opt-in partially committed VMM prefix at startup, `resize_transactional()` with rollback on partial VMM failures, resident-tail protection, and live-slot bounds so admission and device pointers cannot escape the mapped prefix. CUDA fault-injection coverage is included. Engine MEMORY/ACK/CAPACITY handling, independently releasable RAM blocks, and Server policy are still not implemented. This branch is opt-in and does not change the default allocator.
 
 Baseline: `Niko1221/Strata/main` at `6e38f588a646c0ee6948a74afbe670eb75896106` (0.2.18 / Engine 0.1.64). This implementation is being built against the current Engine interfaces, not by merging the older reference branch.
 

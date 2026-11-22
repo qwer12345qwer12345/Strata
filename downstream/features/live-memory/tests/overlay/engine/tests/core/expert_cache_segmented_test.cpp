@@ -175,6 +175,14 @@ int main() {
         if (c.device_slot(0) != first || !check(c, 32, kBlob))
             return fail("transactional: prefix after shrink rollback");
 
+        if (!c.resize_transactional(30ll << 20, err) || c.slots() != 32 ||
+            c.mapped_bytes() != (32ll << 20))
+            return fail("transactional: successful shrink", err);
+        if (c.device_slot(32) != nullptr || c.admit(3, 8) != strata::core::ExpertCache::kNotResident)
+            return fail("transactional: access beyond live prefix");
+
+        if (!c.grow(1ll << 40, err) || c.slots() != kSlots)
+            return fail("transactional: regrow after shrink", err);
         if (c.admit(3, 8) != 32) return fail("transactional: tail residency");
         if (c.resize_transactional(30ll << 20, err) || c.mapped_bytes() != kSlots * kBlob)
             return fail("transactional: resident tail was unmapped", err);
