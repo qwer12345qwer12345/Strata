@@ -10,7 +10,7 @@
 
 ### `ampere-gyro-latency`
 
-保留。该分支包含独立的 Ampere benchmark 工具和测量数据（kernel latency、chat latency、profile、历史结果），并包含旧 L2 archive/V2/V3 相关实现、控制器、测试和设计文档。这些内容不是当前五个功能包的完整迁移范围，尤其旧 L2 增量归档和基准数据不能因 PR #2 的 Persistent Conversation Spill 包而视为已迁移。
+保留。该分支包含独立的 Ampere benchmark 工具和测量数据（kernel latency、chat latency、profile、历史结果），并包含旧 L2 archive/V2/V3 相关实现、控制器、测试和设计文档。这些内容不是当前活动功能包的迁移范围；尤其旧 L2 增量归档和基准数据仍应作为参考，不代表当前下游已有可用的 L2 实现。
 
 ## 已迁移，可列为清理候选
 
@@ -40,7 +40,6 @@ L2 工作已重新拆分：旧的 features/l2-session 功能包已从活动功�
 git push origin --delete \
   backup/pre-upstream-sync-main \
   feature/ampere-gyro-reimplementation \
-  feature/l2-session-v3-reimplementation \
   feature/live-memory-reimplementation
 ```
 
