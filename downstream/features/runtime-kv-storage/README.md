@@ -16,8 +16,8 @@ This package implements Patch A from the runtime KV storage plan. It starts from
 
 ## API
 
-- session_delta_write(): writes one immutable Delta for generation = parent_generation + 1.
-- session_delta_apply(): applies one exact child generation to an already-read Base image.
+- `session_delta_write()`: writes one immutable Delta for generation = parent_generation + 1.
+- `session_delta_apply()`: applies one exact child generation to an already-read Base image.
 
 The caller supplies per-part keep byte lengths. They are not derived from token counts in this patch. The future Snapshot provenance adapter must obtain exact boundaries from the official Snapshot part-size/layout API. A layout/format change or uncertain lineage starts a new Base.
 
@@ -36,4 +36,4 @@ The test target is enabled only when the test overlay is present, so ordinary bu
 
 See tests/README.md and validation/README.md.
 
-Design and staged implementation plan: ../../patch-plans/runtime-kv-storage/DESIGN.md
+Design and staged implementation plan: [DESIGN.md](../../patch-plans/runtime-kv-storage/DESIGN.md)

@@ -1,6 +1,6 @@
 # Patch A — Runtime KV Storage
 
-状态：**Patch 1 代码已写入活动 Feature Package；编译和测试验证待执行。运行时接入尚未开始。**本计划对应独立的 Runtime KV Storage 功能包；它不会并入 Patch B，也不修改跨重启缓存。
+状态：**Patch 1 代码已写入活动 Feature Package；编译和测试验证待执行。运行时接入尚未开始。** 本计划对应独立的 Runtime KV Storage 功能包；它不会并入 Patch B，也不修改跨重启缓存。
 
 ## 已确定的设计
 

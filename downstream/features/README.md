@@ -17,4 +17,8 @@ Test overlays are copied into a disposable prepared worktree only while tests ru
 
 | Feature ID | Current scope | State |
 |---|---|---|
-| `runtime-kv-storage` | Session Delta Core; runtime spill integration is still pending | Active in stack |
+| `tq-cpu` | AVX-VNNI CPU quantization kernels | Active |
+| `tq-ampere` | Ampere paired quantization kernels | Active |
+| `qsa-imma` | SM86 QSA IMMA attention kernels | Active |
+| `live-memory` | ExpertCache VMM-backed allocation | Active |
+| `runtime-kv-storage` | Session Delta Core; runtime spill integration is pending | Active in stack; validation pending |

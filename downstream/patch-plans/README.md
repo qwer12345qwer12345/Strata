@@ -9,6 +9,6 @@
 
 两者分别开发、分别启用。Patch A 不负责跨重启持久化；Patch B 不改造运行时 Spill，也不依赖 Patch A。
 
-## 进入活动功能栈的条件
+## 活动栈与验证状态
 
-计划目录中的占位 .patch 不参与 stack.json。实现进入活动栈时，必须建立正常 Feature Package，补齐真实生产 patch、测试、验证记录、patch SHA256 和独立/完整 stack tree 指纹。只有真实 unified diff 通过 downstream/scripts/verify.py 后，才加入 stack.json。
+Patch A 的 Session Delta Core 已加入 stack.json，独立/完整 stack tree 指纹和 patch SHA256 已记录；但本地 downstream/scripts/verify.py、编译和 CTest 尚未执行，因此当前是已登记、待验证状态，不代表已通过验收。后续 Snapshot provenance、ConversationSpill chain 和 compaction 仍按独立 patch 提交，并在加入活动栈前完成 patch 应用验证。计划目录中的占位 .patch 不参与 stack.json。
