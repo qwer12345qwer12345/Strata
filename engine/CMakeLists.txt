@@ -662,6 +662,14 @@ if(STRATA_NATIVE_EXPERTS)
   endif()
   add_test(NAME nvfp4_cpu_parity COMMAND nvfp4_avx512_parity)   # random blocks; the AVX2 rows bit-equal to ggml's
   set_tests_properties(nvfp4_cpu_parity PROPERTIES TIMEOUT 120)
+  # TQK6/TQK7 and TQ2_T CPU rows: run the same parity suite with the opt-in VEX AVX-VNNI path enabled.
+  # On CPUs without AVX-VNNI the dispatcher safely retains the AVX2 implementation.
+  add_executable(tq_cpu_parity src/kernels/cpu/tq_cpu_parity.cpp)
+  target_link_libraries(tq_cpu_parity PRIVATE strata_kernels_cpu)
+  add_test(NAME tq_cpu_parity COMMAND tq_cpu_parity)
+  add_test(NAME tq_cpu_parity_avxvnni COMMAND tq_cpu_parity)
+  set_tests_properties(tq_cpu_parity tq_cpu_parity_avxvnni PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+  set_tests_properties(tq_cpu_parity_avxvnni PROPERTIES ENVIRONMENT "STRATA_TQ_AVXVNNI=1")
   if(STRATA_ENABLE_CUDA)   # the NVFP4 decode kernels vs ggml's reference
     add_executable(nvfp4_expert_gpu_parity src/kernels/nvfp4_expert_gpu_parity.cpp)
     target_link_libraries(nvfp4_expert_gpu_parity PRIVATE strata_kernels ggml-base CUDA::cudart)
@@ -757,6 +765,15 @@ if(STRATA_NATIVE_EXPERTS)
           add_test(NAME native_expert_parity_hadamard_${_name} COMMAND native_expert_parity --synthetic-hadamard ${_pair})
           set_tests_properties(native_expert_parity_${_name} native_expert_parity_hadamard_${_name} PROPERTIES TIMEOUT 300)
         endforeach()
+        # Exercise the paired gate/up TQ path when the active CUDA device is SM86 (RTX 30).
+        # Other devices use the unchanged native path, so the test remains portable.
+        add_test(NAME native_expert_parity_tqk6_tqk7_ampere_pair
+                 COMMAND native_expert_parity --synthetic tqk6/tqk7)
+        add_test(NAME native_expert_parity_tq2_t_ampere_pair
+                 COMMAND native_expert_parity --synthetic tq2_t/tq2_t)
+        set_tests_properties(native_expert_parity_tqk6_tqk7_ampere_pair
+                             native_expert_parity_tq2_t_ampere_pair
+                             PROPERTIES TIMEOUT 300 ENVIRONMENT "STRATA_TQ_AMPERE_ROWS=2")
       endif()
       # #290: the BF16 token embedding (--embd-gguf) gathered and dequantized bit for bit
       add_test(NAME native_expert_parity_bf16_embd COMMAND native_expert_parity --bf16-embd)
