@@ -73,11 +73,54 @@ static void gpu_budget_respects_reserve_and_quantum() {
            == 4096 * mib);
 }
 
+// ---- PR4 Phase 3: the terminal ACK, the CAPACITY report, the one pending request slot ----
+
+static void ack_line_reports_actual_capacity() {
+    using strata::core::LiveMemoryAck;
+    assert(strata::core::live_memory_ack_line(7, LiveMemoryAck::Ok, 4096, 3584, 1536, "")
+           == "ACK 7 OK ram_resident_mib=4096 vram_committed_mib=3584 vram_reserve_mib=1536");
+    assert(strata::core::live_memory_ack_line(9, LiveMemoryAck::Partial, 2048, 3584, 1536, "the_RAM_release_stopped_early")
+           == "ACK 9 PARTIAL ram_resident_mib=2048 vram_committed_mib=3584 vram_reserve_mib=1536 "
+              "note=the_RAM_release_stopped_early");
+    assert(strata::core::live_memory_ack_line(3, LiveMemoryAck::Refused, 0, 4096, 1024, "")
+           == "ACK 3 REFUSED ram_resident_mib=0 vram_committed_mib=4096 vram_reserve_mib=1024");
+}
+
+static void capacity_line_shape() {
+    assert(strata::core::live_memory_capacity_line(1024, 8192, 3584, 6144, 1536)
+           == "CAPACITY ram_resident_mib=1024 ram_available_mib=8192 vram_committed_mib=3584 "
+              "vram_free_mib=6144 vram_reserve_mib=1536");
+}
+
+static void pending_waits_supersedes_and_refuses() {
+    strata::core::LiveMemoryPending pending;
+    assert(!pending.active());
+    strata::core::LiveMemoryRequest taken;
+    assert(!pending.take(taken));
+
+    std::string why;
+    assert(pending.push({1, 8192, 1024}, 8192ull << 20, why) && why.empty());
+    assert(pending.active() && pending.request.id == 1);
+
+    // a newer request that releases capacity in both tiers replaces the waiting one
+    assert(pending.push({2, 4096, 1536}, 8192ull << 20, why) && why.empty() && pending.request.id == 2);
+    // one that grows either tier is refused at once (the sender learns now, not after the effects)
+    assert(!pending.push({3, 12288, 1536}, 8192ull << 20, why) && !why.empty());
+    assert(!pending.push({3, 4096, 512}, 8192ull << 20, why) && !why.empty());
+    assert(pending.request.id == 2);   // the waiting request is unchanged by a refusal
+
+    assert(pending.take(taken) && taken.id == 2 && taken.resident_mib == 4096 && taken.vram_reserve_mib == 1536);
+    assert(!pending.active() && !pending.take(taken));
+}
+
 int main() {
     parse_requests();
     superseding_only_releases();
     ram_completion_is_latched();
     growth_is_not_a_side_effect_of_pressure_relief();
     gpu_budget_respects_reserve_and_quantum();
+    ack_line_reports_actual_capacity();
+    capacity_line_shape();
+    pending_waits_supersedes_and_refuses();
     return 0;
 }
