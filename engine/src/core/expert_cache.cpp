@@ -658,7 +658,11 @@ bool ExpertCache::open(int64_t n_slots, int64_t n_layers, int64_t n_expert, int6
     }
 
 #if !defined(STRATA_EC_NO_VMM)
-    if (seg_req_ > 0 && !segmented_supported()) {   // a driver without them: one block, the engine starts all the same
+    if (seg_req_ > 0 && !segmented_supported()) {
+        if (initial_seg_req_ > 0) {
+            err = "ExpertCache: Live Memory requires CUDA virtual memory management on this device and driver";
+            return false;
+        }
         std::fprintf(stderr, "ExpertCache: --vram-elastic is off: the driver or this GPU offers no virtual memory management; "
                              "the cache is one block\n");
         seg_req_ = 0;
