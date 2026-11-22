@@ -110,7 +110,7 @@ diff --git a/engine/src/core/expert_cache.cpp b/engine/src/core/expert_cache.cpp
 diff --git a/engine/include/strata/core/expert_cache_refuse.hpp b/engine/include/strata/core/expert_cache_refuse.hpp
 --- a/engine/include/strata/core/expert_cache_refuse.hpp
 +++ b/engine/include/strata/core/expert_cache_refuse.hpp
-@@ -1,15 +1,15 @@
+@@ -1,18 +1,18 @@
  #pragma once
 -// Tests only: make one of the segmented expert cache's driver calls fail on purpose, so a test can check what a shrink
 -// that the driver refused part way leaves behind (src/core/expert_cache.cpp).  The engine never sets it.
