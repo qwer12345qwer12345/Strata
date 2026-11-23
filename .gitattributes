@@ -38,3 +38,5 @@ engine/third_party/strata-llama/** text eol=lf
 # the image gate's recorded data (merges with their ranks, expected token ids, table hashes) is read byte for byte by the test programs
 # (terminal/tools/test_te_tokenizer.py: a CR at a line end made every merge unknown on a Windows checkout); never convert its line endings
 terminal/tools/image/gate/data/** -text
+# Keep byte-hashed downstream patch files LF on every checkout.
+downstream/features/**/*.patch text eol=lf
