@@ -8923,10 +8923,10 @@ index 00000000..c70c9daf
 +if __name__=='__main__':main()
 diff --git a/terminal/l2/runtime_config.py b/terminal/l2/runtime_config.py
 new file mode 100644
-index 00000000..c14d25d8
+index 00000000..174b7205
 --- /dev/null
 +++ b/terminal/l2/runtime_config.py
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,81 @@
 +"""Apply the one user-owned runtime selection. Reading it never runs a benchmark."""
 +import copy
 +import hashlib
@@ -8936,7 +8936,7 @@ index 00000000..c14d25d8
 +DAILY = dict(spec=4, shapes=2, lookup=16, tc=0, dense=1, skip=8, rows=2, nowait=1, tail=7,
 +             emb=1, gdn_np=2, upmix=1, gdn_tiles=1, gdn_fuse=1, prefill_cap=8192,
 +             cpu_nt=32, cpu_max=3072, lag=2, overlap=0, engine=1, decode_tc=1,
-+             tq_f16=1, fetch=2, hc_persist=1, qfuse=0, l3=1, pin=0.25,
++             tq_f16=1, fetch=2, hc_persist=1, qfuse=0, l3=0, pin=0.25, cpu_share=0,
 +             adapt_every=2, adapt_swaps=192, adapt_decay=0.92, dense_min=9)
 +# Historical theoretical bundle; current-version ablations and the frozen 0.1.65
 +# reference are separate groups below, so a binary change is never hidden.
@@ -8957,6 +8957,15 @@ index 00000000..c14d25d8
 +            at = args.index(flag)
 +            del args[at:at + 2]
 +        args.extend([flag, str(value)])
++    return args
++
++
++def set_flags(args, overrides):
++    args=list(args)
++    for flag, enabled in overrides.items():
++        if not isinstance(enabled,bool):raise ValueError('Boolean engine flag expected: '+flag)
++        args=[item for item in args if item!=flag]
++        if enabled:args.append(flag)
 +    return args
 +
 +
@@ -8986,6 +8995,8 @@ index 00000000..c14d25d8
 +    # profiles may have neither user_args nor args_written, so changing args
 +    # alone lets drafting.apply replace our selected --spec with its default.
 +    result['user_args'] = set_options(result.get('user_args', []), overrides)
++    for key in ('args','user_args'):
++        result[key]=set_flags(result[key],data.get('flag_overrides',{}))
 +    rows = data.get('ampere_rows', '2')
 +    if rows not in ('0', '2'):
 +        raise ValueError('Ampere expert rows must be 0 or 2')
@@ -9281,10 +9292,10 @@ index 00000000..545e126b
 +   self.assertIn(b'504',data.split(b'\r\n')[0])
 diff --git a/terminal/l2/test_runtime_config.py b/terminal/l2/test_runtime_config.py
 new file mode 100644
-index 00000000..2dfc2ca1
+index 00000000..d0be496b
 --- /dev/null
 +++ b/terminal/l2/test_runtime_config.py
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,58 @@
 +import contextlib
 +import copy
 +import hashlib
@@ -9311,7 +9322,8 @@ index 00000000..2dfc2ca1
 +   'archive_dir':str(root/'archives'),'ple_gguf':str(ple),'ampere_rows':'2',
 +   'environment':{'STRATA_DF2_AMPERE_TUNING':'2','STRATA_DF2_GEMM_TC':'0','STRATA_ADAPT_NOWAIT':'1','STRATA_ROUTE_TAIL_SKIP':'7'},
 +   'argument_overrides':{'--spec':'4','--lookup-max-t':'16'},'configuration_status':'NOT TESTED',
-+   'vision':{'gpu':True,'expert_lease':True},'vram_elastic':True,'repeat_failure_retry':True}
++   'vision':{'gpu':True,'expert_lease':True},'vram_elastic':True,'repeat_failure_retry':True,
++   'flag_overrides':{'--session-save-reclaim':True}}
 +  (state/'production-baseline.json').write_text(json.dumps(selection))
 +  file=root/'profile.json';file.write_text(json.dumps(profile))
 +  return profile,file,state
@@ -9328,6 +9340,9 @@ index 00000000..2dfc2ca1
 +   self.assertEqual(cfg['configuration_status'],'NOT TESTED')
 +   self.assertTrue(cfg['vision']['expert_lease']);self.assertTrue(cfg['vram_elastic'])
 +   self.assertTrue(cfg['repeat_failure_retry'])
++   for key in ('args','user_args'):
++    self.assertEqual(cfg[key].count('--session-save-reclaim'),1)
++    self.assertNotIn('True',cfg[key])
 +   self.assertEqual(profile,before)
 + def test_legacy_profile_pins_selection_for_official_drafting(self):
 +  from strata_control import user_args
@@ -10018,6 +10033,25 @@ index ef751b5c..5985f385 100644
          def _settings(self):
              # They change what every client gets, so only the app's own page may set them
              body = self._body()
+diff --git a/terminal/serve/session_save_retry.py b/terminal/serve/session_save_retry.py
+index 2e9368ad..d97d36a7 100644
+--- a/terminal/serve/session_save_retry.py
++++ b/terminal/serve/session_save_retry.py
+@@ -33,12 +33,12 @@ def available_mib() -> int | None:
+ 
+ 
+ def retryable(action, error) -> bool:
+-    return (action == 'save' and error.kind == 'memory' and not error.published
++    return (action in ('save','saveinc') and error.kind == 'memory' and not error.published
+             and required_mib(error) is not None)
+ 
+ 
+ def session_file(service, action, path, refused_type):
+-    """Called only when --session-save-reclaim is enabled; never changes RESTORE."""
++    """Only unpublished full-save admission (including SAVEINC's full fallback); never RESTORE."""
+     engine = service.engine
+     process = getattr(engine, 'proc', None)
+     try:
 diff --git a/terminal/serve/test_server.py b/terminal/serve/test_server.py
 index c5e9092d..8bf8687d 100644
 --- a/terminal/serve/test_server.py
@@ -10030,3 +10064,24 @@ index c5e9092d..8bf8687d 100644
                                                       "n_prompt_tokens": 0}])
          finally:
              with self.svc.status_lock:
+diff --git a/terminal/serve/test_session_save_retry.py b/terminal/serve/test_session_save_retry.py
+index 60adc4da..a2dd601c 100644
+--- a/terminal/serve/test_session_save_retry.py
++++ b/terminal/serve/test_session_save_retry.py
+@@ -67,6 +67,16 @@ class Retry(unittest.TestCase):
+         self.assertEqual(self.clock.now,30)
+         self.assertEqual(self.engine.session_file.call_count,1)
+ 
++    def test_saveinc_full_fallback_retries_only_unpublished_full_save_admission(self):
++        self.engine.session_file.side_effect=[refused(floor=1536),RESULT]
++        self.assertEqual(self.call(2000,action='saveinc'),RESULT)
++        self.assertEqual(self.engine.session_file.call_args_list,[mock.call('saveinc','same.bin')]*2)
++        for failure in (SessionRefused('memory',str(refused()),published=True),
++                        SessionRefused('memory','not enough RAM to save the session incrementally (355 MiB needed)')):
++            self.engine.session_file=mock.Mock(side_effect=failure)
++            with self.assertRaises(SessionRefused):self.call(2000,action='saveinc')
++            self.assertEqual(self.engine.session_file.call_count,1)
++
+     def test_admission_races_are_bounded_and_keep_latest_error(self):
+         errors=[refused(355+n) for n in range(4)]
+         self.engine.session_file.side_effect=errors

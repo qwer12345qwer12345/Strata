@@ -277,3 +277,6 @@ python downstream/scripts/test.py --feature example \
 
 
 2026-11-23：已增加一次重复生成失败恢复，保留256-token保护，失败草稿不覆盖旧存档。[配置、行为边界与回归](features/chatml-tool-guard/README.md)。
+
+
+2026-11-24日用回退：19/19存档因RAM不足拒绝，已修正CPU-share预分配选择、关闭L3/static并启用保存前回收；真实模型效果待无头验证。[诊断与生效配置](DAILY_CONFIGURATION.md#2026-11-24缓存与速度回退修正覆盖上文l3cpu-share日常选择)。

@@ -446,10 +446,10 @@ index 00000000..ab65a59d
 +    return report
 diff --git a/terminal/l2/headless_experiments.py b/terminal/l2/headless_experiments.py
 new file mode 100644
-index 00000000..768279e7
+index 00000000..98e92437
 --- /dev/null
 +++ b/terminal/l2/headless_experiments.py
-@@ -0,0 +1,446 @@
+@@ -0,0 +1,448 @@
 +"""One-shot headless spec, SM86 shape and wide lookup comparisons. Never select a winner automatically."""
 +import datetime
 +import hashlib
@@ -683,7 +683,7 @@ index 00000000..768279e7
 +    result += mirror('hc-upmix',('upmix',),[(0,),(1,)])
 +    result += mirror('gdn-execution',('gdn_tiles','gdn_fuse'),[(1,1),(2,1),(2,0),(1,0)])
 +    result += mirror('prefill-cap',('prefill_cap',),[(8192,),(16384,),(32768,)])
-+    result += mirror('cpu-prefill',('cpu_nt','cpu_max'),[(0,0),(32,3072),(32,6144),(8,6144)])
++    result += mirror('cpu-prefill',('cpu_share','cpu_nt','cpu_max'),[(0,0,0),(1,32,3072),(1,32,6144),(1,8,6144)])
 +    result += mirror('adapt-mode',('nowait','lag','overlap','fetch'),[(1,2,0,2),(1,2,0,0),(0,1,0,0),(0,1,1,0)])
 +    for engine in (0,1,1,0):
 +        result.append(arm('engine-reference','engine-reference-'+str(engine),{**REFERENCE,'engine':engine}))
@@ -758,6 +758,8 @@ index 00000000..768279e7
 +                      STRATA_GDN_TC_NP=str(arm['gdn_np']), STRATA_HC_UPMIX=str(arm['upmix']),
 +                      STRATA_GDN_TC_TILES=str(arm['gdn_tiles']), STRATA_GDN_TC_FUSE=str(arm['gdn_fuse']),
 +                      STRATA_PREFILL_TIMING='1')
++    cfg['env']['STRATA_PREFILL_CPU_SHARE']='auto' if arm['cpu_share'] else '0'
++    cfg['env']['STRATA_POOL_STATIC']='0'
 +    for key, field in (('STRATA_PREFILL_CPU_SHARE_NT','cpu_nt'),('STRATA_PREFILL_CPU_SHARE_MAX','cpu_max')):
 +        cfg['env'].pop(key,None)
 +        if arm[field]:cfg['env'][key]=str(arm[field])
@@ -1139,10 +1141,10 @@ index 00000000..9e681352
 +    raise SystemExit(main())
 diff --git a/terminal/l2/test_headless_experiments.py b/terminal/l2/test_headless_experiments.py
 new file mode 100644
-index 00000000..428e1a79
+index 00000000..38c58018
 --- /dev/null
 +++ b/terminal/l2/test_headless_experiments.py
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,169 @@
 +import copy
 +import contextlib
 +import io
@@ -1202,6 +1204,7 @@ index 00000000..428e1a79
 +    for name,key in [('STRATA_PREFILL_CPU_SHARE_NT','cpu_nt'),('STRATA_PREFILL_CPU_SHARE_MAX','cpu_max')]:
 +     if arm[key]:self.assertEqual(cfg['env'][name],str(arm[key]))
 +     else:self.assertNotIn(name,cfg['env'])
++    self.assertEqual(cfg['env']['STRATA_PREFILL_CPU_SHARE'],'auto' if arm['cpu_share'] else '0')
 +    self.assertEqual(val('--pool-workers'),'15')
 +    self.assertEqual(val('--max-context'),'262144')
 +    self.assertIn('--resident-experts',args)
@@ -1299,7 +1302,7 @@ index 00000000..428e1a79
 +   rows=h.arms([group]);self.assertEqual(rows,rows[::-1])
 +   if group not in ('combined','engine-reference'):
 +    fields={k for k in h.DAILY if len({r[k] for r in rows})>1}
-+    expected={'spec-lookup':{'spec','lookup'},'shape-qkv':{'shapes','tc'},'dense-lookup':{'dense','lookup'},'skip-lookup':{'skip','lookup'},'rows':{'rows'},'adapt-tail':{'nowait','tail'},'tail-spec':{'tail','spec'},'emb-gdn':{'emb','gdn_np'},'gdn-precision':{'gdn_np'},'hc-upmix':{'upmix'},'gdn-execution':{'gdn_tiles','gdn_fuse'},'prefill-cap':{'prefill_cap'},'cpu-prefill':{'cpu_nt','cpu_max'},'adapt-mode':{'nowait','lag','overlap','fetch'},'update-bundle':{'decode_tc','tq_f16','fetch','hc_persist'},'decode-tc-spec':{'decode_tc','spec'},'tq-prefill':{'tq_f16','prefill_cap'},'hc-qfuse':{'hc_persist','qfuse'},'fetch-pin':{'fetch','pin'},'fetch-mode':{'fetch'},'upstream-adapt':{'adapt_every','adapt_swaps','adapt_decay'},'qfuse-l3':{'qfuse','l3'},'dense-min':{'dense_min'}}
++    expected={'spec-lookup':{'spec','lookup'},'shape-qkv':{'shapes','tc'},'dense-lookup':{'dense','lookup'},'skip-lookup':{'skip','lookup'},'rows':{'rows'},'adapt-tail':{'nowait','tail'},'tail-spec':{'tail','spec'},'emb-gdn':{'emb','gdn_np'},'gdn-precision':{'gdn_np'},'hc-upmix':{'upmix'},'gdn-execution':{'gdn_tiles','gdn_fuse'},'prefill-cap':{'prefill_cap'},'cpu-prefill':{'cpu_share','cpu_nt','cpu_max'},'adapt-mode':{'nowait','lag','overlap','fetch'},'update-bundle':{'decode_tc','tq_f16','fetch','hc_persist'},'decode-tc-spec':{'decode_tc','spec'},'tq-prefill':{'tq_f16','prefill_cap'},'hc-qfuse':{'hc_persist','qfuse'},'fetch-pin':{'fetch','pin'},'fetch-mode':{'fetch'},'upstream-adapt':{'adapt_every','adapt_swaps','adapt_decay'},'qfuse-l3':{'qfuse','l3'},'dense-min':{'dense_min'}}
 +    self.assertEqual(fields,expected[group],group)
 +  self.assertEqual(len(h.arms(['numeric'])),46)
 +  self.assertEqual(len(h.arms(['updates'])),64)

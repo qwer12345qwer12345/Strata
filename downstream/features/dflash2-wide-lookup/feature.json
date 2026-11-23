@@ -4,7 +4,7 @@
   "version": "0.4.1",
   "status": "active",
   "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
-  "patched_tree": "035d099d89a19429909720c56c40f39c8be58221",
+  "patched_tree": "8bde4524d43120e1f57bb06d0198609c8ded1cee",
   "requires": [
     "legacy-session-archive"
   ],
@@ -12,7 +12,7 @@
     {
       "id": "dflash2-wide-lookup",
       "path": "patches/0001-dflash2-wide-lookup.patch",
-      "sha256": "31a9a217c7f0f43ec1a25ee9abc848f2809f213c464dcb234396c7b5cb4139e8"
+      "sha256": "921ceed279b1b5f10a4f115391fbe39eab5d7aceb479caf37f55bd9625f8e64c"
     }
   ],
   "tests": "tests/test.json",

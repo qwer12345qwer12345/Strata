@@ -1,0 +1,34 @@
+{
+  "requests": 19,
+  "median_decode_tps": 74.6,
+  "median_prompt_reuse_fraction": 0.09009609224855862,
+  "full_save_memory_refusals": 19,
+  "expert_file_blob_nonzero_records": 0,
+  "old_gpu_slots": 5542,
+  "new_gpu_slots": 5316,
+  "old_complement_gib": 20.81,
+  "new_complement_gib": 21.45,
+  "old_lend_duplicate_slots": 2252,
+  "new_lend_duplicate_slots": 2684,
+  "old_cpu_miss_us": [
+    33,
+    34
+  ],
+  "new_cpu_miss_us": 46,
+  "old_pcie_fraction": 0.3,
+  "new_pcie_fraction": 0.45,
+  "stack_tree": "f04ba5ea5a9300fc99873807bd6c0faee72517d4",
+  "production_fix": {
+    "L3_PF": 0,
+    "POOL_STATIC": 0,
+    "PREFILL_CPU_SHARE": 0,
+    "session_save_reclaim": true,
+    "floor_mib": 1536
+  },
+  "validation": {
+    "cpu_reclaim_checks": 119,
+    "live_model_after_repair": "not run",
+    "speed_causality": "not isolated",
+    "binary_unchanged": true
+  }
+}

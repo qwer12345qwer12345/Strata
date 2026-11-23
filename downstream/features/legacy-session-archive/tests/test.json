@@ -21,7 +21,8 @@
   "python_modules": [
     "l2.test_controller",
     "l2.test_startup_benchmark",
-    "l2.test_runtime_config"
+    "l2.test_runtime_config",
+    "serve.test_session_save_retry"
   ],
   "settings_generation": false
 }
