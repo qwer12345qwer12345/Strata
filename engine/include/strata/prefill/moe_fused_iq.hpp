@@ -66,11 +66,9 @@ void set_down_rotation(bool on, const float* signs);
 /// (CUDA) the same rotation in place on `rows` FP32 rows of `cols` values (a multiple of 128), on `stream`: a folded gate/up's input before
 /// quantize_act_native, or (tests) MMQ's H.
 void hadamard128_rows(float* x, int64_t rows, int64_t cols, const float* signs, void* stream);
-/// Whether a general NT = 256 or warp-specialized kernel is set up on the current device.
+/// The NT = 256 kernels (STRATA_PF_FUSED_NT=256 or _F16=1) or the warp-specialized kernel (STRATA_PF_FUSED_WS=1) are
+/// set up on the current device: experts_native takes a WideBatch (STRATA_PF_BATCH up to kBatchRoom experts a launch).
 bool native_wide();
-/// Whether a general wide kernel or the TQ-only F16/NT=256 candidate (STRATA_PF_FUSED_TQ_F16=1) is set up for this pair.
-/// experts_native then takes a WideBatch (STRATA_PF_BATCH up to kBatchRoom experts a launch).
-bool native_wide(int gu_type, int d_type);
 /// Launches of experts_native that took the unstaged 64-row kernel because the weight-staging check failed (an expert blob not in device memory, or an odd address / row / offset):
 /// 0 in every default configuration; 0 in a HIP build (no staging kernels).  The first such launch logs one line to stderr; the process does not exit.  For the GPU test.
 int staged_blob_fallbacks();

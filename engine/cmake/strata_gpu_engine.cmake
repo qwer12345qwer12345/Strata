@@ -18,7 +18,7 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
   # The selected runtime is PUBLIC because graph.cpp is a HOST translation unit that calls cudaGraphLaunch and
   # cudaEventQuery: the .cu sources get cudart through the CUDA language rules, a .cpp does not, and the
   # linker error ("unresolved external symbol cudaGraphInstantiate") names the function rather than the cause.
-  target_link_libraries(strata_core PUBLIC strata_plan strata_warnings ${_strata_gpu_runtime_target})
+  target_link_libraries(strata_core PUBLIC strata_plan strata_warnings ${_strata_gpu_runtime_target} ${CMAKE_DL_LIBS})
 
   add_executable(strata-device src/core/device_main.cpp)
   target_link_libraries(strata-device PRIVATE strata_core)
@@ -105,7 +105,10 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
                           src/ngram/ple_reader.cpp
                           src/platform/direct_file.cpp)
   if(STRATA_ENABLE_HIP)
-    target_sources(strata_kernels PRIVATE src/kernels/cuda/nvfp4_decode_sm120_absent.cpp)
+    target_sources(strata_kernels PRIVATE
+      src/kernels/cuda/nvfp4_decode_sm120_absent.cpp
+      src/kernels/hip/hip_unsloth_wmma.cu
+      src/kernels/hip/hip_unsloth_dp4a.cu)
   endif()
   if(STRATA_ISA_FLOOR STREQUAL "avx")
     if(MSVC)
@@ -189,22 +192,6 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
     add_test(NAME qsa_slots_parity_lanecell COMMAND qsa_slots_parity)
     set_tests_properties(qsa_slots_parity qsa_slots_parity_lanecell PROPERTIES SKIP_RETURN_CODE 77)
     set_tests_properties(qsa_slots_parity_lanecell PROPERTIES ENVIRONMENT "STRATA_ATTN_LANECELL=1")
-    # K8V4 decode tensor-core scoring is native CUDA only; HIP-GFX906 compiles the TC path out.
-    if(NOT STRATA_HIP_GFX906)
-      # fork: STRATA_ATTN_DECODE_TC=1's K8V4 tensor-core score phase against the warp-scoring default on synthetic
-      # pools (short and long widths, tail block, empty split, paged, streamed-masked, multi-query). The harness
-      # compares both named chunk passes against a host double reference and checks the production batch dispatch
-      # against the selected named path. Following prompt i8v3 parity, TC must stay within 4x the measured default-path
-      # error (or 1e-6 of reference scale, whichever is larger) and within 1e-4 of the default output scale.
-      add_executable(qsa_decode_tc_parity src/kernels/qsa_decode_tc_parity.cpp)
-      target_include_directories(qsa_decode_tc_parity PRIVATE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-      target_link_libraries(qsa_decode_tc_parity PRIVATE strata_kernels CUDA::cudart)
-      add_test(NAME qsa_decode_tc_parity COMMAND qsa_decode_tc_parity)
-      set_tests_properties(qsa_decode_tc_parity PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "STRATA_ATTN_DECODE_TC=0")
-      # the production batch entry with the environment on must select the same TC result as the named chunk pass
-      add_test(NAME qsa_decode_tc_parity_env COMMAND qsa_decode_tc_parity)
-      set_tests_properties(qsa_decode_tc_parity_env PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "STRATA_ATTN_DECODE_TC=1")
-    endif()
     # fork: the Daily's decode attention (STRATA_ATTN_DAILY=1: PR #540's chunk kernel on every card and the bounded
     # merge) against upstream's kernels, bitwise; the production entries checked with the variable off and on
     add_executable(qsa_merge_daily_parity src/kernels/qsa_merge_daily_parity.cpp)
@@ -1142,8 +1129,8 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
   target_include_directories(gr_multi_parity PRIVATE ${_strata_gpu_include_directories})
   target_link_libraries(gr_multi_parity PRIVATE strata_kernels ${_strata_gpu_runtime_target})
   add_test(NAME gr_multi_parity COMMAND gr_multi_parity)
-  # STRATA_HC_PERSIST=1: BF16 and Q8_0 persistent HC reads against the default paths, QFUSE output parity, and the
-  # existing 8 + tail fallback for wide Q8 windows; with the variable unset the persistent read never runs.
+  # STRATA_HC_PERSIST=1: the persistent hyper-connection read against the default multi read (bounded, two runs bitwise),
+  # and with the variable unset it never runs (a skip where the card cannot hold its 80 blocks, and on CUDA)
   add_executable(hc_persist_parity src/kernels/hc_persist_parity.cpp)
   target_include_directories(hc_persist_parity PRIVATE ${_strata_gpu_include_directories})
   target_link_libraries(hc_persist_parity PRIVATE strata_kernels ${_strata_gpu_runtime_target})

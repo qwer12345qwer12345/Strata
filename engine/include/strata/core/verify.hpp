@@ -662,6 +662,8 @@ private:
     SessionState* ss_ = nullptr;
     VerifyHits hits_;
     const NativeHead* head_ = nullptr;
+    mutable bool split_logits_materialized_ = false;
+    void ensure_full_logits(int T, bool sync) const;
     int max_t_ = 0;
     float* ple_key_ = nullptr;   ///< STRATA_PLE_BATCH: the window rows' PLE key / value projections
     float* ple_val_ = nullptr;
@@ -755,7 +757,6 @@ private:
     using FlagSet = strata::core::FlagRaise;
     FlagSet flag_sets_[2 * 64 * 2] = {};                          // host-function arguments, one per (layer, group)
     static void fetch_dma(void* ctx, const uint8_t* const* src, int n, size_t bytes);
-    static bool fetch_copyback(void* ctx, const uint8_t* const* src, uint8_t* const* dst, int n, size_t bytes);
     static void raise_flag(uint32_t* flag, uint32_t value);
     /// Flag B for `want`, behind every copy queued on copy_ (an empty plan must not overtake an earlier layer's DMA).
     void raise_flag_b_ordered(uint32_t want);

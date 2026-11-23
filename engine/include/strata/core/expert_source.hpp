@@ -364,11 +364,13 @@ private:
     std::condition_variable cv_;
     bool quit_ = false, pending_ = false, busy_ = false;
     int64_t layer_ = -1, n_tok_ = 0;
-    std::vector<int32_t> res_;   ///< the residency rows of the layers predicted, copied at submit (admissions write the table)
+    std::vector<int32_t> res_;       ///< pending residency rows (overwritten by submit() without dropping!)
+    std::vector<int32_t> work_res_;  ///< worker's active copy while busy_ == true
     bool has_res_ = false;
     uint64_t sub_gen_ = 0;
-    ForesightSwap* fs_ = nullptr;                   ///< (under mu_)
-    std::vector<float> x_;
+    ForesightSwap* fs_ = nullptr;    ///< (under mu_)
+    std::vector<float> x_;           ///< pending activation buffer (overwritten by submit() without dropping!)
+    std::vector<float> work_x_;      ///< worker's active copy while busy_ == true
     std::atomic<int64_t> predicted_{0}, skipped_{0};
     std::atomic<uint64_t> busy_us_{0};
     // STRATA_LOOKAHEAD_STATS
@@ -408,9 +410,6 @@ struct GpuPlanSink {
     void (*publish)(void* ctx) = nullptr;
     /// Starts the DMA copies of `n` host blobs (pinned) into staging slots 0..n-1 and signals the GPU when they land.
     void (*fetch)(void* ctx, const uint8_t* const* src, int n, size_t bytes) = nullptr;
-    /// Resident ADAPT_FETCH: preserve the cache slots' old experts before the graph overwrites them.  This runs
-    /// before `publish`, on an independent transfer stream, and must return only after every host copy has completed.
-    bool (*fetch_copyback)(void* ctx, const uint8_t* const* src, uint8_t* const* dst, int n, size_t bytes) = nullptr;
     void* ctx = nullptr;
     /// Plan v0.3 P6: how a PCIe group reaches the GPU.  0 = the copy engine stages it (DMA, `fetch`); 1 = the grouped
     /// kernel reads the mapped arena directly; 2 = a copy kernel stages it inside the graph.  For 1 and 2 `ptr2`
@@ -678,14 +677,11 @@ struct ExpertDispatch {
     /// of staging - a swap with no RAM read of its own.  `res_mut` is `host_res`, written here (and listed in
     /// `res_dirty_idx`); `in_flight`: experts the adaptive tier is copying in.
     int fetch_admit = 0;
-    bool fetch_resident = false;          ///< resident-RAM mode: direct admissions must exchange complementary ownership
-    bool fetch_exchange_active = false;   ///< staged exchanges belong to this verifier window, not the adaptive tier
     float fetch_min = 1.0f, fetch_margin = 0.5f;
-    struct FetchExchange { int32_t layer, in, out, slot; int64_t q; };
-    std::vector<FetchExchange> fetch_exchanges;  ///< committed after the verifier window's graph has completed
     int32_t* res_mut = nullptr;
     std::vector<uint8_t> in_flight;
     std::vector<uint8_t> fetch_mark;   ///< per expert of the layer: routed in the window
+    const uint8_t* fetch_pin = nullptr;   ///< non-null: pinned Zipf-head (layer, expert) slots protected from eviction
     /// STRATA_ADAPT_FETCH: whether the pool can admit into `layer` now (a window still needs a PCIe share there)
     bool fetch_can(int64_t layer) const;
     /// per layer: the PCIe share fetched there since the tier's last round (the tier leaves those layers' fetchable
@@ -841,15 +837,11 @@ public:
     int64_t exchange_capacity() const { return xstage_cap_; }
     /// The exchange buffers are page-locked (cudaHostAlloc): copies to and from them are asynchronous.
     bool exchange_pinned() const { return xstage_pinned_; }
-    /// Whether any adaptive ownership exchanges are staged but not committed yet.
-    bool exchanges_pending() const { return !staged_.empty(); }
     /// Buffer `q`.  `layer` >= 0: the buffer an exchange of that layer's experts stages into (STRATA_EXCHANGE_ROTATE with
     /// several block sizes keeps one per size); without it, one that holds any layer's block.
     uint8_t* exchange_buffer(int64_t q, int64_t layer = -1) const;
     /// Requires `has_resident(layer, in)`, `!has_resident(layer, out)` and `exchange_buffer(q)` holding out's blob.
     bool stage_exchange(int64_t layer, int64_t in, int64_t out, int64_t q);
-    /// Atomically validate and stage a batch of ownership exchanges after their cache-slot copybacks have completed.
-    bool stage_exchanges(const int32_t* layers, const int32_t* ins, const int32_t* outs, const int64_t* qs, size_t n);
     /// --pipeline-windows: size the exchange table now, so a `stage_exchange` on the adaptive tier's thread never
     /// reallocates it under a concurrent `blob` (the pool reads it while windows are in flight).
     void prepare_overrides() { if (override_.empty()) override_.assign((size_t) blobs_, nullptr); }
@@ -924,7 +916,7 @@ public:
     /// experts_unbuffered.  The mapped reads' page faults are one small request each, and the pages they bring in
     /// take the RAM the budget was sized for.  `why` says what decided.
     /// #577: `ram_bytes` counts up to every expert, and only the experts outside it are what the cache must keep.
-    bool set_unbuffered(uint64_t ram_bytes, std::string& why);
+    bool set_unbuffered(uint64_t ram_bytes, std::string& why, bool force = false);
     /// #577: the same decision once the RAM copy is built (pin_cache_complement), from the RAM it really holds and the
     /// expert bytes outside it; switches either way (startup only, nothing reading).  Returns whether unbuffered.
     bool recheck_unbuffered(std::string& why);
@@ -938,6 +930,10 @@ public:
     /// 32 measured 2.35 GB/s with experts.bin mapped and 3.57 GB/s without.  After this every file read goes through
     /// read_direct (mapped_blob answers nullptr).  Returns whether the view was closed; `why` says why not.
     bool drop_mapping(std::string& why);
+    /// Verifies unbuffered read_direct on blob (0, 0) against the mapping first, then calls drop_mapping so Windows
+    /// NTFS unbuffered reads run at full unmapped NVMe queue depth (10.4 GB/s vs 3.4 GB/s) during GPU cache + RAM load.
+    bool drop_mapping_verified(std::string& why);
+    bool is_unmapped() const { return unmapped_; }
     /// A GPU that shares the system RAM (cudaDevAttrIntegrated: the DGX Spark's GB10) and holds every expert in its cache
     /// reads nothing from the files again, and the pages the start read from them are a second copy of the cache's bytes.
     /// CUDA counts only the RAM the kernel has free (MemFree, not the page cache it could reclaim), so with those pages
@@ -1148,6 +1144,7 @@ private:
     std::vector<std::string> paths_;          ///< the mapped files, as maps_
     std::vector<void*> pdirect_;              ///< open_prompt_direct: O_DIRECT fds for copy_blobs only
     std::vector<void*> direct_;               ///< #286: per file, an unbuffered handle (Windows) or O_DIRECT fd (Linux)
+    uint64_t direct_sector_ = 4096;           ///< Windows FileStorageInfo hardware sector alignment (>= 4096)
     std::vector<int> role_file_;              ///< 3 x n_layers: index into maps_ / direct_
     /// blobs assembled in the stage buffers (`blob` hands those out): the GGUF in place, or any unbuffered source
     bool staged() const { return !role_ptr_.empty() || !direct_.empty() || io_pf_; }
