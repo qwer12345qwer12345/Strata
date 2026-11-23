@@ -1164,6 +1164,7 @@ bool Verifier::init(const WeightTable& wt, const ModelGeometry& g, SessionState&
         sink_.cap = cap;
         sink_.publish = &Verifier::publish_plan;
         sink_.fetch = &Verifier::fetch_dma;
+        sink_.fetch_copyback = &Verifier::fetch_copyback;
         sink_.ctx = this;
     }
 
@@ -4176,6 +4177,25 @@ void Verifier::fetch_dma(void* ctx, const uint8_t* const* src, int n, size_t byt
         }
     }
     v->raise_flag_b_ordered(want);   // copy_used_ is set: the host function runs after this group's uploads
+}
+
+// Resident ADAPT_FETCH preserves the cache slot's current expert before the plan is published.  The verifier graph
+// is waiting for that publication on cs_, so this copy must use the independent transfer stream and finish before
+// publish releases the graph to overwrite the slot.
+bool Verifier::fetch_copyback(void* ctx, const uint8_t* const* src, uint8_t* const* dst, int n, size_t bytes) {
+    Verifier* v = (Verifier*) ctx;
+    if (n <= 0) return true;
+    const OnDevice on_device(v->device_);
+    for (int i = 0; i < n; ++i) {
+        if (src[i] == nullptr || dst[i] == nullptr ||
+            cudaMemcpyAsync(dst[i], src[i], bytes, cudaMemcpyDeviceToHost, v->copy_) != cudaSuccess) {
+            (void) cudaGetLastError();
+            // Earlier entries may already be in flight.  Do not let a later fetch reuse their buffers.
+            (void) cudaStreamSynchronize(v->copy_);
+            return false;
+        }
+    }
+    return cudaStreamSynchronize(v->copy_) == cudaSuccess;
 }
 
 void Verifier::publish_plan(void* ctx) {

@@ -14482,7 +14482,7 @@ int main(int argc, char** argv) {
                             : o.pcie_mode == "dma" || o.pcie_mode == "direct" ? "--pcie-mode dma / direct"
                             : drive.d.plan == nullptr ? "no GPU plan"
                             : drive.d.pcie_num <= 0 ? "no PCIe share"
-                            : src.complement_ready() ? "the resident RAM mode" : nullptr;
+                            : src.complement_ready() && src.exchange_capacity() <= 0 ? "no resident exchange buffers" : nullptr;
             if (off != nullptr) {
                 if (strata::core::adapt_fetch_is_default())   // the default of a card with 16 GiB or less, not the user's setting
                     std::fprintf(stderr, "strata serve: STRATA_ADAPT_FETCH=2 (the default for this card) is not used in this run (%s)\n", off);
@@ -14490,15 +14490,19 @@ int main(int argc, char** argv) {
             }
             else {
                 drive.d.fetch_admit = adapt_fetch();
+                drive.d.fetch_resident = src.complement_ready();
                 drive.d.res_mut = host_res.data();
                 drive.d.in_flight.assign(host_res.size(), 0);
                 drive.d.fetch_avail.assign((size_t) g.n_layers, 0);
+                if (drive.d.fetch_resident)
+                    drive.d.fetch_exchanges.reserve((size_t) std::min<int64_t>(src.exchange_capacity(), 96));
                 if (const char* v = std::getenv("STRATA_ADAPT_FETCH_MIN")) drive.d.fetch_min = (float) std::atof(v);
                 if (const char* v = std::getenv("STRATA_ADAPT_FETCH_MARGIN")) drive.d.fetch_margin = (float) std::atof(v);
                 std::fprintf(stderr, "strata serve: STRATA_ADAPT_FETCH=%d: the PCIe share takes each layer's most-routed "
-                                     "misses and admits those routed >= %.2f and %.2f more than a resident one%s\n",
+                                     "misses and admits those routed >= %.2f and %.2f more than a resident one%s%s\n",
                              drive.d.fetch_admit, drive.d.fetch_min, drive.d.fetch_margin,
-                             drive.d.fetch_admit == 2 ? "; the tier's own copies are off" : "");
+                             drive.d.fetch_admit == 2 ? "; the tier's own copies are off" : "",
+                             drive.d.fetch_resident ? "; RAM complement ownership is exchanged after the window copy completes" : "");
             }
         }
         // #477 --expert-profile-save: what the adaptive tier learned, kept across restarts (opt-in; off: `heat` stays
@@ -14645,6 +14649,22 @@ int main(int argc, char** argv) {
                 drive.d.res_dirty = false;
                 drive.d.res_dirty_idx.clear();
             }
+        };
+        auto finish_fetch_exchanges = [&](std::string& e) -> bool {
+            if (drive.d.fetch_exchanges.empty()) {
+                drive.d.fetch_exchange_active = false;
+                return true;
+            }
+            const int64_t expected = (int64_t) drive.d.fetch_exchanges.size();
+            const int64_t committed = src.commit_exchanges();
+            if (committed != expected) {
+                e = "resident ADAPT_FETCH could not commit the RAM complement ownership exchange";
+                return false;
+            }
+            for (const auto& x : drive.d.fetch_exchanges) srcp->release(x.layer, x.in);
+            drive.d.fetch_exchanges.clear();
+            drive.d.fetch_exchange_active = false;
+            return true;
         };
         // Where the tier does not wait for its copies (STRATA_ADAPT_NOWAIT=1, STRATA_ADAPT_LAG > 1), its evictions reach
         // the device's tables before the next window: adapt() marks them non-resident at once, apply_pending uploads
@@ -15766,6 +15786,7 @@ int main(int argc, char** argv) {
                     drive.d.experts = 0;
                     drive.d.failed = false;
                     wok = ver.run(t, wtok.data(), 0, win_pool_fn, win_pool_user, wout.data(), werr) && !drive.d.failed;
+                    if (wok && !finish_fetch_exchanges(werr)) wok = false;
                     char wb[48];
                     std::snprintf(wb, sizeof wb, "%s%d:%.0f", wlist.empty() ? "" : " ", t,
                                   std::chrono::duration<double, std::milli>(Clock::now() - t0).count());
@@ -16554,6 +16575,7 @@ int main(int argc, char** argv) {
                 std::printf("ERR %s\n", drive.d.failed && drive.d.fail ? drive.d.fail : err.c_str());
                 return false;
             }
+            if (!finish_fetch_exchanges(err)) { std::printf("ERR %s\n", err.c_str()); return false; }
             const Clock::time_point w1 = Clock::now();
             // The adaptive VRAM tier, as the solo loop runs it: every --adapt-every windows, on a thread beside the commit and
             // the drafts.  Every stage's window has finished here (run_slot_rows synchronised each stage's stream), and
@@ -19601,6 +19623,7 @@ int main(int argc, char** argv) {
                         if (drive.d.failed && drive.d.fail) e = drive.d.fail;
                         return false;
                     }
+                    if (!finish_fetch_exchanges(e)) return false;
                     if (nonfinite_hit(ver, "prompt")) {   // (its commit is not needed: the next request reads from 0)
                         e = "non-finite logits (#879)";
                         return false;
@@ -22137,6 +22160,7 @@ int main(int argc, char** argv) {
                     std::printf("ERR %s\n", drive.d.failed && drive.d.fail ? drive.d.fail : err.c_str());
                     return 1;
                 }
+                if (!finish_fetch_exchanges(err)) { std::printf("ERR %s\n", err.c_str()); return 1; }
                 if (aflipped) apply_pending(true);   // 0.1.43: every layer's copies were waited for in the window; the bookkeeping now
                 // Diagnostics (as in generate): STRATA_DUMP_FIRST_LOGITS=<path> writes the logits of each request's first
                 // window to <path>.<n>, so the prompt paths (a peer card's share, a split) can be compared by KL
@@ -23682,7 +23706,7 @@ int main(int argc, char** argv) {
                             : o.pcie_mode == "dma" || o.pcie_mode == "direct" ? "--pcie-mode dma / direct"
                             : drive.d.plan == nullptr ? "no GPU plan"
                             : drive.d.pcie_num <= 0 ? "no PCIe share"
-                            : src.complement_ready() ? "the resident RAM mode" : nullptr;
+                            : src.complement_ready() && src.exchange_capacity() <= 0 ? "no resident exchange buffers" : nullptr;
             if (off != nullptr) {
                 if (strata::core::adapt_fetch_is_default())
                     std::fprintf(stderr, "strata generate: STRATA_ADAPT_FETCH=2 (the default for this card) is not used in this run (%s)\n", off);
@@ -23690,16 +23714,20 @@ int main(int argc, char** argv) {
             }
             else {
                 drive.d.fetch_admit = adapt_fetch();
+                drive.d.fetch_resident = src.complement_ready();
                 drive.d.res_mut = host_res.data();
                 drive.d.in_flight.assign(host_res.size(), 0);
                 drive.d.fetch_avail.assign((size_t) g.n_layers, 0);
+                if (drive.d.fetch_resident)
+                    drive.d.fetch_exchanges.reserve((size_t) std::min<int64_t>(src.exchange_capacity(), 96));
                 if (const char* v = std::getenv("STRATA_ADAPT_FETCH_MIN")) drive.d.fetch_min = (float) std::atof(v);
                 if (const char* v = std::getenv("STRATA_ADAPT_FETCH_MARGIN")) drive.d.fetch_margin = (float) std::atof(v);
                 drive.d.fetch_log_on = std::getenv("STRATA_ADAPT_FETCH_VERIFY") != nullptr;
                 std::fprintf(stderr, "strata generate: STRATA_ADAPT_FETCH=%d: the PCIe share takes each layer's most-routed "
-                                     "misses and admits those routed >= %.2f and %.2f more than a resident one%s\n",
+                                     "misses and admits those routed >= %.2f and %.2f more than a resident one%s%s\n",
                              drive.d.fetch_admit, drive.d.fetch_min, drive.d.fetch_margin,
-                             drive.d.fetch_admit == 2 ? "; the tier's own copies are off" : "");
+                             drive.d.fetch_admit == 2 ? "; the tier's own copies are off" : "",
+                             drive.d.fetch_resident ? "; RAM complement ownership is exchanged after the window copy completes" : "");
             }
         }
         // before every window: the device's table follows the host's (the tier's evictions while its copies are in
@@ -23797,6 +23825,22 @@ int main(int argc, char** argv) {
                 drive.d.res_dirty = false;
                 drive.d.res_dirty_idx.clear();
             }
+        };
+        auto finish_fetch_exchanges = [&](std::string& e) -> bool {
+            if (drive.d.fetch_exchanges.empty()) {
+                drive.d.fetch_exchange_active = false;
+                return true;
+            }
+            const int64_t expected = (int64_t) drive.d.fetch_exchanges.size();
+            const int64_t committed = src.commit_exchanges();
+            if (committed != expected) {
+                e = "resident ADAPT_FETCH could not commit the RAM complement ownership exchange";
+                return false;
+            }
+            for (const auto& x : drive.d.fetch_exchanges) srcp->release(x.layer, x.in);
+            drive.d.fetch_exchanges.clear();
+            drive.d.fetch_exchange_active = false;
+            return true;
         };
         // Plan v0.3 P6: the VRAM tier follows the conversation.  Candidates are missing experts routed at least
         // twice (decayed); each is paired with its layer's least-routed resident expert and swapped when it was
@@ -24231,7 +24275,8 @@ int main(int argc, char** argv) {
             if (!ver.run(T, window.data(), p, decode_pool_fn, &drive, outv.data(), err)) {
                 // The graph of a window size is captured the first time it is used, and the draft source took VRAM: when the capture runs
                 // out of memory the window gets one row narrower (the widths below it are already captured) instead of the run failing.
-                if (T > 2 && !first_window && !gated_proposal && err.find("out of memory") != std::string::npos) {
+                if (T > 2 && !first_window && !gated_proposal && drive.d.fetch_exchanges.empty() &&
+                    err.find("out of memory") != std::string::npos) {
                     win_cap = T - 1;
                     --window_hist[(size_t) T];
                     std::fprintf(stderr, "strata generate: not enough VRAM left for a %d-token verify window: windows are %d tokens at most from here\n", T, win_cap);
@@ -24245,6 +24290,10 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "strata generate: the expert pool failed at layer %lld expert %lld: %s\n",
                              (long long) drive.d.fail_layer, (long long) drive.d.fail_expert,
                              drive.d.fail ? drive.d.fail : "(no message)");
+                return 1;
+            }
+            if (!finish_fetch_exchanges(err)) {
+                std::fprintf(stderr, "strata generate: %s\n", err.c_str());
                 return 1;
             }
             if (hashes != nullptr) {   // FNV-1a over the window's final residual rows (a test path: a plain copy)
