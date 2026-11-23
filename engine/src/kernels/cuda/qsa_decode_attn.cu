@@ -287,20 +287,22 @@ __device__ __forceinline__ void attn_chunk_body(const float* __restrict__ q, Qsa
 #pragma unroll
                 for (int o = 1; o < 4; o <<= 1) mx[rh] = fmaxf(mx[rh], __shfl_xor_sync(0xffffffffu, mx[rh], o));
             }
+            float up[2];
 #pragma unroll
             for (int rh = 0; rh < 2; ++rh) {
                 qinv[rh] = mx[rh] * (1.0f / 127.0f);
-                const float up = mx[rh] > 0.0f ? 127.0f / mx[rh] : 0.0f;
+                up[rh] = mx[rh] > 0.0f ? 127.0f / mx[rh] : 0.0f;
+            }
+            // Each A fragment row has its own maximum; preserve that row's scale when building the packed parts.
 #pragma unroll
-                for (int r = 0; r < 4; ++r) {   // a0: row gid, dims 0..15; a1: row gid + 8; a2: row gid, 16..31; a3
-                    const int rr = r & 1, kh = r >> 1;
-                    int hh[4], ll[4], mm[4];
+            for (int r = 0; r < 4; ++r) {   // a0: row gid, dims 0..15; a1: row gid + 8; a2: row gid, 16..31; a3
+                const int rr = r & 1, kh = r >> 1;
+                int hh[4], ll[4], mm[4];
 #pragma unroll
-                    for (int e = 0; e < 4; ++e) split3(x[rr][kh][e] * up, hh[e], ll[e], mm[e]);
-                    qa[0][r] = pack4(hh[0], hh[1], hh[2], hh[3]);
-                    qa[1][r] = pack4(ll[0], ll[1], ll[2], ll[3]);
-                    qa[2][r] = pack4(mm[0], mm[1], mm[2], mm[3]);
-                }
+                for (int e = 0; e < 4; ++e) split3(x[rr][kh][e] * up[rr], hh[e], ll[e], mm[e]);
+                qa[0][r] = pack4(hh[0], hh[1], hh[2], hh[3]);
+                qa[1][r] = pack4(ll[0], ll[1], ll[2], ll[3]);
+                qa[2][r] = pack4(mm[0], mm[1], mm[2], mm[3]);
             }
         }
         int ch[4] = {0, 0, 0, 0}, cl[4] = {0, 0, 0, 0}, cm[4] = {0, 0, 0, 0};
@@ -324,11 +326,16 @@ __device__ __forceinline__ void attn_chunk_body(const float* __restrict__ q, Qsa
             imma16832(ch, qa[0], b);
             imma16832(cl, qa[1], b);
             imma16832_us(cm, qa[2], b);
-            sptc[warp][gid][c0] = join3(ch[0], cl[0], cm[0]) * qinv[0] * ksc;
-            sptc[warp][gid][c0 + 1] = join3(ch[1], cl[1], cm[1]) * qinv[0] * ksc;
+            // B fragments are column-major across lanes (column = gid), while the C fragment's two output
+            // columns live on tig (2*tig and 2*tig+1). Fetch each output cell's K scale from the B lane that owns
+            // that column; using this lane's ksc would attach gid's scale to a different output cell.
+            const float ksc0 = __shfl_sync(0xffffffffu, ksc, (2 * tig) * 4);
+            const float ksc1 = __shfl_sync(0xffffffffu, ksc, (2 * tig + 1) * 4);
+            sptc[warp][gid][c0] = join3(ch[0], cl[0], cm[0]) * qinv[0] * ksc0;
+            sptc[warp][gid][c0 + 1] = join3(ch[1], cl[1], cm[1]) * qinv[0] * ksc1;
             if (gid + 8 < G) {
-                sptc[warp][gid + 8][c0] = join3(ch[2], cl[2], cm[2]) * qinv[1] * ksc;
-                sptc[warp][gid + 8][c0 + 1] = join3(ch[3], cl[3], cm[3]) * qinv[1] * ksc;
+                sptc[warp][gid + 8][c0] = join3(ch[2], cl[2], cm[2]) * qinv[1] * ksc0;
+                sptc[warp][gid + 8][c0 + 1] = join3(ch[3], cl[3], cm[3]) * qinv[1] * ksc1;
             }
         }
         __syncthreads();
@@ -1454,8 +1461,8 @@ void qsa_decode_attn_step(const float* q, const QsaAttnPools& pools, const int32
 // arguments (never the environment), so the Daily's kernels and upstream's can be run on the same inputs and the
 // outputs compared bit for bit.  The engine never calls these.
 // daily_chunk: 0 upstream's attn_chunk_kernel, 1 PR #540's kernel, 2 the named K8V4 tensor-core chunk kernel
-// (qsa_decode_tc_parity: the default kernel's outputs on the same pools compared within tolerance, since the
-// tensor-core scores sum the eight warps' 24-bit partials in warp order instead of one FP32 lane sum).
+// (qsa_decode_tc_parity compares each path with a host FP64 mathematical reference and checks the production
+// environment dispatch against the corresponding named path).
 void qsa_decode_attn_chunks_only(const float* q, const QsaAttnPools& pools, const int32_t* ids, const int32_t* steps,
                                  int64_t cap, const QsaShapes& s, float* scratch, int64_t n_q, int daily_chunk,
                                  void* stream) {

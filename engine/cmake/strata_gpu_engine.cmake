@@ -189,19 +189,22 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
     add_test(NAME qsa_slots_parity_lanecell COMMAND qsa_slots_parity)
     set_tests_properties(qsa_slots_parity qsa_slots_parity_lanecell PROPERTIES SKIP_RETURN_CODE 77)
     set_tests_properties(qsa_slots_parity_lanecell PROPERTIES ENVIRONMENT "STRATA_ATTN_LANECELL=1")
-    # fork: STRATA_ATTN_DECODE_TC=1's K8V4 tensor-core score phase against the warp-scoring default on synthetic
-    # pools (short and long widths, tail block, empty split, paged, streamed-masked, multi-query).  The harness
-    # compares the named TC chunk pass against the default pass through the same merge, and re-runs the default
-    # pass to prove it stays bitwise.  Divergence is reported per case rather than treated as a failure of quality.
-    add_executable(qsa_decode_tc_parity src/kernels/qsa_decode_tc_parity.cpp)
-    target_include_directories(qsa_decode_tc_parity PRIVATE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-    target_link_libraries(qsa_decode_tc_parity PRIVATE strata_kernels CUDA::cudart)
-    add_test(NAME qsa_decode_tc_parity COMMAND qsa_decode_tc_parity)
-    set_tests_properties(qsa_decode_tc_parity PROPERTIES SKIP_RETURN_CODE 77)
-    # the production entry point with the environment on: the batch window, slots and rows entries select the TC
-    # kernel for K8V4 pools, while the named chunk pass above does not read the variable
-    add_test(NAME qsa_decode_tc_parity_env COMMAND qsa_decode_tc_parity)
-    set_tests_properties(qsa_decode_tc_parity_env PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "STRATA_ATTN_DECODE_TC=1")
+    # K8V4 decode tensor-core scoring is native CUDA only; HIP-GFX906 compiles the TC path out.
+    if(NOT STRATA_HIP_GFX906)
+      # fork: STRATA_ATTN_DECODE_TC=1's K8V4 tensor-core score phase against the warp-scoring default on synthetic
+      # pools (short and long widths, tail block, empty split, paged, streamed-masked, multi-query). The harness
+      # compares both named chunk passes against a host double reference and checks the production batch dispatch
+      # against the selected named path. Following prompt i8v3 parity, TC must stay within 4x the measured default-path
+      # error (or 1e-6 of reference scale, whichever is larger) and within 1e-4 of the default output scale.
+      add_executable(qsa_decode_tc_parity src/kernels/qsa_decode_tc_parity.cpp)
+      target_include_directories(qsa_decode_tc_parity PRIVATE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+      target_link_libraries(qsa_decode_tc_parity PRIVATE strata_kernels CUDA::cudart)
+      add_test(NAME qsa_decode_tc_parity COMMAND qsa_decode_tc_parity)
+      set_tests_properties(qsa_decode_tc_parity PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "STRATA_ATTN_DECODE_TC=0")
+      # the production batch entry with the environment on must select the same TC result as the named chunk pass
+      add_test(NAME qsa_decode_tc_parity_env COMMAND qsa_decode_tc_parity)
+      set_tests_properties(qsa_decode_tc_parity_env PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "STRATA_ATTN_DECODE_TC=1")
+    endif()
     # fork: the Daily's decode attention (STRATA_ATTN_DAILY=1: PR #540's chunk kernel on every card and the bounded
     # merge) against upstream's kernels, bitwise; the production entries checked with the variable off and on
     add_executable(qsa_merge_daily_parity src/kernels/qsa_merge_daily_parity.cpp)
