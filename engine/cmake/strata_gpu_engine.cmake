@@ -1142,8 +1142,8 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
   target_include_directories(gr_multi_parity PRIVATE ${_strata_gpu_include_directories})
   target_link_libraries(gr_multi_parity PRIVATE strata_kernels ${_strata_gpu_runtime_target})
   add_test(NAME gr_multi_parity COMMAND gr_multi_parity)
-  # STRATA_HC_PERSIST=1: the persistent hyper-connection read against the default multi read (bounded, two runs bitwise),
-  # and with the variable unset it never runs (a skip where the card cannot hold its 80 blocks, and on CUDA)
+  # STRATA_HC_PERSIST=1: BF16 and Q8_0 persistent HC reads against the default paths, QFUSE output parity, and the
+  # existing 8 + tail fallback for wide Q8 windows; with the variable unset the persistent read never runs.
   add_executable(hc_persist_parity src/kernels/hc_persist_parity.cpp)
   target_include_directories(hc_persist_parity PRIVATE ${_strata_gpu_include_directories})
   target_link_libraries(hc_persist_parity PRIVATE strata_kernels ${_strata_gpu_runtime_target})
