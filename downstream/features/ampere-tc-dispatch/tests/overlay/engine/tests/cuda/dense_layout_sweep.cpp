@@ -43,7 +43,7 @@ void fill_weights(const Case& c, std::vector<uint8_t>& w, std::mt19937& rng) {
     for (auto& b : w) b = uint8_t(rng());
     const int block_elems = c.type == 8 ? 32 : 256;
     const int block_bytes = c.type == 8 ? 34 : c.type == 12 ? 144 : c.type == 13 ? 176 : 210;
-    const int scale_at = c.type == 8 ? 32 : c.type == 14 ? 208 : 0;
+    const int scale_at = c.type == 14 ? 208 : 0; // Q8_0/Q4_K/Q5_K: d@0; Q6_K: d@208.
     const std::size_t blocks = std::size_t(c.n) * std::size_t(c.k / block_elems);
     for (std::size_t b = 0; b < blocks; ++b) {
         const float d = 0.002f + float(rng() & 255u) * 0.00002f;
