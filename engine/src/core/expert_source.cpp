@@ -4713,6 +4713,37 @@ bool FileExpertSource::stage_exchange(int64_t layer, int64_t in, int64_t out, in
     return true;
 }
 
+bool FileExpertSource::stage_exchanges(const int32_t* layers, const int32_t* ins, const int32_t* outs,
+                                       const int64_t* qs, size_t n) {
+    if (n == 0) return true;
+    if (layers == nullptr || ins == nullptr || outs == nullptr || qs == nullptr) return false;
+    for (size_t i = 0; i < n; ++i) {
+        const int64_t layer = layers[i], in = ins[i], out = outs[i], q = qs[i];
+        if (layer < 0 || layer >= n_layers_ || in < 0 || out < 0 || in >= n_expert_ || out >= n_expert_ || in == out ||
+            !has_resident(layer, in) || has_resident(layer, out) || exchange_buffer(q, layer) == nullptr) return false;
+        const size_t i_in = (size_t) layer * (size_t) n_expert_ + (size_t) in;
+        const size_t i_out = (size_t) layer * (size_t) n_expert_ + (size_t) out;
+        if ((!override_.empty() && override_[i_out] != nullptr)) return false;
+        for (const Exchange& x : staged_)
+            if (x.in == i_in || x.q == q) return false;
+        for (size_t j = 0; j < i; ++j) {
+            const size_t j_in = (size_t) layers[j] * (size_t) n_expert_ + (size_t) ins[j];
+            const size_t j_out = (size_t) layers[j] * (size_t) n_expert_ + (size_t) outs[j];
+            if (q == qs[j] || i_in == j_in || i_out == j_out || i_in == j_out || i_out == j_in) return false;
+        }
+    }
+    if (override_.empty()) override_.assign((size_t) blobs_, nullptr);
+    staged_.reserve(staged_.size() + n);
+    for (size_t i = 0; i < n; ++i) {
+        const size_t i_in = (size_t) layers[i] * (size_t) n_expert_ + (size_t) ins[i];
+        const size_t i_out = (size_t) layers[i] * (size_t) n_expert_ + (size_t) outs[i];
+        const uint64_t bytes = layer_blob_bytes_[(size_t) layers[i]];
+        override_[i_out] = exchange_buffer(qs[i], layers[i]);
+        staged_.push_back({i_in, i_out, qs[i], bytes});
+    }
+    return true;
+}
+
 bool FileExpertSource::soft_commit_exchanges() {
     if (staged_.empty()) return true;
     if (exchange_storage_.active() || !xstage_pinned_ || xstage_ == nullptr || !complement_pinned_ || complement_device_ == nullptr)
@@ -5108,9 +5139,14 @@ bool FileExpertSource::pcie_layer(int64_t layer) const {
 // ================================ THE ADAPTER ================================
 
 bool ExpertDispatch::fetch_can(int64_t layer) const {
-    return fetch_admit > 0 && res_mut != nullptr && !usage.empty() && plan != nullptr && plan->pcie_mode == 2 &&
-           plan->dst2 != nullptr && peer == nullptr && remote_count == 0 && fs == nullptr && pcie_num > 0 &&
-           src != nullptr && src->pcie_layer(layer);
+    if (!(fetch_admit > 0 && res_mut != nullptr && !usage.empty() && plan != nullptr && plan->pcie_mode == 2 &&
+          plan->dst2 != nullptr && peer == nullptr && remote_count == 0 && fs == nullptr && pcie_num > 0 &&
+          src != nullptr && src->pcie_layer(layer))) return false;
+    if (!fetch_resident) return true;
+    const auto* file = dynamic_cast<const FileExpertSource*>(src);
+    return file != nullptr && file->complement_ready() && plan->fetch_copyback != nullptr &&
+           file->exchange_capacity() > (int64_t) fetch_exchanges.size() &&
+           (!file->exchanges_pending() || fetch_exchange_active);
 }
 
 void expert_pool_dispatch(void* user, const float* x_f, const int32_t* ids, const float* weights, int64_t n_embd,
@@ -5394,6 +5430,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
         // STRATA_ADAPT_FETCH: the share is the layer's most-routed misses, and the ones the tier would swap in are copied
         // into a slot as they are fetched (ExpertDispatch::fetch_admit)
         const bool fetch_on = m > 0 && d.fetch_can(d.layers);
+        auto* resident_file = d.fetch_resident ? dynamic_cast<FileExpertSource*>(d.src) : nullptr;
         const float* use = d.usage.empty() ? nullptr : d.usage.data() + (size_t) d.layers * (size_t) d.n_expert;
         bool pick[kMaxWindowEntries];
         if (fetch_on) {
@@ -5403,7 +5440,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
                 const int32_t e = ids[distinct[q]];   // a tail-skipped miss is not fetched
                 // (an unpinned blob cannot be fetched: under STRATA_PIN_BY_NEED a PCIe layer is pinned in part)
                 if (!skip_d[q] && e >= 0 && e < d.n_expert && d.host_res[(size_t) d.layers * (size_t) d.n_expert + (size_t) e] < 0 &&
-                    d.src->pinned(d.layers, e))
+                    d.src->pinned(d.layers, e) && (!d.fetch_resident || resident_file->has_resident(d.layers, e)))
                     mq[nm++] = q;
             }
             std::stable_sort(mq, mq + nm, [&](int a, int b) { return use[ids[distinct[a]]] > use[ids[distinct[b]]]; });
@@ -5475,7 +5512,8 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
         }
         if (d.fetch_admit > 0 && P.dst2 != nullptr)
             for (int q = 0; q < fetches; ++q) P.dst2[q] = 0;   // staging
-        if (fetch_on && fetches > 0 && (size_t) d.layers < d.fetch_avail.size()) d.fetch_avail[(size_t) d.layers] = 1;
+        if (fetch_on && fetches > 0 && !d.fetch_resident && (size_t) d.layers < d.fetch_avail.size())
+            d.fetch_avail[(size_t) d.layers] = 1;
         if (fetch_on && fetches > 0) {
             // the fetched experts routed enough, most-routed first, each against the next least-routed resident expert
             // of the layer that the window does not route (its slot is read by nothing until the next window)
@@ -5486,32 +5524,76 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
             int cq[64], nc = 0;
             for (int q = 0; q < fetches; ++q) {
                 const int32_t e = ids[pcie_i0[q]];
-                if (use[e] >= d.fetch_min && (d.in_flight.empty() || d.in_flight[lb + (size_t) e] == 0)) cq[nc++] = q;
+                if (use[e] >= d.fetch_min && (d.in_flight.empty() || d.in_flight[lb + (size_t) e] == 0) &&
+                    (!d.fetch_resident || resident_file->has_resident(d.layers, e))) cq[nc++] = q;
             }
             std::stable_sort(cq, cq + nc, [&](int a, int b) { return use[ids[pcie_i0[a]]] > use[ids[pcie_i0[b]]]; });
             int32_t vic[64];
             int nv = 0;
             for (int32_t e = 0; e < (int32_t) d.n_expert && nc > 0; ++e) {
-                if (d.res_mut[lb + (size_t) e] < 0 || d.fetch_mark[(size_t) e] != 0) continue;
+                if (d.res_mut[lb + (size_t) e] < 0 || d.fetch_mark[(size_t) e] != 0 ||
+                    (d.fetch_resident && resident_file->has_resident(d.layers, e))) continue;
                 if (nv < nc) vic[nv++] = e;
                 else if (use[e] < use[vic[nv - 1]]) vic[nv - 1] = e;
                 else continue;
                 for (int j = nv - 1; j > 0 && use[vic[j]] < use[vic[j - 1]]; --j) std::swap(vic[j], vic[j - 1]);
             }
-            for (int j = 0; j < nc && j < nv; ++j) {
+            struct Admission { int pcie_q; int32_t in, out, slot; int64_t exchange_q; };
+            Admission admitted[64];
+            int na = 0;
+            const int64_t exchange_cap = d.fetch_resident ? resident_file->exchange_capacity() : 64;
+            const int64_t exchange_used = (int64_t) d.fetch_exchanges.size();
+            const int64_t exchange_room = std::max<int64_t>(0, exchange_cap - exchange_used);
+            for (int j = 0; j < nc && j < nv && na < 64 && (!d.fetch_resident || na < exchange_room); ++j) {
                 const int q = cq[j];
                 const int32_t e = ids[pcie_i0[q]], v = vic[j];
                 if (use[e] < use[v] + d.fetch_margin) break;
                 const int32_t slot = d.res_mut[lb + (size_t) v];
-                P.dst2[q] = (unsigned long long) (d.cache_base + (d.cache_slot_off ? (size_t) d.cache_slot_off[slot]
-                                                                                   : (size_t) slot * (size_t) d.cache_blob));
-                d.res_mut[lb + (size_t) v] = -1;   // kNotResident
-                d.res_mut[lb + (size_t) e] = slot;
+                if (slot < 0) continue;
+                admitted[na] = {q, e, v, slot, exchange_used + na};
+                if (d.fetch_resident && resident_file->exchange_buffer(admitted[na].exchange_q, d.layers) == nullptr)
+                    continue;
+                ++na;
+            }
+            if (d.fetch_resident && na > 0) {
+                const uint8_t* copy_src[64];
+                uint8_t* copy_dst[64];
+                int32_t copy_layers[64], copy_in[64], copy_out[64];
+                int64_t copy_q[64];
+                for (int j = 0; j < na; ++j) {
+                    const Admission& a = admitted[j];
+                    copy_src[j] = d.cache_base + (d.cache_slot_off ? (size_t) d.cache_slot_off[a.slot]
+                                                                    : (size_t) a.slot * (size_t) d.cache_blob);
+                    copy_dst[j] = resident_file->exchange_buffer(a.exchange_q, d.layers);
+                    copy_layers[j] = (int32_t) d.layers;
+                    copy_in[j] = a.in;
+                    copy_out[j] = a.out;
+                    copy_q[j] = a.exchange_q;
+                }
+                if (P.fetch_copyback == nullptr || !P.fetch_copyback(P.ctx, copy_src, copy_dst, na, (size_t) bb)) {
+                    std::fprintf(stderr, "strata: resident ADAPT_FETCH could not preserve evicted experts; using the PCIe staging path\n");
+                    na = 0;
+                } else if (!resident_file->stage_exchanges(copy_layers, copy_in, copy_out, copy_q, (size_t) na)) {
+                    std::fprintf(stderr, "strata: resident ADAPT_FETCH ownership changed before staging; using the PCIe staging path\n");
+                    na = 0;
+                } else {
+                    d.fetch_exchange_active = true;
+                    for (int j = 0; j < na; ++j)
+                        d.fetch_exchanges.push_back({copy_layers[j], copy_in[j], copy_out[j], admitted[j].slot, copy_q[j]});
+                }
+            }
+            for (int j = 0; j < na; ++j) {
+                const Admission& a = admitted[j];
+                const size_t dst = lb + (size_t) a.in, src = lb + (size_t) a.out;
+                P.dst2[a.pcie_q] = (unsigned long long) (d.cache_base + (d.cache_slot_off ? (size_t) d.cache_slot_off[a.slot]
+                                                                                          : (size_t) a.slot * (size_t) d.cache_blob));
+                d.res_mut[src] = -1;   // kNotResident; the RAM ownership exchange commits after the graph finishes
+                d.res_mut[dst] = a.slot;
                 ++d.fetch_admitted;
                 d.res_dirty = true;
-                d.res_dirty_idx.push_back((int32_t) (lb + (size_t) v));
-                d.res_dirty_idx.push_back((int32_t) (lb + (size_t) e));
-                if (d.fetch_log_on) d.fetch_log.emplace_back((int64_t) (lb + (size_t) e), slot);
+                d.res_dirty_idx.push_back((int32_t) src);
+                d.res_dirty_idx.push_back((int32_t) dst);
+                if (d.fetch_log_on) d.fetch_log.emplace_back((int64_t) dst, a.slot);
             }
             for (int64_t i = 0; i < n; ++i)
                 if (ids[i] >= 0 && ids[i] < d.n_expert) d.fetch_mark[(size_t) ids[i]] = 0;
