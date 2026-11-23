@@ -135,6 +135,9 @@ constexpr unsigned kT75Formats = t75_bit(T_IQ3_S, true) | t75_bit(T_IQ4_NL, fals
                                  t75_bit(T_IQ2_XXS, true) | t75_bit(T_IQ2_XS, true);
 // the trellis types: 128-value blocks (32 steps of 4 weights), two 32-value sub-blocks a 64-value stage
 __host__ __device__ constexpr bool is_tq(int t) { return t == T_TQ2_T || t == T_TQK6 || t == T_TQK7; }
+__host__ __device__ constexpr bool tq_pair(int gu, int down) {
+    return (gu == T_TQK6 && down == T_TQK7) || (gu == T_TQ2_T && down == T_TQ2_T);
+}
 __host__ __device__ constexpr int tq_k(int t) { return t == T_TQK6 ? 6 : t == T_TQK7 ? 7 : 8; }
 static_assert(sizeof(block_iq2_xxs) == 66 && sizeof(block_iq2_xs) == 74 && sizeof(block_iq2_s) == 82 &&
               sizeof(block_iq3_xxs) == 98 && sizeof(block_iq3_s) == 110 && sizeof(block_iq4_xs) == 136 &&
@@ -898,7 +901,7 @@ native_kernel(const BatchOf<NT> b, const NativeGeom geo, const Tables tb, const 
     static_assert(2 * WR <= NT, "every decode unit is a thread of the block");
     constexpr int WLDX = F16 ? WLDH : WLD;
     constexpr int WT_BYTES = WR * WLDX, WS_FLOATS = F16 ? 0 : WR * 4, ACT_STAGE = TR * AB;
-    constexpr bool TWO_PASS = NT != THREADS;   // the two-pass loads (load_unit_l) only in the opt-in NT = 256 kernels
+    constexpr bool TWO_PASS = NT != THREADS && !(F16 && is_tq(WT));   // TQ's F16/NT=256 form uses its normal single-pass decoder
     static_assert(!(TWO_PASS && WT == T_Q5_0), "the NT = 256 kernels have no Q5_0 form");
     static_assert(!(TWO_PASS && (has_min(WT) || WT == T_Q8_0 || WT == T_Q6_K || is_tq(WT))), "the NT = 256 kernels have no K-quant / Q5_1 / Q8_0 / Q6_K / trellis form");
     constexpr bool SWT = sw_inst(WT, GU, WW, NT, F16) && ASTAGES_DEV == ASTAGES;   // weight staging (see sw_on)
@@ -2664,6 +2667,8 @@ struct DevInfo {
     int occ_q6k = 1;    // the Q6_K gate/up kernels' blocks per multiprocessor (the down keeps occ_kq8)
     bool tq = false;    // the trellis kernels (TQK6 / TQ2_T gate/up, TQK7 / TQ2_T down) are set up: by default on sm_86 with 80+ SMs, STRATA_PF_FUSED_TQ=1 on any sm_80+ (fused_tq_default.hpp)
     int occ_tq_gu = 1, occ_tq_d = 1;   // their blocks per multiprocessor (their own)
+    bool tq_f16 = false; // the TQ-only F16/NT=256 candidate (STRATA_PF_FUSED_TQ_F16=1), independent of other formats' NT=256 switch
+    int occ_tq_f16_gu = 1, occ_tq_f16_d = 1;
     bool nvfp4 = false; // the NVFP4 kernels (gate/up and down) are set up on this sm_80+ card (whether a layer takes them: native_supported)
     int occ_nvfp4_gu = 1, occ_nvfp4_d = 1;   // their blocks per multiprocessor (their own)
 #endif
@@ -2759,6 +2764,10 @@ template <int T, bool GU> void t75_setup(DevInfo& d, int& occ) {
 // STRATA_PF_FUSED_F16=1 (sm_80+, opt-in, changes the output at rounding level): the NT = 256 kernels' F16 products
 bool f16c_requested() {
     static const bool on = [] { const char* v = std::getenv("STRATA_PF_FUSED_F16"); return v != nullptr && v[0] == '1'; }();
+    return on;
+}
+bool tq_f16_requested() {
+    static const bool on = [] { const char* v = std::getenv("STRATA_PF_FUSED_TQ_F16"); return v != nullptr && v[0] == '1' && v[1] == '\0'; }();
     return on;
 }
 bool nt256_requested() {
@@ -2977,6 +2986,24 @@ const DevInfo& dev_info() {
         d.tq = true;
         d.occ_tq_gu = og;
         d.occ_tq_d = od;
+    }
+    // Separate TQ F16 matrix-core candidate: the ordinary NT=256 two-pass loader has no trellis decoder.
+    // Keep the TQ codebook/rotation path and use its single-pass decoder with the F16 products instead.
+    if (d.tq && tq_f16_requested()) {
+#if STRATA_PF_WIDE_PARAMS
+        int og = 1 << 20, od = 1 << 20;
+        const bool ok_f16 = setup_ww<T_TQK6, true, 2, 256, true>(og) && setup_ww<T_TQ2_T, true, 2, 256, true>(og) &&
+                            setup_ww<T_TQK7, false, 2, 256, true>(od) && setup_ww<T_TQ2_T, false, 2, 256, true>(od);
+        if (ok_f16) {
+            d.tq_f16 = true;
+            d.occ_tq_f16_gu = og;
+            d.occ_tq_f16_d = od;
+        } else {
+            std::fprintf(stderr, "prefill fused experts (native): STRATA_PF_FUSED_TQ_F16=1 is not available here\n");
+        }
+#else
+        std::fprintf(stderr, "prefill fused experts (native): STRATA_PF_FUSED_TQ_F16=1 needs a CUDA compiler with wide kernel parameters\n");
+#endif
     }
     // NVFP4 (ModelOpt packs: gate/up and down both NVFP4): 64-value blocks, a scale per 16 values on the per-16 path, the per-expert scales on the FP32 products.  Set up on every
     // sm_80+ card; native_supported decides which layers take it (STRATA_PF_FUSED=1 as given or as a build without MMQ sets it, STRATA_PREFILL_NVFP4 unset or w4a8).
@@ -3252,6 +3279,19 @@ void launch(bool ws, unsigned grid, const WideBatch& b, const NativeGeom& g, con
     (void) ws; (void) grid; (void) b; (void) g; (void) tb; (void) a; (void) src; (void) o; (void) dm; (void) s;
 #endif
 }
+#if !defined(__HIPCC__)
+template <int T, bool GU>
+void launch_tq_f16(unsigned grid, const WideBatch& b, const NativeGeom& g, const Tables& tb, const void* act,
+                   const int32_t* src, void* out, float* dm, cudaStream_t s) {
+#if STRATA_PF_WIDE_PARAMS
+    const uint8_t* a = (const uint8_t*) act;
+    uint8_t* o = (uint8_t*) out;
+    native_kernel<T, GU, 2, 256, true><<<grid, 256, smem_bytes(T, 2, host_astages(), 256, true, GU), s>>>(b, g, tb, a, src, o, dm);
+#else
+    (void) grid; (void) b; (void) g; (void) tb; (void) act; (void) src; (void) out; (void) dm; (void) s;
+#endif
+}
+#endif
 
 // The work item's shape for a layer of `n` routed rows over `n_expert` experts: 128 routed rows when an expert has
 // about one such tile (56 to 112 rows on average), else 64.  Measured on the RTX 5070 (tests/cuda/prefill_fused_iq_test,
@@ -3441,7 +3481,8 @@ bool native_supported(int gu_type, int d_type) {
         const DevInfo& d = dev_info();
         // Gyro-S's pair follows the default rule (d.tq); Gyro-M's TQ2_T / TQ2_T has no gate series yet: only with STRATA_PF_FUSED_TQ=1 (fused_tq::gyro_m_on)
         const bool pair = (gu_type == T_TQK6 && d_type == T_TQK7) || (gu_type == T_TQ2_T && d_type == T_TQ2_T && strata::prefill::fused_tq::gyro_m_on(tq_env()));
-        return geo_ok && pair && d.ok && d.tq && !d.t75 && d.occ_nt <= 0 && !d.ws;
+        const bool tq_f16_pair = d.tq_f16 && tq_pair(gu_type, d_type);
+        return geo_ok && pair && d.ok && d.tq && !d.t75 && (tq_f16_pair || (d.occ_nt <= 0 && !d.ws));
     }
     // NVFP4 (ModelOpt packs), the NVFP4 / NVFP4 pair only (a mixed pair keeps MMQ or the FP16 path): taken when STRATA_PF_FUSED is 1 AS SET (by the user, or by a build without MMQ, whose
     // start-up sets it) - so a build with MMQ keeps its MMQ w4a8 default unless the switch is given - and STRATA_PREFILL_NVFP4 is unset or w4a8 (fp16 asks for the exact reference
@@ -3681,6 +3722,16 @@ void experts_native(const Batch& b, const NativeGeom& g, int n_expert, int64_t n
     }
     const cudaStream_t s = (cudaStream_t) stream;
     const Tables tb = tables(const_cast<void*>(scratch), n_expert);
+#if !defined(__HIPCC__)
+    if (d.tq_f16 && tq_pair(g.gu_type, g.d_type)) {
+        WideBatch w;
+        w.e0 = b.e0;
+        w.e1 = b.e1;
+        std::copy(b.blob, b.blob + (b.e1 - b.e0), w.blob);
+        experts_native(w, g, n_expert, n, scratch, xa, src, ha, dm, stream);
+        return;
+    }
+#endif
 #if defined(__HIPCC__)
     {
         const int64_t tiles = (n + kTileRows - 1) / kTileRows + (b.e1 - b.e0);
@@ -3931,6 +3982,15 @@ void experts_native(const Batch& b, const NativeGeom& g, int n_expert, int64_t n
 }
 
 bool native_wide() { const DevInfo& d = dev_info(); return d.occ_nt > 0 || d.ws; }
+bool native_wide(int gu_type, int d_type) {
+    const DevInfo& d = dev_info();
+#if !defined(__HIPCC__)
+    return d.occ_nt > 0 || d.ws || (d.tq_f16 && tq_pair(gu_type, d_type));
+#else
+    (void) gu_type; (void) d_type;
+    return d.occ_nt > 0 || d.ws;
+#endif
+}
 
 void experts_native(const WideBatch& b, const NativeGeom& g, int n_expert, int64_t n, const void* scratch, const void* xa,
                     const int32_t* src, void* ha, float* dm, void* stream) {
@@ -3938,18 +3998,39 @@ void experts_native(const WideBatch& b, const NativeGeom& g, int n_expert, int64
     const DevInfo& d = dev_info();
 #if !defined(__HIPCC__)
     // (no Q5_0 / K-quant / Q5_1 form of the NT = 256 kernels: native_supported keeps those layers off this path)
+    const bool tq_f16_pair = d.tq_f16 && tq_pair(g.gu_type, g.d_type);
     const bool q50 = g.d_type == T_Q5_0 || g.gu_type == T_Q4_K || g.gu_type == T_Q5_K || g.d_type == T_Q5_1 || g.d_type == T_Q8_0 ||
-                     is_tq(g.gu_type) || is_tq(g.d_type) || g.gu_type == T_NVFP4;
+                     ((is_tq(g.gu_type) || is_tq(g.d_type)) && !tq_f16_pair) || g.gu_type == T_NVFP4;
 #else
+    constexpr bool tq_f16_pair = false;
     constexpr bool q50 = false;
 #endif
-    if ((d.occ_nt <= 0 && !d.ws) || !gu_covered(g.gu_type) || !d_covered_on(g.d_type, d) || q50) {
+    if ((d.occ_nt <= 0 && !d.ws && !tq_f16_pair) || !gu_covered(g.gu_type) || !d_covered_on(g.d_type, d) || q50) {
         std::fprintf(stderr, "prefill fused experts (native, NT = 256): types %d / %d are not covered here\n", g.gu_type,
                      g.d_type);
         std::exit(1);
     }
     const cudaStream_t s = (cudaStream_t) stream;
     const Tables tb = tables(const_cast<void*>(scratch), n_expert);
+#if !defined(__HIPCC__)
+    if (tq_f16_pair) {
+        const int64_t tiles = (n + kTileRows - 1) / kTileRows + (b.e1 - b.e0);
+        const unsigned g_gu = (unsigned) std::min<int64_t>(tiles * (GU_ROWS_N / weight_rows(2)), (int64_t) d.sms * d.occ_tq_f16_gu);
+        const unsigned g_d = (unsigned) std::min<int64_t>(tiles * (D_ROWS_N / weight_rows(2)), (int64_t) d.sms * d.occ_tq_f16_d);
+        // Gate/up writes this call's FP32 H rows into dm when the down rotation is on;
+        // enqueue the rotation after that write and before down consumes ha.
+        if (g.gu_type == T_TQK6) launch_tq_f16<T_TQK6, true>(g_gu, b, g, tb, xa, src, ha, g_rot_on ? dm : nullptr, s);
+        else launch_tq_f16<T_TQ2_T, true>(g_gu, b, g, tb, xa, src, ha, g_rot_on ? dm : nullptr, s);
+        if (g_rot_on) {
+            const int64_t nw = n * (D_ROWS_K / 128);
+            rot_quant_h_kernel<<<blocks(nw, 8), 256, 0, s>>>(dm, tb.off, b.e0, b.e1, n, g_rot_signs, (uint8_t*) ha);
+        }
+        if (g.d_type == T_TQK7) launch_tq_f16<T_TQK7, false>(g_d, b, g, tb, ha, src, nullptr, dm, s);
+        else launch_tq_f16<T_TQ2_T, false>(g_d, b, g, tb, ha, src, nullptr, dm, s);
+        ck(cudaGetLastError(), "experts_native (TQ F16 / NT = 256)");
+        return;
+    }
+#endif
     // WW 2 (128 x 64 items), as many blocks as are resident (the WS kernel: one a multiprocessor); the tiles as in
     // experts_native(const Batch&)
     const int64_t tiles = (n + kTileRows - 1) / kTileRows + (b.e1 - b.e0);
