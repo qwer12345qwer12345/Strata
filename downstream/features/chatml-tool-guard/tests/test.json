@@ -3,12 +3,15 @@
   "targets": [],
   "ctest_regex": "",
   "overlays": [
-    "overlay/terminal/serve/test_chatml_tool_guard.py"
+    "overlay/terminal/serve/test_chatml_tool_guard.py",
+    "overlay/terminal/serve/test_repeat_failure_retry.py"
   ],
   "python_tests": [],
   "python_modules": [
     "serve.test_chatml_tool_guard.ChatMLToolGuard",
-    "serve.test_server.UnfinishedToolCall"
+    "serve.test_server.UnfinishedToolCall",
+    "serve.test_repeat_failure_retry.RepeatFailureRetry",
+    "serve.test_server.RepeatStop"
   ],
   "settings_generation": false
 }

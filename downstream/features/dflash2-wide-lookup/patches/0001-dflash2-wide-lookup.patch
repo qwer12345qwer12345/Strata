@@ -225,10 +225,10 @@ index 65d0b054..d0de04ed 100644
              }
 diff --git a/terminal/l2/chat_latency.py b/terminal/l2/chat_latency.py
 new file mode 100644
-index 00000000..95e38a2e
+index 00000000..37cd37a9
 --- /dev/null
 +++ b/terminal/l2/chat_latency.py
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,123 @@
 +#!/usr/bin/env python3
 +"""Measure local Strata Chat Completions with synthetic prompts."""
 +import argparse
@@ -312,6 +312,8 @@ index 00000000..95e38a2e
 +            item = json.loads(payload)
 +            if item.get('error'):
 +                raise RuntimeError(f'{name}: benchmark request returned an error')
++            if item.get('strata_generation_failure') or item.get('strata_generation_recovery'):
++                raise RuntimeError(f'{name}: repetition failure/recovery is not a valid performance baseline')
 +            if item.get('timings'):
 +                timings = item['timings']
 +            has_content = False
@@ -896,10 +898,10 @@ index 00000000..768279e7
 +    return report
 diff --git a/terminal/l2/kernel_check.py b/terminal/l2/kernel_check.py
 new file mode 100644
-index 00000000..28206102
+index 00000000..5fd451d6
 --- /dev/null
 +++ b/terminal/l2/kernel_check.py
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,77 @@
 +"""Explicit prebuilt GPU correctness checks and a resident-weight Dense sweep."""
 +import datetime
 +import hashlib
@@ -907,13 +909,15 @@ index 00000000..28206102
 +from pathlib import Path
 +import subprocess
 +import time
++import sys
 +import xml.etree.ElementTree as ET
 +from l2 import headless_experiments as runner
 +
 +
 +def plan(cfg):
 +    return {'suite':'kernel-check-v1','automatic_tests':False,
-+            'checks':['K8V4 decode TC named/default dispatch','Q8 HC persistent and QFUSE',
++            'checks':['tool repeat retry and disk archive eligibility regression',
++                      'K8V4 decode TC named/default dispatch','Q8 HC persistent and QFUSE',
 +                      'TQ INT8 and F16 prefill','resident complement batch exchange',
 +                      'vision expert lease','Dense resident-weight layout latency sweep'],
 +            'compilation':False,'model_requests':False}
@@ -936,6 +940,16 @@ index 00000000..28206102
 +        if remaining<=0:raise TimeoutError('kernel stage time budget exhausted')
 +        return min(limit,remaining)
 +    try:
++        with (folder/'repeat-recovery.log').open('w') as log:
++            result=subprocess.run([sys.executable,'-m','unittest',
++                'serve.test_repeat_failure_retry.RepeatFailureRetry','serve.test_chatml_tool_guard.ChatMLToolGuard',
++                'serve.test_server.UnfinishedToolCall','serve.test_server.RepeatStop',
++                'serve.test_reasoning_loop_recovery','serve.test_stream_errors','serve.test_stream_terminal',
++                'l2.test_controller','l2.test_runtime_config','l2.test_headless_experiments',
++                'l2.test_manual_compare','l2.test_full_suite','l2.test_vision_check'],
++                cwd=root,stdout=log,stderr=subprocess.STDOUT,timeout=timeout(90))
++        report['steps'].append({'check':'repeat-recovery-regression','returncode':result.returncode})
++        if result.returncode:raise RuntimeError('repeat recovery/archive regression failed')
 +        for n,command in enumerate(commands):
 +            with (folder/f'correctness-{n}.log').open('w') as log:
 +                result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,timeout=timeout(300))
@@ -1125,10 +1139,10 @@ index 00000000..9e681352
 +    raise SystemExit(main())
 diff --git a/terminal/l2/test_headless_experiments.py b/terminal/l2/test_headless_experiments.py
 new file mode 100644
-index 00000000..c6f88f55
+index 00000000..428e1a79
 --- /dev/null
 +++ b/terminal/l2/test_headless_experiments.py
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,168 @@
 +import copy
 +import contextlib
 +import io
@@ -1240,6 +1254,15 @@ index 00000000..c6f88f55
 +   self.assertEqual(data[0]['lookup']['round_latency_ms']['p99'],2.5)
 +   self.assertEqual(data[0]['widths'],{'4':1,'12':1})
 +   self.assertNotIn('789',json.dumps(data))
++ def test_benchmark_rejects_service_retry_metadata(self):
++  from email.message import Message
++  for field in ('strata_generation_failure','strata_generation_recovery'):
++   response=io.BytesIO(b'data: '+json.dumps({field:{'reason':'repetition'}}).encode()+b'\n\ndata: [DONE]\n\n')
++   response.headers=Message();response.headers['Content-Type']='text/event-stream'
++   with patch('l2.chat_latency.urllib.request.build_opener') as opener:
++    opener.return_value.open.return_value=response
++    with self.assertRaisesRegex(RuntimeError,'not a valid performance baseline'):
++     h.measure('http://127.0.0.1:1','fixture','prompt',64,10)
 + def test_skip_and_adapt_metrics_are_observed_not_inferred_from_flags(self):
 +  text=('STRATA_ROUTE_TAIL_SKIP=7 is ON\n'
 +        'strata serve: route tail skip: 15 missed experts skipped (21 entries) since the start\n'

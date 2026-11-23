@@ -1,0 +1,29 @@
+{
+  "date": "2026-11-23",
+  "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
+  "stack_tree": "6df856425df4149ae6238f6e004d91e267df8259",
+  "engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+  "configuration": {
+    "repeat_failure_retry": true,
+    "chatml_tool_guard": true,
+    "prior": 0.5,
+    "automatic_benchmarks": false
+  },
+  "validation": {
+    "final_regression_tests": 93,
+    "matching_prepared_files": 79,
+    "single_token_guard_retained": 256,
+    "unpublished_draft_max_retries": 1,
+    "shared_generation_budget": true,
+    "stream_nonstream_and_followup_request": "passed with MockEngine",
+    "no_replay_after_published_content_or_tool": "passed with MockEngine",
+    "cancel_and_embedding_ownership": "passed with MockEngine",
+    "failed_archive_preservation": "passed with synthetic HTTP backend"
+  },
+  "not_run": [
+    "Pi client live-model end-to-end",
+    "GPU/model performance benchmark"
+  ],
+  "build": "Python only; existing CUDA binary unchanged",
+  "manual_all_includes_repeat_regressions": true
+}

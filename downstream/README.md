@@ -274,3 +274,6 @@ python downstream/scripts/test.py --feature example \
 官方与下游数值/性能取舍的完整审计见 [NUMERICAL_PERFORMANCE_AUDIT.md](NUMERICAL_PERFORMANCE_AUDIT.md)，包含已有K8V4 IMMA与待扩展decode split的区别，以及spec参数接线修正。
 
 最新日常已启用Embedding实际计费与GDN NP2；[手动矩阵](DAILY_CONFIGURATION.md)现有114组（新增数值/执行候选44组），需要改代码的候选见[下一轮计划](NEXT_OPTIMIZATION_PLAN.md)。
+
+
+2026-11-23：已增加一次重复生成失败恢复，保留256-token保护，失败草稿不覆盖旧存档。[配置、行为边界与回归](features/chatml-tool-guard/README.md)。

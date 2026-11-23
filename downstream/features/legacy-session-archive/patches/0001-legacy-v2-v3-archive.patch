@@ -8734,10 +8734,10 @@ index 00000000..cd700dc8
 +if __name__=='__main__':main()
 diff --git a/terminal/l2/reference_controller.py b/terminal/l2/reference_controller.py
 new file mode 100644
-index 00000000..486a4c4b
+index 00000000..c70c9daf
 --- /dev/null
 +++ b/terminal/l2/reference_controller.py
-@@ -0,0 +1,178 @@
+@@ -0,0 +1,183 @@
 +#!/usr/bin/env python3
 +"""Single-slot Chat Completions adapter for PR #5500's saveinc/preload APIs.
 +Streams SSE immediately. Stores message hashes, never message text, in its index.
@@ -8793,6 +8793,8 @@ index 00000000..486a4c4b
 +  except (ValueError,OSError):return e.code,{}
 + except (OSError,ValueError) as e:return 0,{'error':str(e)}
 +def cache_body(body):return {k:body[k] for k in ('messages','tools','chat_template_kwargs') if k in body}
++def cacheable_response(data):
++ return isinstance(data,dict) and 'error' not in data and not data.get('strata_generation_failure')
 +def handle_turn(body):
 + hs=chain_hashes(body.get('messages'));row=find_entry(load_index(),family(body),hs)
 + if not row:return None
@@ -8887,13 +8889,16 @@ index 00000000..486a4c4b
 +        payload=line[5:].strip()
 +        if payload==b'[DONE]':
 +         self.wfile.write(b'\n');self.wfile.flush();complete=True;break
-+        try:failed=failed or 'error' in json.loads(payload)
++        try:failed=failed or not cacheable_response(json.loads(payload))
 +        except (ValueError,TypeError):pass
 +      watch_stop.set()
 +      if complete and not failed:after_turn(body,True)
 +     else:
 +      data=r.read();watch_stop.set()
-+      if r.status==200:after_turn(body,True)
++      if r.status==200:
++       try:cacheable=cacheable_response(json.loads(data))
++       except (ValueError,TypeError):cacheable=False
++       if cacheable:after_turn(body,True)
 +      self.send_response(r.status);self.send_header('Content-Type',r.headers.get('Content-Type','application/json'));self.send_header('Content-Length',str(len(data)));self.end_headers();sent=True;self.wfile.write(data)
 +   except urllib.error.HTTPError as e:
 +    if not sent:
@@ -8918,7 +8923,7 @@ index 00000000..486a4c4b
 +if __name__=='__main__':main()
 diff --git a/terminal/l2/runtime_config.py b/terminal/l2/runtime_config.py
 new file mode 100644
-index 00000000..ada930f2
+index 00000000..c14d25d8
 --- /dev/null
 +++ b/terminal/l2/runtime_config.py
 @@ -0,0 +1,70 @@
@@ -8987,7 +8992,7 @@ index 00000000..ada930f2
 +    result.setdefault('env', {}).update(STRATA_TQ_AMPERE_ROWS=rows,
 +                                      STRATA_PF_FUSED_TQ='1', STRATA_PF_GROUP_SCRATCH='0')
 +    result['env'].update(data.get('environment', {}))
-+    for key in ('vision','vram_elastic','comparison_reference'):
++    for key in ('vision','vram_elastic','comparison_reference','repeat_failure_retry'):
 +        if key in data:result[key]=copy.deepcopy(data[key])
 +    result.update(exe=str(exe), cwd=str(root), log=data['log'], slot_save_path=data['archive_dir'],
 +                  configuration_status=data.get('configuration_status', STATUS))
@@ -9167,10 +9172,10 @@ index 00000000..2e8d14d5
 +    return report
 diff --git a/terminal/l2/test_controller.py b/terminal/l2/test_controller.py
 new file mode 100644
-index 00000000..912f5479
+index 00000000..545e126b
 --- /dev/null
 +++ b/terminal/l2/test_controller.py
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,103 @@
 +import json,tempfile,threading,unittest,urllib.request,socket
 +from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 +from pathlib import Path
@@ -9191,8 +9196,10 @@ index 00000000..912f5479
 +     self.send_response(200);self.send_header('Content-Type','text/event-stream');self.send_header('Connection','close');self.end_headers()
 +     self.wfile.write(b'data: {"choices":[{"delta":{"content":"first"}}]}\n\n');self.wfile.flush()
 +     owner.release.wait(3)
++     if body['messages'][-1].get('content')=='repeat-failure':
++      self.wfile.write(b'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"strata_generation_failure":{"reason":"repetition"}}\n\n');self.wfile.flush()
 +     self.wfile.write(b'data: [DONE]\n\n');self.wfile.flush();self.close_connection=True
-+    elif self.path=='/v1/chat/completions':self.reply({'choices':[{'message':{'role':'assistant','content':'ok'}}]})
++    elif self.path=='/v1/chat/completions':self.reply({'choices':[{'message':{'role':'assistant','content':'ok'}}],**({'strata_generation_failure':{'reason':'repetition'}} if body['messages'][-1].get('content')=='repeat-failure' else {})})
 +    elif self.path=='/v1/cache/probe':self.reply({'prompt_tokens':10000,'reusable_tokens':0})
 +    elif self.path=='/v1/cache/preload':self.reply({'serial':1,'tokens':9000})
 +    else:self.reply({'ok':True,'tokens':9000})
@@ -9239,6 +9246,15 @@ index 00000000..912f5479
 +  for text in ['A','B','A']:
 +   with self.request(self.body(text)) as r:r.read()
 +  self.assertEqual(sum('action=saveinc' in p for p,b in self.calls),2)
++ def test_failed_generation_notice_does_not_overwrite_good_archive(self):
++  with self.request(self.body('root')) as r:r.read()
++  before=c.load_index();self.release.set()
++  for stream in (False,True):
++   bad=self.body('root');bad.update(stream=stream)
++   bad['messages'] += [{'role':'assistant','content':'previous good reply'},{'role':'user','content':'repeat-failure'}]
++   with self.request(bad) as r:r.read()
++   self.assertEqual(c.load_index(),before)
++  self.assertEqual(sum('action=saveinc' in p for p,b in self.calls),1)
 + def test_return_to_ancestor_does_not_overwrite_descendant(self):
 +  root=self.body('root');child=self.body('root');child['messages'] += [{'role':'assistant','content':'one'},{'role':'user','content':'child'}]
 +  for body in [root,child,root]:
@@ -9265,10 +9281,10 @@ index 00000000..912f5479
 +   self.assertIn(b'504',data.split(b'\r\n')[0])
 diff --git a/terminal/l2/test_runtime_config.py b/terminal/l2/test_runtime_config.py
 new file mode 100644
-index 00000000..dfa6e967
+index 00000000..2dfc2ca1
 --- /dev/null
 +++ b/terminal/l2/test_runtime_config.py
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,54 @@
 +import contextlib
 +import copy
 +import hashlib
@@ -9295,7 +9311,7 @@ index 00000000..dfa6e967
 +   'archive_dir':str(root/'archives'),'ple_gguf':str(ple),'ampere_rows':'2',
 +   'environment':{'STRATA_DF2_AMPERE_TUNING':'2','STRATA_DF2_GEMM_TC':'0','STRATA_ADAPT_NOWAIT':'1','STRATA_ROUTE_TAIL_SKIP':'7'},
 +   'argument_overrides':{'--spec':'4','--lookup-max-t':'16'},'configuration_status':'NOT TESTED',
-+   'vision':{'gpu':True,'expert_lease':True},'vram_elastic':True}
++   'vision':{'gpu':True,'expert_lease':True},'vram_elastic':True,'repeat_failure_retry':True}
 +  (state/'production-baseline.json').write_text(json.dumps(selection))
 +  file=root/'profile.json';file.write_text(json.dumps(profile))
 +  return profile,file,state
@@ -9311,6 +9327,7 @@ index 00000000..dfa6e967
 +   self.assertEqual(cfg['env']['STRATA_ROUTE_TAIL_SKIP'],'7')
 +   self.assertEqual(cfg['configuration_status'],'NOT TESTED')
 +   self.assertTrue(cfg['vision']['expert_lease']);self.assertTrue(cfg['vram_elastic'])
++   self.assertTrue(cfg['repeat_failure_retry'])
 +   self.assertEqual(profile,before)
 + def test_legacy_profile_pins_selection_for_official_drafting(self):
 +  from strata_control import user_args

@@ -4,13 +4,13 @@
   "version": "0.2.4",
   "status": "active",
   "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
-  "patched_tree": "0a8e9a51ccdfe06c047fa0e53840cd31e34e9da1",
+  "patched_tree": "8a48bd90973f50686790bb3dd454e88afc2b552e",
   "requires": [],
   "patches": [
     {
       "id": "legacy-v2-v3-archive",
       "path": "patches/0001-legacy-v2-v3-archive.patch",
-      "sha256": "51791bc2ef1e095da0f4a804447d62ac0cec99cd8ca9e6c387358f15289e7c07"
+      "sha256": "8c0a86dd7822c17ca5c69b5fcc2078e3606ea64b564e633d3a0f0877f4055274"
     }
   ],
   "tests": "tests/test.json",
