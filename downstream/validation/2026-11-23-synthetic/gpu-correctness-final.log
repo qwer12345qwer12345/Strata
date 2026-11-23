@@ -1,0 +1,17 @@
+Test project <prepared-worktree>/terminal/build
+    Start  87: qsa_decode_tc_parity
+1/6 Test  #87: qsa_decode_tc_parity ..............   Passed    0.47 sec
+    Start  88: qsa_decode_tc_parity_env
+2/6 Test  #88: qsa_decode_tc_parity_env ..........   Passed    0.44 sec
+    Start  99: file_expert_source_rotation_gpu
+3/6 Test  #99: file_expert_source_rotation_gpu ...   Passed    0.72 sec
+    Start 111: vision_expert_lease_gpu_test
+4/6 Test #111: vision_expert_lease_gpu_test ......   Passed    0.50 sec
+    Start 181: hc_persist_parity
+5/6 Test #181: hc_persist_parity .................   Passed    0.46 sec
+    Start 182: hc_persist_default_off
+6/6 Test #182: hc_persist_default_off ............   Passed    0.39 sec
+
+100% tests passed out of 6
+
+Total Test time (real) =   2.98 sec

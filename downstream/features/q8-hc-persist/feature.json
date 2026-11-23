@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "status": "active",
   "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
-  "patched_tree": "18075708ee9d78dabeb190af924f400eed6daa1e",
+  "patched_tree": "2cb8f4cea052e7d4f060df2d80bed5fcb3743a17",
   "requires": [],
   "source_pr": "https://github.com/qwer12345qwer12345/Strata/pull/9",
   "reviewed_head": "2ae4d6c208c698e39c4fa478941a37eccd9e8268",
@@ -12,7 +12,7 @@
     {
       "id": "q8-hc-persist",
       "path": "patches/0001-feature.patch",
-      "sha256": "a32e5619c48e35af95932c46cd21668210ac364190a9885c659ae02464cf0947"
+      "sha256": "04502be346ec03ca7eecaeaf3a4e4c29a3c5daeb8f34cd9c4f88a51285d1e0a9"
     }
   ],
   "tests": "tests/test.json",

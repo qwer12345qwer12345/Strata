@@ -1,0 +1,55 @@
+{
+  "upstream_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
+  "full_stack_tree": "94f900348f401d72d119a5c0850e211ad06e0e6e",
+  "engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+  "build": {
+    "cuda_sm86": "passed",
+    "cuda_toolkit": "13.4",
+    "host_compiler": "GCC 16",
+    "build_type": "Release",
+    "verify_max_t": 8,
+    "HIP_SYCL_Metal": "not run"
+  },
+  "passed": {
+    "feature_packages_independent_and_combined": 13,
+    "prepared_source_files_matching_compiled_worktree": 75,
+    "control_unittests": 17,
+    "cache_control_unittests": 14,
+    "serve_tool_and_vision_unittests": 84,
+    "gpu_correctness_ctest": [
+      "qsa_decode_tc_parity",
+      "qsa_decode_tc_parity_env",
+      "file_expert_source_rotation_gpu",
+      "vision_expert_lease_gpu_test",
+      "hc_persist_parity",
+      "hc_persist_default_off"
+    ],
+    "tq_prefill": [
+      "INT8 folded and edge",
+      "F16 folded and edge; same existing F16 tolerance, independent FP32 reference unchanged"
+    ],
+    "hc_compute_sanitizer_memcheck_errors": 0
+  },
+  "failed_then_fixed": [
+    "PR7 geometry format variables",
+    "PR9 missing warp/helper scope",
+    "HC TC global-only load on shared weight tile",
+    "HC native quantizer fixture missing explicit stream",
+    "TQ F16 fixture not recognizing the new F16 opt-in"
+  ],
+  "initial_environment_failure": "Another inference server occupied 11.7 GiB VRAM. GPU OOM and skips were not passes. Retested after user closed it.",
+  "not_run": [
+    "full-model performance and task quality",
+    "full-resident real vision API cycle on new version",
+    "Dense layout latency sweep",
+    "cross-version disk archive restoration",
+    "other backends"
+  ],
+  "manual_plan": {
+    "total_runs": 180,
+    "updates_runs": 64,
+    "numeric_runs": 46,
+    "automatic_benchmarks": false
+  },
+  "policy": "Production theoretical selection at user request; no bitwise-output requirement; still reject memory/protocol corruption."
+}

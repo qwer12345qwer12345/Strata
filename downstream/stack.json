@@ -6,7 +6,7 @@
     "branch": "main"
   },
   "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
-  "patched_tree": "0c161bb2eddce44204277c492c306e354c508e31",
+  "patched_tree": "94f900348f401d72d119a5c0850e211ad06e0e6e",
   "feature_order": [
     "tq-cpu",
     "tq-ampere",

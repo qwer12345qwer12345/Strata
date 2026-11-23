@@ -1,15 +1,13 @@
-# 下一轮需要代码的优化计划
+# 后续优化计划
 
-2026-11-23。当前执行范围为配置和手动测试计划；第4项已有独立的CUDA opt-in候选实现，仍待表列硬件验收；第1、2、3、5项尚未实现。目标仍为RTX3080 12GiB、32GiB RAM、Gyro-S、prior0.5、DFlash2、K8V4；不要求跨硬件逐位相同。
+2026-11-23，0.2.20集成后。prior0.5、RTX3080 12GiB、32GiB RAM、Gyro-S、K8V4；数值差异本身不淘汰候选。
 
-| 顺序 | 改动 | 复用与预期收益来源 | 验证要点 |
-|---|---|---|---|
-| 1 | K8V4解码Tensor Core分块 | 复用已有query三部分INT8 IMMA、Q4 V gather，以及现有decode scratch/log-sum-exp merge；保留K8V4存储 | 当前decode已有chunk/merge，需比较实际选中cells和query宽度下的CTA、TC吞吐与merge成本。短/长attention、paged/streamed KV、尾块和空split；显存/内存预算不增加一份K8V8 |
-| 2 | Dense非exact布局的按形状分派 | 将官方保留的generic reduction布局加入候选，按格式/K/N/T比较当前B6、IL表、packed和TC路径；只替换赢家 | 现有setter无生产接线，不能全局false绕过所有新优化。固定resident权重与窗口测细微GPU延迟，再测完整模型接受率、lookup和长输出 |
-| 3 | Q8 HC融合/持久内核 | 现有HC_PERSIST直接拒绝Q8 HC和QFUSE，须复用INT8点积、现有scale与epilogue实现兼容版本 | CTA必须同时驻留，避免grid barrier死锁；比较现有Q8 TC路径，包含QFUSE和≥9行分块，不以减少launch数直接推导收益 |
-| 4 | Gyro TQ的CUDA F16/NT256预填充候选（`STRATA_PF_FUSED_TQ_F16=1`） | 独立分派，复用TQ码本/旋转、权重存储和单阶段解码；默认关闭 | 现有全局F16/NT256不直接覆盖trellis。比较INT8 DP4A/TC与F16的真实形状、暂存和带宽，检查range/NaN及任务质量；结果未测 |
-| 5 | resident complement下ADAPT_FETCH | 复用已抓取的热门miss直接录入GPU缓存，减少重复PCIe读取，提高命中；需要与RAM补集所有权交换接线 | 逐层归属、被驱逐专家的RAM可用性、异步复制完成、NOWAIT可见性和vision lease冻结一致；不删除拒绝条件来冒充支持 |
+| 原计划 | 当前状态 | 下一步 |
+|---|---|---|
+| K8V4 decode TC | #6已移植为独立包 | 同一输入下检查短/长、paged/masked，再比较spec4/6的实际端到端延迟 |
+| Dense布局分派 | #10测量工具已接线，没有新赢家 | 先跑常驻权重形状扫描，覆盖T2..16；按胜出形状写下一补丁，不全局覆盖旧表 |
+| Q8 HC persistent | #9已移植，修复编译和共享内存读取问题 | 与现有Q8 INT8 TC及QFUSE交叉比较，确认实际是否命中persistent或回退 |
+| TQ F16预填充 | #7独立候选已移植，修复geometry变量引用 | INT8/F16数值及真实prompt吞吐、内存峰值和任务质量 |
+| resident ADAPT_FETCH | #8已移植，增加批量交换原子性回归 | fetch0/1/2、pin、NOWAIT，完整驻留且专家文件读取为零；再验vision借还 |
 
-优先先取得本轮配置的手动无头数据，再按结果调整以上顺序。每项先做不受专家文件读取干扰的微测试，再做实际任务；数值差异本身不淘汰。性能候选与已证实优化分别记录，失败或无收益的结果也保留。
-
-不需要代码的候选已加入[日常配置与手动矩阵](DAILY_CONFIGURATION.md)：Embedding/GDN、HC_UPMIX、GDN执行分块、预填充上限/CPU share以及resident overlap替代调度。旧GPU的SELECT_SIMT只对其他设备有意义，不计入3080测试。GR_V3在当前Q8 HC分支前已返回，HC_PERSIST也拒绝该格式；不把无效开关占满测试队列。STAGE_PIN已有真实损坏记录，不属于本轮数值取舍候选。
+配置与64次新增对照见[日常配置](DAILY_CONFIGURATION.md)。先执行GPU正确性与Dense扫描，再手动运行updates及识图完整模型对照；不在正常启动时自动执行。性能/任务结果出来后才能形成新的实测基线。

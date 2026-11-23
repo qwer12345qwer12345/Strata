@@ -1,13 +1,13 @@
 # Strata 下游补丁仓库（Downstream Feature Packages）
 
-本轮版本、补丁及硬件验证见[0.2.19 核查记录](validation/2026-11-23-review.md)。识图功能的新结构采用[临时借用专家显存](design/GYRO_VISION_VRAM_LEASE.md)，已实现为[vision-expert-lease](features/vision-expert-lease/README.md)，完成真实图片受限预算API检查；完整驻留无头验收待手动执行。
+本轮同步及PR验收见[0.2.20 核查记录](validation/2026-11-23-0220-review.md)。旧[0.2.19 核查记录](validation/2026-11-23-review.md)保留为历史证据。识图功能的新结构采用[临时借用专家显存](design/GYRO_VISION_VRAM_LEASE.md)，已实现为[vision-expert-lease](features/vision-expert-lease/README.md)，完成真实图片受限预算API检查；完整驻留无头验收待手动执行。
 
 本分支是 Strata 的**下游功能包管理层**。它不维护一份长期漂移的完整源码分叉，而是把每项下游改动拆成可单独应用、验证、测试、启停和退役的补丁包。
 
 - 上游源码基线：`Niko1221/Strata:main`
 - 原下游管理分支：`downstream/main`
 - 当前已验证补丁与旧存档移植：`audit/0219-patch-validation`
-- 当前固定基线：`c6f6427d9de9016fd92d13e29740f65625261df7`
+- 当前固定基线：`6a6db7ff58c283cf28d2b913404b5fa31a767eaa`
 - 当前功能栈指纹：见 `stack.json` 的 `patched_tree`
 
 ## 1. 项目补丁思路
@@ -53,6 +53,8 @@ downstream/features/<feature-id>/
 | `ampere-tc-dispatch` | SM86 DFlash2 按形状选 scalar/TC，部分 Dense 短窗口 INT8 TC | opt-in，保留9行全局门槛 |
 | `dflash2-wide-lookup` | 10/12/16行lookup与宽窗口桥接、手动对比入口 | opt-in |
 | `vision-expert-lease` | 图像编码借出专家显存、结束后按原槽恢复 | opt-in，本机无头启用 |
+
+新增活动包：`k8v4-decode-tc`（PR #6）、`tq-f16-prefill`（#7）、`resident-adapt-fetch`（#8）、`q8-hc-persist`（#9）。原9包全部移植，完整栈共13包。#10提供Dense布局测量工具，尚没有可选出的新生产赢家；#11规范patch为LF。生产选择与未测标记见[日常配置](DAILY_CONFIGURATION.md)。
 
 `live-memory`、`runtime-kv-storage`、`shutdown-persistent-cache` 已从默认活动栈移除，原目录保留作参考，不能与完整存档包叠加使用。
 

@@ -40,7 +40,7 @@ sudo ~/.local/bin/strata-headless-compare
 
 第一条只看计划，不停止服务。第二条须在无头环境执行；先正常停止Strata，测试时继承无限memlock并以模型用户运行，结束（含试验失败）后恢复日常服务。桌面仍active时直接退出，不切换桌面。需要sudo是为了完整专家锁页的memlock和systemd停止/恢复服务，不用于模型进程提权。
 
-可只选一组，例如 `sudo ~/.local/bin/strata-headless-compare --group spec`；默认全部114组、预算14400秒。可用 `--budget-s` 调整，运行器上限14400秒。源码入口为 `terminal/l2/manual_compare.py`，命令本身没有开机队列副作用。
+可只选一组，例如 `sudo ~/.local/bin/strata-headless-compare --group spec`；默认全部180组、预算14400秒。可用 `--budget-s` 调整，运行器上限14400秒。源码入口为 `terminal/l2/manual_compare.py`，命令本身没有开机队列副作用。
 
 ## 原有70组：关键交互矩阵
 
@@ -68,7 +68,7 @@ HC Q8并非遗漏的关闭项：当前Gyro-S GGUF包含Q8_0 HC投影，上游自
 
 已编译部署 `vision-expert-lease`：GPU编码前借专家显存，编码后退出reader并恢复原专家，再开始语言生成。同图磁盘缓存命中不借显存。配置 `vision.gpu=true`、`expert_lease=true`、`max_tokens=1024`、`threads=8`，`vram_elastic=true`、`STRATA_VISION_EXPERT_LEASE=1`、`--vram-segment-mib=128`。不为视觉静态保留2GiB专家容量；128MiB分段相对原分段的吞吐影响仍未测。
 
-下一次无头正常启动生效，无需桌面快捷方式。真实桌面受限预算API已通过，完整驻留和恢复后零文件层读取尚待以下显式检查；它与114组参数矩阵分开运行：
+下一次无头正常启动生效，无需桌面快捷方式。真实桌面受限预算API已通过，完整驻留和恢复后零文件层读取尚待以下显式检查；它与180组参数矩阵分开运行：
 
 ```sh
 strata-headless-compare --vision-check --plan
@@ -79,7 +79,7 @@ sudo ~/.local/bin/strata-headless-compare --vision-check
 
 2026-11-23接线复查：此前旧profile缺少`user_args`，官方drafting层会将选择器写入的spec4改回6。已修正为显式用户参数，最终命令干跑确认spec4/confidence0.8/lookup16；没有重新跑完整组合。详见 [数值与性能审计](NUMERICAL_PERFORMANCE_AUDIT.md)。
 
-## 新增44组：数值与执行策略（未测）
+## 新增46组：数值与执行策略（未测）
 
 用户明确选择日常直接启用 `STRATA_EMB_REUSE_ACCOUNT=1`、`STRATA_GDN_TC_NP=2`，并显式固定 `STRATA_GDN_TC=1`。已写入实际无头启动选择器，下一次启动生效；无须编译。NP2简化直接输出侧乘法，递归状态相关乘法保留补偿；输出变化仍会影响后续层，不保证一般质量损失小。prior保持0.5。
 
@@ -91,7 +91,7 @@ sudo ~/.local/bin/strata-headless-compare --vision-check
 | gdn-execution | tiles1/2 × fused norm0/1；70SM下两tile可能受第二wave拖慢，仍作为实测候选 | 8 |
 | prefill-cap | auto:8192/16384/32768；这是上限，记录实际可分配chunk | 6 |
 | cpu-prefill | 当前auto范围、NT32/MAX3072、NT32/MAX6144、NT8/MAX6144 | 8 |
-| adapt-mode | NOWAIT1/lag2、resident overlap1/NOWAIT0/lag1、等待模式NOWAIT0/lag1 | 6 |
+| adapt-mode | NOWAIT/lag2下fetch2或0；等待/lag1/fetch0；overlap/lag1/fetch0 | 8 |
 
 每组以最新日常为固定背景；combined的旧组合同时保留Embedding0/NP3，新组合采用Embedding1/NP2。CPU auto组删除NT/MAX显式覆盖，以保留官方当前规则。resident overlap使用官方 `STRATA_ADAPT_OVERLAP_RESIDENT=1`，与NOWAIT互斥；不是叠加。此前审计把overlap仅描述为替代关系，此处补全已有resident opt-in。
 
@@ -100,8 +100,36 @@ strata-headless-compare --group numeric --plan
 sudo ~/.local/bin/strata-headless-compare --group numeric
 ```
 
-`numeric`选择新增44组；默认无group为全部114组。也可选 `--group emb-gdn`、`--group hc-upmix` 等单组。仍为显式无头命令，普通启动无基准、无队列，测试结束恢复日常服务。默认/最大预算4小时，未完成应报告incomplete，不假称114组全部通过。
+`numeric`选择新增46组；默认无group为全部180组。也可选 `--group emb-gdn`、`--group hc-upmix` 等单组。仍为显式无头命令，普通启动无基准、无队列，测试结束恢复日常服务。默认/最大预算4小时，未完成应报告incomplete，不假称180组全部通过。
 
 每组保留64-token热身、3072-token长输出、600条记录的长prompt后1536-token输出，至少达到目标长度75%才有效；记录实际prompt token数，不能仅凭cap32768宣称测到32K单块。CPU share组另加60条记录的中等prompt及1536-token输出，以覆盖扩展的分担范围，不能只测超出范围的大块。新增记录各arm的完整请求参数、精度与调度环境；启用参数不等于已观察到内核命中。显式打开prefill分项计时，所有arm一致。一般任务质量、工具可靠性仍需单独判断，输出hash不作为淘汰条件。
 
-需要修改推理代码的候选见[下一轮计划](NEXT_OPTIMIZATION_PLAN.md)。本次不实现这些新内核。
+需要修改推理代码的候选见[下一轮计划](NEXT_OPTIMIZATION_PLAN.md)。这些候选已有PR的验收和当前状态见下一节及更新后的计划。
+
+## 0.2.20 / engine 0.1.66 与PR生产选择（未完成模型验证）
+
+固定上游 `6a6db7ff58c283cf28d2b913404b5fa31a767eaa`。旧9包及V2/V3存档、工具边界、BF16 PLE、识图租约保留，新增4包。日常按用户要求采用理论优先选择，不能据此宣称比旧版更快。
+
+| 选择 | 生产值 | 原因与限制 |
+|---|---|---|
+| K8V4解码TC | `STRATA_ATTN_DECODE_TC=1` | 3部分INT8 query score，V仍Q4；目标卡收益待测 |
+| TQ F16预填充 | `STRATA_PF_FUSED_TQ_F16=1`、`STRATA_PF_BATCH=256` | TQ独立路径；精度、带宽、暂存及任务质量待验收 |
+| resident抓取入GPU | `STRATA_ADAPT_FETCH=2` | 已有fetch代替重复tier拷贝；RAM/GPU归属批量交换；与NOWAIT和vision组合待全模型验证 |
+| Q8 HC持久内核 | `STRATA_HC_PERSIST=1` | 每设备驻留探测，不能驻留则回退；新QFUSE能力保留供测 |
+| QFUSE | `STRATA_QFUSE=0` | 新上游取消SM86默认；此前覆盖更合适的up路径，在部分驻留下有回退数据 |
+| HC upmix / CPU share | `STRATA_HC_UPMIX=1`，NT32/MAX3072 | 当前上游候选；覆盖Gyro的实际分派仍需实测 |
+| CPU专家L3预取 | `STRATA_L3_PF=1` | 重叠GPU attention与CPU预取；约120MiB BF16 router副本成本，观察总RAM |
+| profile固定 / 自适应 | pin0.25；every2/swaps192/decay0.92 | 当前约22.5%专家在GPU，取新上游15–65%覆盖策略；非套用旧注释的<15%小缓存策略 |
+| Dense全局门槛 | minT9 | #10只有测量准备，没有新的生产分派赢家；保留旧已测局部形状表 |
+
+保留prior0.5、spec4/confidence0.8、lookup16、成对行、15workers、262144上下文、20480 KV resident、448MiB显存余量；不因升级把活跃内存预算扩大。新版本使用独立存档目录，旧存档保留；跨二进制恢复兼容性尚未验证。旧0.1.65二进制和冻结配置用于对照。
+
+新增 `updates` 共64次正反序对照：engine-reference4、update-bundle4、decode-tc-spec8、tq-prefill8、hc-qfuse8、fetch-pin8、fetch-mode6、upstream-adapt4、qfuse-l3 8、dense-min6。参考版本组对齐旧日常开关，并记录实际二进制SHA；其他组使用同一新二进制。原70 + numeric46 + updates64 = 180；4小时可能不足，全矩阵未完成必须标incomplete。
+
+```sh
+strata-headless-compare --group updates --plan
+sudo ~/.local/bin/strata-headless-compare --kernel-check
+sudo ~/.local/bin/strata-headless-compare --group updates
+```
+
+`--kernel-check`只使用预编译目标：GPU正确性、两种TQ预填充数值检查及128MiB常驻权重Dense延迟扫描；无模型请求、无编译。缺测试或关键GPU项跳过即不算通过。正常启动无测试、无队列。完整模型和实际识图验收仍分别通过`--group`和`--vision-check`显式执行。

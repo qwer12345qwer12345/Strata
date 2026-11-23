@@ -1,0 +1,22 @@
+========= COMPUTE-SANITIZER
+strata hc: CUDA0: the hyper-connection read runs as staged (the norm per token and stream, the down projection's activations staged ahead by cp.async); checked bit for bit against the plain read on this card (STRATA_HC_SPLIT=1 or 0 for the earlier ones)
+strata hc: CUDA0: BF16 persistent read checked against the default path (80 blocks on 70 multiprocessors, up to 8 tokens; 0 token counts timed out; max relative difference 1.8e-07)
+strata hc: CUDA0: Q8_0 persistent read residency checked (up to 8 tokens; 0 token counts timed out)
+T=1: max relative difference 3.12e-07 against the default read, finite, two runs bitwise equal  ok
+T=2: max relative difference 2.91e-07 against the default read, finite, two runs bitwise equal  ok
+T=3: max relative difference 2.59e-07 against the default read, finite, two runs bitwise equal  ok
+T=4: max relative difference 2.46e-07 against the default read, finite, two runs bitwise equal  ok
+T=5: max relative difference 2.46e-07 against the default read, finite, two runs bitwise equal  ok
+T=6: max relative difference 2.46e-07 against the default read, finite, two runs bitwise equal  ok
+T=7: max relative difference 2.46e-07 against the default read, finite, two runs bitwise equal  ok
+T=8: max relative difference 2.24e-07 against the default read, finite, two runs bitwise equal  ok
+Q8 T=1: default (TC when enabled) vs persistent max relative difference 0.000299; finite yes, repeat yes, QFUSE exact yes
+Q8 T=2: default (TC when enabled) vs persistent max relative difference 0.000279; finite yes, repeat yes, QFUSE exact yes
+Q8 T=3: default (TC when enabled) vs persistent max relative difference 0.000248; finite yes, repeat yes, QFUSE exact yes
+Q8 T=4: default (TC when enabled) vs persistent max relative difference 0.000405; finite yes, repeat yes, QFUSE exact yes
+Q8 T=5: default (TC when enabled) vs persistent max relative difference 0.000405; finite yes, repeat yes, QFUSE exact yes
+Q8 T=6: default (TC when enabled) vs persistent max relative difference 0.000405; finite yes, repeat yes, QFUSE exact yes
+Q8 T=7: default (TC when enabled) vs persistent max relative difference 0.000405; finite yes, repeat yes, QFUSE exact yes
+Q8 T=8: default (TC when enabled) vs persistent max relative difference 0.000369; finite yes, repeat yes, QFUSE exact yes
+PASS: 8 token counts checked
+========= ERROR SUMMARY: 0 errors

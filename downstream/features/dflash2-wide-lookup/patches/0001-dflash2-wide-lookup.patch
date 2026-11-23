@@ -352,7 +352,7 @@ index 00000000..95e38a2e
 +    main()
 diff --git a/terminal/l2/headless_experiments.py b/terminal/l2/headless_experiments.py
 new file mode 100644
-index 00000000..b816708a
+index 00000000..eea7663b
 --- /dev/null
 +++ b/terminal/l2/headless_experiments.py
 @@ -0,0 +1,444 @@
@@ -390,7 +390,7 @@ index 00000000..b816708a
 +            name = path.read_text().strip()
 +        except OSError:
 +            continue
-+        if name in {'strata', 'ninja', 'make', 'cc1plus', 'nvcc', 'ptxas', 'cicc'} or name.startswith('strata-pr5500-'):
++        if name in {'strata', 'ninfer-serve', 'ininfer', 'ninja', 'make', 'cc1plus', 'nvcc', 'ptxas', 'cicc'} or name.startswith('strata-pr5500-'):
 +            raise RuntimeError(f'{name} is already running')
 +
 +def stop_trial(proc):
@@ -800,12 +800,77 @@ index 00000000..b816708a
 +        (work / 'results.json').write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n')
 +        print(f'Strata 手动无头对比 {report["status"]}。报告 {work / "results.json"}', flush=True)
 +    return report
+diff --git a/terminal/l2/kernel_check.py b/terminal/l2/kernel_check.py
+new file mode 100644
+index 00000000..7e4613e7
+--- /dev/null
++++ b/terminal/l2/kernel_check.py
+@@ -0,0 +1,59 @@
++"""Explicit prebuilt GPU correctness checks and a resident-weight Dense sweep."""
++import datetime
++import hashlib
++import json
++from pathlib import Path
++import subprocess
++import xml.etree.ElementTree as ET
++from l2 import headless_experiments as runner
++
++
++def plan(cfg):
++    return {'suite':'kernel-check-v1','automatic_tests':False,
++            'checks':['K8V4 decode TC named/default dispatch','Q8 HC persistent and QFUSE',
++                      'TQ INT8 and F16 prefill','resident complement batch exchange',
++                      'vision expert lease','Dense resident-weight layout latency sweep'],
++            'compilation':False,'model_requests':False}
++
++
++def run(root,cfg,directory,port,request):
++    runner.check_environment()
++    if hashlib.sha256(Path(cfg['exe']).read_bytes()).hexdigest()!=request['engine_sha256']:
++        raise ValueError('selected kernel-check engine changed')
++    folder=directory/('kernel-check-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
++    folder.mkdir(parents=True,mode=0o700)
++    build=root/'build'
++    commands=[['ctest','--test-dir',str(build),'--output-on-failure','--no-tests=error','--output-junit',str(folder/'ctest.xml'),'-R',
++               '^(qsa_decode_tc_parity(_env)?|hc_persist_(parity|default_off)|file_expert_source_rotation_gpu|vision_expert_lease_gpu_test)$']]
++    exe=build/'prefill_fused_iq_test'
++    report={'status':'failed','plan':plan(cfg),'steps':[]}
++    try:
++        for n,command in enumerate(commands):
++            with (folder/f'correctness-{n}.log').open('w') as log:
++                result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,timeout=300)
++            report['steps'].append({'check':'synthetic-correctness','returncode':result.returncode})
++            if result.returncode:raise RuntimeError('synthetic GPU checks failed; inspect correctness log')
++            cases=ET.parse(folder/'ctest.xml').getroot().findall('.//testcase')
++            skipped=[case.get('name') for case in cases if case.find('skipped') is not None]
++            report['steps'][-1].update(tests=len(cases),skipped=skipped)
++            if len(cases)!=6 or skipped:
++                report['status']='incomplete'
++                raise RuntimeError('required GPU checks were absent or skipped')
++        import os
++        for mode in (0,1):
++            with (folder/f'tq-f16-{mode}.log').open('w') as log:
++                result=subprocess.run([str(exe),'--only=+ T','--folded','--edge','--no-timing'],
++                    env={**os.environ,'STRATA_PF_FUSED_TQ':'1','STRATA_PF_FUSED_TQ_F16':str(mode)},
++                    stdout=log,stderr=subprocess.STDOUT,timeout=300)
++            report['steps'].append({'check':'tq-f16','mode':mode,'returncode':result.returncode})
++            if result.returncode:raise RuntimeError('TQ numerical check failed; inspect fixture and reference before enabling')
++        with (folder/'dense-layout.jsonl').open('w') as out,(folder/'dense-layout.stderr.log').open('w') as err:
++            result=subprocess.run([str(build/'dense_layout_sweep'),'128','4'],stdout=out,stderr=err,timeout=1800)
++        report['steps'].append({'check':'dense-layout','returncode':result.returncode})
++        if result.returncode:raise RuntimeError('Dense sweep failed or target hardware unavailable')
++        report['status']='passed'
++    except Exception as exc:report['error']=str(exc)
++    finally:
++        (folder/'results.json').write_text(json.dumps(report,indent=2)+'\n')
++        print(f'Strata 手动内核检查 {report["status"]}；报告 {folder/"results.json"}',flush=True)
++    return report
 diff --git a/terminal/l2/manual_compare.py b/terminal/l2/manual_compare.py
 new file mode 100644
-index 00000000..da68f193
+index 00000000..f4311a42
 --- /dev/null
 +++ b/terminal/l2/manual_compare.py
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,109 @@
 +"""Explicit headless comparison; normal startup never imports this module."""
 +import argparse
 +import json
@@ -829,13 +894,16 @@ index 00000000..da68f193
 +    parser.add_argument('--state-dir', type=Path)
 +    parser.add_argument('--group', action='append', help='combined/spec-lookup/shape-qkv/dense-lookup/skip-lookup/rows/adapt-tail/tail-spec/emb-gdn/gdn-precision/hc-upmix/gdn-execution/prefill-cap/cpu-prefill/adapt-mode; numeric selects numerical groups; updates selects 0.2.20 and PR groups; default all')
 +    parser.add_argument('--budget-s', type=int, default=14400)
++    parser.add_argument('--kernel-check',action='store_true',help='prebuilt synthetic GPU checks and Dense sweep only; no model requests')
 +    parser.add_argument('--vision-check',action='store_true',help='run the optional vision lease correctness suite only')
 +    parser.add_argument('--plan', action='store_true', help='show the comparison plan without stopping or starting anything')
 +    parser.add_argument('--worker', type=Path, help=argparse.SUPPRESS)
 +    args = parser.parse_args(argv)
 +    if args.worker:
 +        payload = json.loads(args.worker.read_text())
-+        if payload['request'].get('suite')=='vision':
++        if payload['request'].get('suite')=='kernels':
++            from l2.kernel_check import run
++        elif payload['request'].get('suite')=='vision':
 +            from l2.vision_check import run
 +        else:run=experiments.run_comparison
 +        report = run(Path(payload['root']),payload['cfg'],Path(payload['directory']),payload['port'],payload['request'])
@@ -844,10 +912,15 @@ index 00000000..da68f193
 +    directory = args.state_dir or Path(cfg.get('startup_benchmark', {}).get(
 +        'output_dir', str(Path.home()/'.local/state/strata/startup-benchmark')))
 +    root, cfg = runtime_config.select(Path(cfg['cwd']), cfg, directory)
-+    if args.vision_check and args.group:parser.error('--vision-check and --group are separate suites')
++    if sum([args.vision_check,args.kernel_check,bool(args.group)])>1:parser.error('--vision-check, --kernel-check and --group are separate suites')
 +    sequence = experiments.arms(args.group)
 +    request = {'engine_sha256': json.loads((directory/'production-baseline.json').read_text())['engine_sha256'],
 +               'budget_s': args.budget_s, 'groups': args.group}
++    if args.kernel_check:
++        from l2.kernel_check import plan
++        kernel_plan=plan(cfg);request['suite']='kernels'
++        if args.plan:
++            print(json.dumps(kernel_plan,indent=2,ensure_ascii=False));return 0
 +    if args.vision_check:
 +        from l2.vision_check import plan
 +        vision_plan=plan(cfg)
@@ -1064,10 +1137,10 @@ index 00000000..875705f4
 +if __name__=='__main__':unittest.main()
 diff --git a/terminal/l2/test_manual_compare.py b/terminal/l2/test_manual_compare.py
 new file mode 100644
-index 00000000..0959f835
+index 00000000..2749ebc3
 --- /dev/null
 +++ b/terminal/l2/test_manual_compare.py
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,46 @@
 +import contextlib
 +import io
 +import json
@@ -1087,6 +1160,13 @@ index 00000000..0959f835
 +    self.assertEqual(manual_compare.main(['--profile',str(profile),'--plan']),0)
 +   run.assert_not_called();popen.assert_not_called()
 +   result=json.loads(out.getvalue());self.assertEqual(result['arms'],180);self.assertFalse(result['automatic_tests'])
++ def test_kernel_plan_never_starts_compiler_or_model(self):
++  with tempfile.TemporaryDirectory() as t:
++   _,profile,_=self.fixture(Path(t));out=io.StringIO()
++   with patch.object(manual_compare.subprocess,'run') as run,patch.object(manual_compare.subprocess,'Popen') as popen,contextlib.redirect_stdout(out):
++    self.assertEqual(manual_compare.main(['--profile',str(profile),'--kernel-check','--plan']),0)
++   run.assert_not_called();popen.assert_not_called()
++   result=json.loads(out.getvalue());self.assertFalse(result['compilation']);self.assertFalse(result['model_requests'])
 + def test_active_desktop_rejected_before_service_stop(self):
 +  with tempfile.TemporaryDirectory() as t:
 +   _,profile,_=self.fixture(Path(t))
