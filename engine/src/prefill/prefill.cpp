@@ -196,6 +196,7 @@ void quantize_act_native(const float*, int64_t, int64_t, void*, void*) {}
 void experts_native(const Batch&, const NativeGeom&, int, int64_t, const void*, const void*, const int32_t*, void*,
                     float*, void*) {}
 bool native_wide() { return false; }
+bool native_wide(int, int) { return false; }
 #if !defined(STRATA_GPU_METAL)   // (the Metal engine has its own want_dm_f16: metal/src/engine/stubs_prompt_f16.cpp)
 void want_dm_f16(bool) {}   // STRATA_PF_DM16: prefill.cpp calls these; moe_fused_iq.cu is not built here
 #endif
@@ -5778,7 +5779,7 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                             const int n = v ? std::atoi(v) : 0;
                             return n > 0 ? std::min(n, fused::kBatchRoom) : fused::kMaxBatch;
                         }();
-                        const bool wide = fused_nat && !fp4_nat && !fp8_nat && pf_batch > fused::kMaxBatch && fused::native_wide();
+                        const bool wide = fused_nat && !fp4_nat && !fp8_nat && pf_batch > fused::kMaxBatch && fused::native_wide(g.gu_type, g.d_type);
                         const int per_launch = wide ? pf_batch : std::min(pf_batch, fused::kMaxBatch);
                         for (int32_t e = 0; e < m.g->n_expert;) {
                             fused::Batch b;
