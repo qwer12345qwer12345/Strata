@@ -54,7 +54,7 @@ downstream/features/<feature-id>/
 | `dflash2-wide-lookup` | 10/12/16行lookup与宽窗口桥接、手动对比入口 | opt-in |
 | `vision-expert-lease` | 图像编码借出专家显存、结束后按原槽恢复 | opt-in，本机无头启用 |
 
-新增活动包：`k8v4-decode-tc`（PR #6）、`tq-f16-prefill`（#7）、`resident-adapt-fetch`（#8）、`q8-hc-persist`（#9）。原9包全部移植，完整栈共13包。#10提供Dense布局测量工具，尚没有可选出的新生产赢家；#11规范patch为LF。生产选择与未测标记见[日常配置](DAILY_CONFIGURATION.md)。
+新增活动包：`k8v4-decode-tc`（PR #6）、`tq-f16-prefill`（#7）、`resident-adapt-fetch`（#8）、`q8-hc-persist`（#9）。原9包全部移植，完整栈共13包。#10提供Dense布局测量工具，尚没有可选出的新生产赢家；#11规范patch为LF。生产选择与未测标记见[日常配置](DAILY_CONFIGURATION.md)。全部已准备的无头测试可用 `sudo ~/.local/bin/strata-headless-compare --all` 后台串行完成，默认总预算72小时。
 
 `live-memory`、`runtime-kv-storage`、`shutdown-persistent-cache` 已从默认活动栈移除，原目录保留作参考，不能与完整存档包叠加使用。
 

@@ -350,12 +350,104 @@ index 00000000..95e38a2e
 +
 +if __name__ == '__main__':
 +    main()
+diff --git a/terminal/l2/full_suite.py b/terminal/l2/full_suite.py
+new file mode 100644
+index 00000000..ab65a59d
+--- /dev/null
++++ b/terminal/l2/full_suite.py
+@@ -0,0 +1,86 @@
++"""One explicit, sequential long-run suite; never imported by normal startup."""
++import datetime
++import hashlib
++import json
++import os
++from pathlib import Path
++import time
++from l2 import headless_experiments as comparisons
++from l2 import kernel_check
++
++DEFAULT_BUDGET_S = 72 * 3600
++
++
++def plan(cfg):
++    vision=cfg.get('vision') or {}
++    if not (vision.get('gpu') is True and vision.get('expert_lease') is True):
++        raise ValueError('full suite requires GPU vision with expert lease configured')
++    return {'suite': 'full-headless-v1', 'automatic_tests': False,
++            'stages': ['kernels', 'comparison', 'vision'],
++            'kernels': kernel_check.plan(cfg),
++            'comparison_runs': len(comparisons.arms()),
++            'vision': ['cold synthetic image', 'same image cached', '3072-token text after expert restoration'],
++            'compilation': False, 'parallel_tests': False,
++            'continue_after_failed_comparison_arm': True}
++
++
++def run(root, cfg, directory, port, request):
++    directory = Path(directory)
++    folder = directory / ('full-suite-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
++    folder.mkdir(mode=0o700)
++    report = {'suite': 'full-headless-v1', 'status': 'running', 'pid': os.getpid(),
++              'folder': str(folder), 'budget_s': request['budget_s'], 'stages': []}
++
++    def save():
++        text = json.dumps(report, indent=2, ensure_ascii=False) + '\n'
++        for dest in (folder / 'results.json', directory / 'full-suite-latest.json'):
++            tmp = dest.with_suffix('.tmp')
++            tmp.write_text(text)
++            tmp.replace(dest)
++
++    save()
++    deadline = time.monotonic() + request['budget_s']
++    try:
++        report['plan'] = plan(cfg)
++        from l2 import vision_check
++        reference = cfg.get('comparison_reference')
++        if not reference:
++            raise ValueError('frozen previous-engine reference is missing')
++        for exe, digest in ((cfg['exe'],request['engine_sha256']),
++                            (reference['config']['exe'],reference['engine_sha256'])):
++            if hashlib.sha256(Path(exe).read_bytes()).hexdigest()!=digest:
++                raise ValueError('selected or frozen reference engine changed')
++        comparisons.check_environment()
++        for stage, runner in (('kernels', kernel_check.run), ('comparison', comparisons.run_comparison),
++                              ('vision', vision_check.run)):
++            remaining = int(deadline - time.monotonic())
++            if remaining < 300:
++                report['error'] = 'total time budget exhausted before ' + stage
++                break
++            # Each stage must finish and reap its processes before the next starts.
++            comparisons.check_environment()
++            item = {'stage': stage, 'status': 'running'}
++            report['stages'].append(item)
++            save()
++            print(f'Strata 长程测试：开始 {stage}；总报告 {folder / "results.json"}', flush=True)
++            child = dict(request, budget_s=remaining, groups=None, continue_on_failure=True)
++            result = runner(root, cfg, folder, port, child)
++            item.update(status=result['status'], report=result)
++            save()
++            # Do not benchmark model kernels after a failed correctness prerequisite.
++            if stage == 'kernels' and result['status'] != 'passed':
++                report['error'] = 'kernel prerequisite failed; model stages were not run'
++                break
++        report['status'] = 'passed' if len(report['stages']) == 3 and all(
++            s['status'] == 'passed' for s in report['stages']) else 'incomplete'
++    except KeyboardInterrupt:
++        report.update(status='interrupted', error='interrupted; retaining completed results')
++        if report['stages'] and report['stages'][-1]['status']=='running':
++            report['stages'][-1]['status']='interrupted'
++        raise
++    except Exception as exc:
++        report.update(status='failed', error=str(exc))
++    finally:
++        save()
++        print(f'Strata 长程测试 {report["status"]}；总报告 {folder / "results.json"}', flush=True)
++    return report
 diff --git a/terminal/l2/headless_experiments.py b/terminal/l2/headless_experiments.py
 new file mode 100644
-index 00000000..eea7663b
+index 00000000..768279e7
 --- /dev/null
 +++ b/terminal/l2/headless_experiments.py
-@@ -0,0 +1,444 @@
+@@ -0,0 +1,446 @@
 +"""One-shot headless spec, SM86 shape and wide lookup comparisons. Never select a winner automatically."""
 +import datetime
 +import hashlib
@@ -379,7 +471,7 @@ index 00000000..eea7663b
 +    lines = Path('/proc/meminfo').read_text()
 +    return {k: int(v) // 1024 for k, v in re.findall(r'^(\w+):\s+(\d+) kB', lines, re.M)}
 +
-+def check_environment():
++def check_environment(*, allow_strata=False):
 +    desktop = subprocess.check_output(
 +        ['systemctl', 'show', '-p', 'ActiveState', '--value', 'sddm.service'], text=True
 +    ).strip()
@@ -390,7 +482,8 @@ index 00000000..eea7663b
 +            name = path.read_text().strip()
 +        except OSError:
 +            continue
-+        if name in {'strata', 'ninfer-serve', 'ininfer', 'ninja', 'make', 'cc1plus', 'nvcc', 'ptxas', 'cicc'} or name.startswith('strata-pr5500-'):
++        is_strata = name == 'strata' or name.startswith('strata-pr5500-')
++        if (is_strata and not allow_strata) or name in {'ninfer-serve', 'ininfer', 'ninja', 'make', 'cc1plus', 'nvcc', 'ptxas', 'cicc'}:
 +            raise RuntimeError(f'{name} is already running')
 +
 +def stop_trial(proc):
@@ -750,7 +843,7 @@ index 00000000..eea7663b
 +        seed = work / 'expert-profile.bin'
 +        seed.write_bytes(Path(args[args.index('--expert-profile') + 1]).read_bytes())
 +        report['seed_sha256'] = hashlib.sha256(seed.read_bytes()).hexdigest()
-+        deadline = time.monotonic() + min(14400, max(60, int(request.get('budget_s', 14400))))
++        deadline = time.monotonic() + max(60, int(request.get('budget_s', 14400)))
 +        # Warmup plus 3072-token output and 1536-token long-context output.
 +        print(f'Strata 开始 spec/形状/宽 lookup 无头对比，共 {len(sequence)} 组；完成后开放服务。报告 {work}', flush=True)
 +        for i, arm in enumerate(sequence, 1):
@@ -775,7 +868,8 @@ index 00000000..eea7663b
 +            ):
 +                result.update(status='invalid', error='long output ended before 75% of the requested length')
 +            # Never mistake enabling wide lookup for evidence that it actually ran.
-+            text = (folder / 'engine.log').read_text(errors='replace')
++            log_path = folder / 'engine.log'
++            text = log_path.read_text(errors='replace') if log_path.is_file() else ''
 +            result['wide_bridge_exercised'] = 'wide context bridge active' in text
 +            result['trace'] = trace_summary(folder / 'spec.trace')
 +            result['optimization_log'] = optimization_log_summary(text)
@@ -789,7 +883,7 @@ index 00000000..eea7663b
 +            report['runs'].append(result)
 +            (work / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
 +            print(f'Strata 对比进度 {i}/{len(sequence)}: {arm["name"]} {result["status"]}', flush=True)
-+            if result['status'] == 'failed' or time.monotonic() >= deadline:
++            if (result['status'] == 'failed' and not request.get('continue_on_failure')) or time.monotonic() >= deadline:
 +                break
 +        report['summary'] = summarize(report['runs'])
 +        report['status'] = 'passed' if len(report['runs']) == len(sequence) and all(
@@ -802,16 +896,17 @@ index 00000000..eea7663b
 +    return report
 diff --git a/terminal/l2/kernel_check.py b/terminal/l2/kernel_check.py
 new file mode 100644
-index 00000000..7e4613e7
+index 00000000..28206102
 --- /dev/null
 +++ b/terminal/l2/kernel_check.py
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,65 @@
 +"""Explicit prebuilt GPU correctness checks and a resident-weight Dense sweep."""
 +import datetime
 +import hashlib
 +import json
 +from pathlib import Path
 +import subprocess
++import time
 +import xml.etree.ElementTree as ET
 +from l2 import headless_experiments as runner
 +
@@ -835,10 +930,15 @@ index 00000000..7e4613e7
 +               '^(qsa_decode_tc_parity(_env)?|hc_persist_(parity|default_off)|file_expert_source_rotation_gpu|vision_expert_lease_gpu_test)$']]
 +    exe=build/'prefill_fused_iq_test'
 +    report={'status':'failed','plan':plan(cfg),'steps':[]}
++    deadline=time.monotonic()+request.get('budget_s',2700)
++    def timeout(limit):
++        remaining=deadline-time.monotonic()
++        if remaining<=0:raise TimeoutError('kernel stage time budget exhausted')
++        return min(limit,remaining)
 +    try:
 +        for n,command in enumerate(commands):
 +            with (folder/f'correctness-{n}.log').open('w') as log:
-+                result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,timeout=300)
++                result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,timeout=timeout(300))
 +            report['steps'].append({'check':'synthetic-correctness','returncode':result.returncode})
 +            if result.returncode:raise RuntimeError('synthetic GPU checks failed; inspect correctness log')
 +            cases=ET.parse(folder/'ctest.xml').getroot().findall('.//testcase')
@@ -851,12 +951,12 @@ index 00000000..7e4613e7
 +        for mode in (0,1):
 +            with (folder/f'tq-f16-{mode}.log').open('w') as log:
 +                result=subprocess.run([str(exe),'--only=+ T','--folded','--edge','--no-timing'],
-+                    env={**os.environ,'STRATA_PF_FUSED_TQ':'1','STRATA_PF_FUSED_TQ_F16':str(mode)},
-+                    stdout=log,stderr=subprocess.STDOUT,timeout=300)
++                    env={**os.environ,'STRATA_PF_FUSED_TQ':'1','STRATA_PF_FUSED_TQ_F16':str(mode),'STRATA_PF_BATCH':'256'},
++                    stdout=log,stderr=subprocess.STDOUT,timeout=timeout(300))
 +            report['steps'].append({'check':'tq-f16','mode':mode,'returncode':result.returncode})
 +            if result.returncode:raise RuntimeError('TQ numerical check failed; inspect fixture and reference before enabling')
 +        with (folder/'dense-layout.jsonl').open('w') as out,(folder/'dense-layout.stderr.log').open('w') as err:
-+            result=subprocess.run([str(build/'dense_layout_sweep'),'128','4'],stdout=out,stderr=err,timeout=1800)
++            result=subprocess.run([str(build/'dense_layout_sweep'),'128','4'],stdout=out,stderr=err,timeout=timeout(1800))
 +        report['steps'].append({'check':'dense-layout','returncode':result.returncode})
 +        if result.returncode:raise RuntimeError('Dense sweep failed or target hardware unavailable')
 +        report['status']='passed'
@@ -867,12 +967,13 @@ index 00000000..7e4613e7
 +    return report
 diff --git a/terminal/l2/manual_compare.py b/terminal/l2/manual_compare.py
 new file mode 100644
-index 00000000..f4311a42
+index 00000000..9e681352
 --- /dev/null
 +++ b/terminal/l2/manual_compare.py
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,152 @@
 +"""Explicit headless comparison; normal startup never imports this module."""
 +import argparse
++import fcntl
 +import json
 +import os
 +from pathlib import Path
@@ -893,7 +994,9 @@ index 00000000..f4311a42
 +    parser.add_argument('--profile', type=Path, default=Path('/etc/strata/server.json'))
 +    parser.add_argument('--state-dir', type=Path)
 +    parser.add_argument('--group', action='append', help='combined/spec-lookup/shape-qkv/dense-lookup/skip-lookup/rows/adapt-tail/tail-spec/emb-gdn/gdn-precision/hc-upmix/gdn-execution/prefill-cap/cpu-prefill/adapt-mode; numeric selects numerical groups; updates selects 0.2.20 and PR groups; default all')
-+    parser.add_argument('--budget-s', type=int, default=14400)
++    parser.add_argument('--budget-s', type=int, help='total seconds; default 72 hours for --all, 4 hours for one suite')
++    parser.add_argument('--all', dest='full', action='store_true', help='all kernels, 180 comparison runs and vision; detached systemd job by default')
++    parser.add_argument('--foreground', action='store_true', help='with --all, wait in this terminal instead of detaching')
 +    parser.add_argument('--kernel-check',action='store_true',help='prebuilt synthetic GPU checks and Dense sweep only; no model requests')
 +    parser.add_argument('--vision-check',action='store_true',help='run the optional vision lease correctness suite only')
 +    parser.add_argument('--plan', action='store_true', help='show the comparison plan without stopping or starting anything')
@@ -901,7 +1004,9 @@ index 00000000..f4311a42
 +    args = parser.parse_args(argv)
 +    if args.worker:
 +        payload = json.loads(args.worker.read_text())
-+        if payload['request'].get('suite')=='kernels':
++        if payload['request'].get('suite')=='all':
++            from l2.full_suite import run
++        elif payload['request'].get('suite')=='kernels':
 +            from l2.kernel_check import run
 +        elif payload['request'].get('suite')=='vision':
 +            from l2.vision_check import run
@@ -912,10 +1017,19 @@ index 00000000..f4311a42
 +    directory = args.state_dir or Path(cfg.get('startup_benchmark', {}).get(
 +        'output_dir', str(Path.home()/'.local/state/strata/startup-benchmark')))
 +    root, cfg = runtime_config.select(Path(cfg['cwd']), cfg, directory)
-+    if sum([args.vision_check,args.kernel_check,bool(args.group)])>1:parser.error('--vision-check, --kernel-check and --group are separate suites')
++    if sum([args.full,args.vision_check,args.kernel_check,bool(args.group)])>1:parser.error('--all, --vision-check, --kernel-check and --group are separate selections')
++    if args.foreground and not args.full:parser.error('--foreground requires --all')
++    if args.budget_s is None:args.budget_s=259200 if args.full else 14400
++    if args.budget_s < (300 if args.full else 60):parser.error('time budget is too short')
 +    sequence = experiments.arms(args.group)
 +    request = {'engine_sha256': json.loads((directory/'production-baseline.json').read_text())['engine_sha256'],
 +               'budget_s': args.budget_s, 'groups': args.group}
++    if args.full:
++        from l2.full_suite import plan
++        full_plan=plan(cfg);request['suite']='all'
++        if args.plan:
++            full_plan.update(budget_s=args.budget_s,detached=not args.foreground)
++            print(json.dumps(full_plan,indent=2,ensure_ascii=False));return 0
 +    if args.kernel_check:
 +        from l2.kernel_check import plan
 +        kernel_plan=plan(cfg);request['suite']='kernels'
@@ -942,6 +1056,35 @@ index 00000000..f4311a42
 +    owner = pwd.getpwuid(directory.stat().st_uid)
 +    if owner.pw_uid == 0:
 +        parser.error('comparison state directory must belong to the model user')
++    # Reject competing inference or compilation before stopping the daily service.
++    try:experiments.check_environment(allow_strata=True)
++    except RuntimeError as exc:parser.error(str(exc))
++    if args.full and not args.foreground:
++        log=directory/'full-suite.log'
++        log.touch(mode=0o600,exist_ok=True)
++        os.chown(log,owner.pw_uid,owner.pw_gid)
++        command=['systemd-run','--unit=strata-headless-test','--collect',
++                 '--description=Strata manual headless full suite',
++                 '--property=Type=exec','--property=LimitMEMLOCK=infinity',
++                 '--property=KillMode=mixed','--property=TimeoutStopSec=120',
++                 '--property=UMask=0077','--property=StandardOutput=append:'+str(log),
++                 '--property=StandardError=inherit',
++                 sys.executable,str(Path(__file__).resolve()),'--all','--foreground',
++                 '--profile',str(args.profile.resolve()),'--state-dir',str(directory.resolve()),
++                 '--budget-s',str(args.budget_s)]
++        subprocess.run(command,check=True)
++        print(f'Strata 长程测试已交给后台，退出终端后继续。日志 {log}；总报告 {directory/"full-suite-latest.json"}。',flush=True)
++        return 0
++    lock=(directory/'manual-compare.lock').open('a')
++    try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
++    except BlockingIOError:
++        lock.close();parser.error('另一项手动测试正在运行；不会停止服务。')
++    try:
++        return run_worker(root,cfg,directory,owner,request)
++    finally:lock.close()
++
++
++def run_worker(root,cfg,directory,owner,request):
 +    # The worker keeps the service user and RAM locking limit of the system service.
 +    # All process-affecting operations occur after the explicit command and preflight.
 +    resource.setrlimit(resource.RLIMIT_MEMLOCK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
@@ -966,7 +1109,7 @@ index 00000000..f4311a42
 +        try:
 +            return worker.wait()
 +        except KeyboardInterrupt:
-+            worker.send_signal(signal.SIGINT)
++            os.killpg(worker.pid,signal.SIGINT)
 +            worker.wait(timeout=60)
 +            return 130
 +    finally:
@@ -982,11 +1125,13 @@ index 00000000..f4311a42
 +    raise SystemExit(main())
 diff --git a/terminal/l2/test_headless_experiments.py b/terminal/l2/test_headless_experiments.py
 new file mode 100644
-index 00000000..875705f4
+index 00000000..c6f88f55
 --- /dev/null
 +++ b/terminal/l2/test_headless_experiments.py
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,159 @@
 +import copy
++import contextlib
++import io
 +import hashlib
 +import json
 +from pathlib import Path
@@ -1078,6 +1223,14 @@ index 00000000..875705f4
 +    with self.assertRaises(KeyboardInterrupt):h.run_comparison(root,base,root,18001,{'engine_sha256':hashlib.sha256(b'engine').hexdigest(),'groups':['shape']})
 +   self.assertTrue(next(root.glob('spec-shape-lookup-*/results.json')).exists())
 +   self.assertEqual(list(root.glob('*.request.json')),[])
++ def test_long_budget_and_continue_on_failure_do_not_stop_at_four_hours(self):
++  with tempfile.TemporaryDirectory() as t:
++   root=Path(t);base=self.base(root)
++   with patch.object(h,'check_environment'),patch.object(h.time,'monotonic',side_effect=[0]+[20000]*50),patch.object(h,'run_phase',return_value={'status':'failed','cases':[]}) as run,contextlib.redirect_stdout(io.StringIO()):
++    result=h.run_comparison(root,base,root,18001,{'engine_sha256':hashlib.sha256(b'engine').hexdigest(),'groups':['shape'],'budget_s':86400,'continue_on_failure':True})
++   self.assertEqual(len(result['runs']),8)
++   self.assertEqual(result['status'],'incomplete')
++   self.assertEqual(run.call_args.args[6],86400)
 + def test_trace_sources_widths_and_no_tokens(self):
 +  with tempfile.TemporaryDirectory() as t:
 +   p=Path(t)/'trace';p.write_text('# request prompt 3 df2 1 spec 6\nR 3 4 2 0 1.2 4 0 | 0.9 | 789 | 123 | 456\nR 6 12 11 1 2.5 12 32 | 0.9 | 789 | 123 | 456\n')
@@ -1137,10 +1290,10 @@ index 00000000..875705f4
 +if __name__=='__main__':unittest.main()
 diff --git a/terminal/l2/test_manual_compare.py b/terminal/l2/test_manual_compare.py
 new file mode 100644
-index 00000000..2749ebc3
+index 00000000..471c0a13
 --- /dev/null
 +++ b/terminal/l2/test_manual_compare.py
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,76 @@
 +import contextlib
 +import io
 +import json
@@ -1167,18 +1320,48 @@ index 00000000..2749ebc3
 +    self.assertEqual(manual_compare.main(['--profile',str(profile),'--kernel-check','--plan']),0)
 +   run.assert_not_called();popen.assert_not_called()
 +   result=json.loads(out.getvalue());self.assertFalse(result['compilation']);self.assertFalse(result['model_requests'])
++ def test_full_plan_is_detached_and_includes_every_suite_without_side_effects(self):
++  with tempfile.TemporaryDirectory() as t:
++   _,profile,_=self.fixture(Path(t));out=io.StringIO()
++   with patch.object(manual_compare.subprocess,'run') as run,patch.object(manual_compare.subprocess,'Popen') as popen,contextlib.redirect_stdout(out):
++    self.assertEqual(manual_compare.main(['--profile',str(profile),'--all','--plan']),0)
++   run.assert_not_called();popen.assert_not_called()
++   result=json.loads(out.getvalue())
++   self.assertEqual(result['stages'],['kernels','comparison','vision'])
++   self.assertEqual(result['comparison_runs'],180)
++   self.assertEqual(result['budget_s'],72*3600)
++   self.assertTrue(result['detached']);self.assertFalse(result['compilation'])
++ def test_detached_full_suite_handoff_does_not_stop_service_in_calling_terminal(self):
++  with tempfile.TemporaryDirectory() as t:
++   _,profile,state=self.fixture(Path(t))
++   with patch.object(manual_compare.os,'geteuid',return_value=0),patch.object(manual_compare.experiments,'check_environment'),patch.object(manual_compare.subprocess,'check_output',return_value='inactive\n'),patch.object(manual_compare.subprocess,'Popen') as popen,patch.object(manual_compare.subprocess,'run') as run,contextlib.redirect_stdout(io.StringIO()):
++    self.assertEqual(manual_compare.main(['--profile',str(profile),'--all']),0)
++   popen.assert_not_called();self.assertEqual(run.call_count,1)
++   command=run.call_args.args[0]
++   self.assertEqual(command[0],'systemd-run')
++   self.assertIn('--foreground',command);self.assertIn('--all',command)
++   self.assertEqual(command[command.index('--budget-s')+1],str(72*3600))
++   self.assertEqual(list(state.glob('manual-compare-*.json')),[])
 + def test_active_desktop_rejected_before_service_stop(self):
 +  with tempfile.TemporaryDirectory() as t:
 +   _,profile,_=self.fixture(Path(t))
 +   with patch.object(manual_compare.subprocess,'check_output',return_value='active\n'),patch.object(manual_compare.subprocess,'run') as run,contextlib.redirect_stderr(io.StringIO()):
 +    with self.assertRaises(SystemExit):manual_compare.main(['--profile',str(profile)])
 +   run.assert_not_called()
++ def test_interrupted_job_signals_worker_group_and_restores_service(self):
++  with tempfile.TemporaryDirectory() as t:
++   _,profile,_=self.fixture(Path(t))
++   with patch.object(manual_compare.os,'geteuid',return_value=0),patch.object(manual_compare.os,'killpg') as killpg,patch.object(manual_compare.experiments,'check_environment'),patch.object(manual_compare.resource,'setrlimit'),patch.object(manual_compare.subprocess,'check_output',return_value='inactive\n'),patch.object(manual_compare.subprocess,'Popen') as popen,patch.object(manual_compare.subprocess,'run') as run,contextlib.redirect_stdout(io.StringIO()):
++    popen.return_value.pid=12345;popen.return_value.wait.side_effect=[KeyboardInterrupt,0]
++    self.assertEqual(manual_compare.main(['--profile',str(profile)]),130)
++   killpg.assert_called_once_with(12345,manual_compare.signal.SIGINT)
++   self.assertEqual(run.call_args_list[-1].args[0],['systemctl','start','strata.service'])
 +
 +
 + def test_failed_worker_restores_daily_service(self):
 +  with tempfile.TemporaryDirectory() as t:
 +   _,profile,state=self.fixture(Path(t))
-+   with patch.object(manual_compare.os,'geteuid',return_value=0),patch.object(manual_compare.resource,'setrlimit'),patch.object(manual_compare.subprocess,'check_output',return_value='inactive\n'),patch.object(manual_compare.subprocess,'Popen') as popen,patch.object(manual_compare.subprocess,'run') as run,contextlib.redirect_stdout(io.StringIO()):
++   with patch.object(manual_compare.os,'geteuid',return_value=0),patch.object(manual_compare.experiments,'check_environment'),patch.object(manual_compare.resource,'setrlimit'),patch.object(manual_compare.subprocess,'check_output',return_value='inactive\n'),patch.object(manual_compare.subprocess,'Popen') as popen,patch.object(manual_compare.subprocess,'run') as run,contextlib.redirect_stdout(io.StringIO()):
 +    popen.return_value.wait.return_value=1
 +    self.assertEqual(manual_compare.main(['--profile',str(profile),'--group','dense']),1)
 +   self.assertEqual([call.args[0] for call in run.call_args_list],

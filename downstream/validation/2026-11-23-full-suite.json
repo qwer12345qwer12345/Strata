@@ -1,0 +1,99 @@
+{
+  "date": "2026-11-23",
+  "stack_tree": "733b068ae0bdaa277de016ddee5aaa85aca53efd",
+  "engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+  "production_daily_environment_mismatches": {},
+  "selected_daily": {
+    "spec": 4,
+    "shapes": 2,
+    "lookup": 16,
+    "tc": 0,
+    "dense": 1,
+    "skip": 8,
+    "rows": 2,
+    "nowait": 1,
+    "tail": 7,
+    "emb": 1,
+    "gdn_np": 2,
+    "upmix": 1,
+    "gdn_tiles": 1,
+    "gdn_fuse": 1,
+    "prefill_cap": 8192,
+    "cpu_nt": 32,
+    "cpu_max": 3072,
+    "lag": 2,
+    "overlap": 0,
+    "engine": 1,
+    "decode_tc": 1,
+    "tq_f16": 1,
+    "fetch": 2,
+    "hc_persist": 1,
+    "qfuse": 0,
+    "l3": 1,
+    "pin": 0.25,
+    "adapt_every": 2,
+    "adapt_swaps": 192,
+    "adapt_decay": 0.92,
+    "dense_min": 9
+  },
+  "effective_arguments": {
+    "--spec": "4",
+    "--draft-conf": "0.8",
+    "--lookup-max-t": "16",
+    "--lookup-sizes": "2,3,4,5,6,7,8,10,12,16",
+    "--prefill": "auto:8192",
+    "--adapt-every": "2",
+    "--adapt-swaps": "192",
+    "--adapt-decay": "0.92",
+    "--max-context": "262144",
+    "--kv-resident": "20480",
+    "--pool-workers": "15",
+    "--vram-reserve-mib": "448"
+  },
+  "prior": "0.5",
+  "tool_guard": true,
+  "archive_v2_v3": [
+    "1",
+    "1"
+  ],
+  "full_suite_plan": {
+    "suite": "full-headless-v1",
+    "automatic_tests": false,
+    "stages": [
+      "kernels",
+      "comparison",
+      "vision"
+    ],
+    "kernels": {
+      "suite": "kernel-check-v1",
+      "automatic_tests": false,
+      "checks": [
+        "K8V4 decode TC named/default dispatch",
+        "Q8 HC persistent and QFUSE",
+        "TQ INT8 and F16 prefill",
+        "resident complement batch exchange",
+        "vision expert lease",
+        "Dense resident-weight layout latency sweep"
+      ],
+      "compilation": false,
+      "model_requests": false
+    },
+    "comparison_runs": 180,
+    "vision": [
+      "cold synthetic image",
+      "same image cached",
+      "3072-token text after expert restoration"
+    ],
+    "compilation": false,
+    "parallel_tests": false,
+    "continue_after_failed_comparison_arm": true
+  },
+  "default_budget_s": 259200,
+  "four_hour_hard_cap": false,
+  "detached_by_default": true,
+  "controller_unittests": 25,
+  "prepared_files_matching_runtime": 77,
+  "model_tests_run_this_change": false,
+  "production_performance_quality_status": "NOT TESTED",
+  "verification_scope": "Control-flow tests use fixtures and mocks. No long model run or real transient job was started during this change."
+}

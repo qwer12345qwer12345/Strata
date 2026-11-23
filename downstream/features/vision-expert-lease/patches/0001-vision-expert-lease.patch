@@ -321,18 +321,83 @@ index 00000000..84a5549e
 + assert(!lease.begin(-1,ops,res,err)&&!lease.active());
 + std::cout<<"vision_expert_lease_test: PASS (borrow, partial shrink rollback, failed map/read retry, ownership gate, idempotent END)\n";
 +}
+diff --git a/terminal/l2/test_full_suite.py b/terminal/l2/test_full_suite.py
+new file mode 100644
+index 00000000..51d6767f
+--- /dev/null
++++ b/terminal/l2/test_full_suite.py
+@@ -0,0 +1,58 @@
++import contextlib
++import hashlib
++import io
++import json
++from pathlib import Path
++import tempfile
++import unittest
++from unittest.mock import patch
++from l2 import full_suite as suite
++
++
++class FullSuite(unittest.TestCase):
++    def fixture(self, root):
++        exe=root/'engine';exe.write_bytes(b'engine')
++        digest=hashlib.sha256(b'engine').hexdigest()
++        cfg={'exe':str(exe),'vision':{'gpu':True,'expert_lease':True},
++             'comparison_reference':{'config':{'exe':str(exe)},'engine_sha256':digest}}
++        return cfg,dict(engine_sha256=digest,budget_s=86400)
++
++    def run_stages(self, root, statuses, interrupted=False):
++        cfg,request=self.fixture(root);seen=[]
++        def stage(name):
++            def run(*args):
++                latest=json.loads((root/'full-suite-latest.json').read_text())
++                self.assertEqual(latest['stages'][-1],{'stage':name,'status':'running'})
++                seen.append(name)
++                if interrupted and name=='comparison':raise KeyboardInterrupt
++                self.assertTrue(args[-1]['continue_on_failure'])
++                return {'status':statuses[name]}
++            return run
++        with patch.object(suite.comparisons,'check_environment'),patch.object(suite.kernel_check,'run',stage('kernels')),patch.object(suite.comparisons,'run_comparison',stage('comparison')),patch('l2.vision_check.run',stage('vision')),contextlib.redirect_stdout(io.StringIO()):
++            result=suite.run(root,cfg,root,8096,request)
++        return result,seen
++
++    def test_sequential_full_suite_continues_after_recoverable_arm_failure(self):
++        with tempfile.TemporaryDirectory() as t:
++            root=Path(t)
++            result,seen=self.run_stages(root,{'kernels':'passed','comparison':'incomplete','vision':'passed'})
++            self.assertEqual(seen,['kernels','comparison','vision'])
++            self.assertEqual(result['status'],'incomplete')
++            self.assertEqual(json.loads((root/'full-suite-latest.json').read_text())['status'],'incomplete')
++
++    def test_failed_kernel_prerequisite_never_runs_model(self):
++        with tempfile.TemporaryDirectory() as t:
++            result,seen=self.run_stages(Path(t),{'kernels':'failed'})
++            self.assertEqual(seen,['kernels']);self.assertEqual(result['status'],'incomplete')
++
++    def test_interrupt_preserves_completed_results(self):
++        with tempfile.TemporaryDirectory() as t:
++            root=Path(t)
++            with self.assertRaises(KeyboardInterrupt):
++                self.run_stages(root,{'kernels':'passed'},interrupted=True)
++            result=json.loads((root/'full-suite-latest.json').read_text())
++            self.assertEqual(result['status'],'interrupted')
++            self.assertEqual([s['status'] for s in result['stages']],['passed','interrupted'])
++
++
++if __name__=='__main__':unittest.main()
 diff --git a/terminal/l2/test_vision_check.py b/terminal/l2/test_vision_check.py
 new file mode 100644
-index 00000000..cacf4416
+index 00000000..79301533
 --- /dev/null
 +++ b/terminal/l2/test_vision_check.py
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,47 @@
 +import unittest
 +import io
 +import json
 +import contextlib
 +from pathlib import Path
 +import tempfile
++import hashlib
 +from unittest import mock
 +from l2 import manual_compare,test_runtime_config
 +from l2 import vision_check
@@ -346,6 +411,24 @@ index 00000000..cacf4416
 + def test_missing_or_cpu_vision_rejected(self):
 +  for cfg in ({},{'vision':{'gpu':False,'expert_lease':True}},{'vision':{'gpu':True}}):
 +   with self.assertRaises(ValueError):vision_check.plan(cfg)
++ def test_vision_uses_fresh_cache_long_budget_and_rejects_short_restored_output(self):
++  for tokens,expected in ((3072,'passed'),(100,'invalid')):
++   with self.subTest(tokens=tokens),tempfile.TemporaryDirectory() as t:
++    root=Path(t);exe=root/'engine';exe.write_bytes(b'engine');seed=root/'seed';seed.write_bytes(b'seed')
++    cfg={'exe':str(exe),'args':['--expert-profile',str(seed)],'env':{},
++         'vision':{'gpu':True,'expert_lease':True,'cache_parent':'daily-cache'}}
++    def phase(*args,**kwargs):
++     trial=args[1];folder=args[3];folder.mkdir()
++     self.assertNotEqual(trial['vision']['cache_parent'],'daily-cache')
++     self.assertEqual(trial['env']['STRATA_CONV_DISK_DIR'],str(folder/'parked'))
++     self.assertEqual(args[6],86500)
++     (folder/'engine.log').write_text('')
++     (folder/'server.log').write_text('VISION_LEASE state=held borrowed\nVISION_LEASE state=idle restored\n')
++     return {'status':'passed','cases':[{'timings':{'predicted_n':64}},{'timings':{'predicted_n':tokens}}]}
++    with mock.patch.object(vision_check.runner,'check_environment'),mock.patch.object(vision_check.runner,'run_phase',side_effect=phase),mock.patch.object(vision_check.time,'monotonic',return_value=100),contextlib.redirect_stdout(io.StringIO()):
++     result=vision_check.run(root,cfg,root,8096,{'engine_sha256':hashlib.sha256(b'engine').hexdigest(),'budget_s':86400})
++    self.assertEqual(result['status'],expected)
++    self.assertEqual(cfg['vision']['cache_parent'],'daily-cache')
 + def test_manual_vision_plan_does_not_stop_or_start_anything(self):
 +  with tempfile.TemporaryDirectory() as t:
 +   _,profile,_=test_runtime_config.RuntimeConfiguration().fixture(Path(t))
@@ -357,10 +440,10 @@ index 00000000..cacf4416
 +if __name__=='__main__':unittest.main()
 diff --git a/terminal/l2/vision_check.py b/terminal/l2/vision_check.py
 new file mode 100644
-index 00000000..228068ef
+index 00000000..d031d7ab
 --- /dev/null
 +++ b/terminal/l2/vision_check.py
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,81 @@
 +"""Explicit full-resident headless vision lifecycle check; never called at startup."""
 +import base64
 +import copy
@@ -411,18 +494,19 @@ index 00000000..228068ef
 +    folder.mkdir(parents=True,mode=0o700)
 +    seed=folder/'expert-profile.bin';args=cfg['args'];seed.write_bytes(Path(args[args.index('--expert-profile')+1]).read_bytes())
 +    trial=copy.deepcopy(cfg)
++    trial['vision']['cache_parent']=str(folder/'vision-cache')
 +    for flag in ('--expert-profile-save','--expert-profile'):
 +        while flag in trial['args']:
 +            i=trial['args'].index(flag);del trial['args'][i:i+2]
 +    trial['args']=set_options(trial['args'],{'--expert-profile':seed,'--conversation-cache-mib':0,'--conversation-cache-slots':0})
 +    for key in ('startup_benchmark','slot_save_path','l2_backend_port','l2_disk_budget_mib'):trial.pop(key,None)
-+    trial['env'].update(STRATA_DRAFT_LOG='1',STRATA_DECODE_TIMING='1',STRATA_CONV_DISK_DIR=str(folder/'parked'))
++    trial['env'].update(STRATA_DRAFT_LOG='1',STRATA_DECODE_TIMING='1',STRATA_CONV_DISK_DIR=str(folder/'trial/parked'))
 +    image=[{'type':'text','text':'Name the three colored rectangles from left to right. Answer briefly in English.'},
 +           {'type':'image_url','image_url':{'url':'data:image/png;base64,'+base64.b64encode(fixture_png()).decode()}}]
 +    warmup,long_output,*_=workloads()
 +    cases=(warmup,('image_cold',image,64),('image_cached',image,64),('text_after_restore',long_output[1],3072))
 +    result=runner.run_phase(root,trial,'vision',folder/'trial',seed,port,
-+        time.monotonic()+min(14400,max(300,request.get('budget_s',1200))),
++        time.monotonic()+max(300,request.get('budget_s',1200)),
 +        workloads=cases,launch_profile=trial,stream_latency=True)
 +    engine_log=(folder/'trial/engine.log').read_text(errors='replace')
 +    if result['status']=='passed' and any(note in engine_log for note in
@@ -436,6 +520,8 @@ index 00000000..228068ef
 +        result.update(status='failed',error='cold picture must borrow/restore once; cached picture must not borrow again')
 +    if result['status']=='passed' and any(r['timings']['predicted_n']<1 for r in result['cases']):
 +        result.update(status='failed',error='empty model output')
++    if result['status']=='passed' and result['cases'][-1]['timings']['predicted_n'] < 3072*.75:
++        result.update(status='invalid',error='post-restoration text ended before 75% of the requested length')
 +    (folder/'results.json').write_text(json.dumps(result,indent=2)+'\n')
 +    print(f'Strata 手动识图检查 {result["status"]}；报告 {folder/"results.json"}',flush=True)
 +    return result

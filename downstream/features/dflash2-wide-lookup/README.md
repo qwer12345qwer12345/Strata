@@ -31,3 +31,6 @@
 本机按用户选择采用理论优先日常组合，明确标注未经无头组合验证；测试改为显式命令触发，详见统一配置文档。引擎二进制SHA256：`85a8b3084262d90b671ba5442bab6a0885bfb7faf34cc76e775b0f12ab4f7569`。编译和GPU测试依次执行，未切换桌面或网络。
 
 当前手动矩阵为114组，`--group numeric`只运行新增44组；覆盖Embedding×GDN精度、HC_UPMIX、GDN执行分块、prefill cap/CPU share与resident overlap替代调度。用户选择日常Embedding1/NP2，性能与质量尚未实测。正常启动不运行这些组，细节见[DAILY_CONFIGURATION.md](../../DAILY_CONFIGURATION.md)。
+
+
+2026-11-23长程入口：`sudo ~/.local/bin/strata-headless-compare --all`，默认由systemd后台串行运行内核/Dense、180组参数对照、识图验收，预算72小时；`--all --plan`无运行副作用。详见[日常配置](../../DAILY_CONFIGURATION.md)。生产选定的DAILY开关已逐项核对一致；控制测试25项通过，不代表已完成模型性能验收。机器可读记录见[验收JSON](../../validation/2026-11-23-full-suite.json)。

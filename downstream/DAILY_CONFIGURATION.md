@@ -34,13 +34,13 @@ prior固定0.5、DFlash2/confidence0.8、专家成对行、15 workers、Gyro-S�
 本机手动入口：
 
 ```sh
-strata-headless-compare --plan
-sudo ~/.local/bin/strata-headless-compare
+strata-headless-compare --all --plan
+sudo ~/.local/bin/strata-headless-compare --all
 ```
 
 第一条只看计划，不停止服务。第二条须在无头环境执行；先正常停止Strata，测试时继承无限memlock并以模型用户运行，结束（含试验失败）后恢复日常服务。桌面仍active时直接退出，不切换桌面。需要sudo是为了完整专家锁页的memlock和systemd停止/恢复服务，不用于模型进程提权。
 
-可只选一组，例如 `sudo ~/.local/bin/strata-headless-compare --group spec`；默认全部180组、预算14400秒。可用 `--budget-s` 调整，运行器上限14400秒。源码入口为 `terminal/l2/manual_compare.py`，命令本身没有开机队列副作用。
+可只选一组，例如 `sudo ~/.local/bin/strata-headless-compare --group spec`；单独矩阵默认180组、预算14400秒，可用 `--budget-s` 调整，已取消4小时硬上限。推荐 `--all` 一次运行内核、完整矩阵和识图，默认后台执行、总预算72小时。源码入口为 `terminal/l2/manual_compare.py`，命令本身没有开机队列副作用。
 
 ## 原有70组：关键交互矩阵
 
@@ -100,7 +100,7 @@ strata-headless-compare --group numeric --plan
 sudo ~/.local/bin/strata-headless-compare --group numeric
 ```
 
-`numeric`选择新增46组；默认无group为全部180组。也可选 `--group emb-gdn`、`--group hc-upmix` 等单组。仍为显式无头命令，普通启动无基准、无队列，测试结束恢复日常服务。默认/最大预算4小时，未完成应报告incomplete，不假称180组全部通过。
+`numeric`选择新增46组；默认无group为全部180组。也可选 `--group emb-gdn`、`--group hc-upmix` 等单组。仍为显式无头命令，普通启动无基准、无队列，测试结束恢复日常服务。单独矩阵默认预算4小时，可显式增加；`--all`默认72小时。未完成应报告incomplete，不假称180组全部通过。
 
 每组保留64-token热身、3072-token长输出、600条记录的长prompt后1536-token输出，至少达到目标长度75%才有效；记录实际prompt token数，不能仅凭cap32768宣称测到32K单块。CPU share组另加60条记录的中等prompt及1536-token输出，以覆盖扩展的分担范围，不能只测超出范围的大块。新增记录各arm的完整请求参数、精度与调度环境；启用参数不等于已观察到内核命中。显式打开prefill分项计时，所有arm一致。一般任务质量、工具可靠性仍需单独判断，输出hash不作为淘汰条件。
 
@@ -124,7 +124,7 @@ sudo ~/.local/bin/strata-headless-compare --group numeric
 
 保留prior0.5、spec4/confidence0.8、lookup16、成对行、15workers、262144上下文、20480 KV resident、448MiB显存余量；不因升级把活跃内存预算扩大。新版本使用独立存档目录，旧存档保留；跨二进制恢复兼容性尚未验证。旧0.1.65二进制和冻结配置用于对照。
 
-新增 `updates` 共64次正反序对照：engine-reference4、update-bundle4、decode-tc-spec8、tq-prefill8、hc-qfuse8、fetch-pin8、fetch-mode6、upstream-adapt4、qfuse-l3 8、dense-min6。参考版本组对齐旧日常开关，并记录实际二进制SHA；其他组使用同一新二进制。原70 + numeric46 + updates64 = 180；4小时可能不足，全矩阵未完成必须标incomplete。
+新增 `updates` 共64次正反序对照：engine-reference4、update-bundle4、decode-tc-spec8、tq-prefill8、hc-qfuse8、fetch-pin8、fetch-mode6、upstream-adapt4、qfuse-l3 8、dense-min6。参考版本组对齐旧日常开关，并记录实际二进制SHA；其他组使用同一新二进制。原70 + numeric46 + updates64 = 180；单独矩阵4小时可能不足，推荐使用72小时预算的`--all`；全矩阵未完成必须标incomplete。
 
 ```sh
 strata-headless-compare --group updates --plan
@@ -133,3 +133,25 @@ sudo ~/.local/bin/strata-headless-compare --group updates
 ```
 
 `--kernel-check`只使用预编译目标：GPU正确性、两种TQ预填充数值检查及128MiB常驻权重Dense延迟扫描；无模型请求、无编译。缺测试或关键GPU项跳过即不算通过。正常启动无测试、无队列。完整模型和实际识图验收仍分别通过`--group`和`--vision-check`显式执行。
+
+## 一条命令挂完整长程测试
+
+```sh
+sudo ~/.local/bin/strata-headless-compare --all
+```
+
+只在无头环境运行。该命令将任务交给系统级临时服务`strata-headless-test.service`，退出终端后继续；不会开机自动执行。只停止一次日常Strata，依次执行预编译内核正确性和常驻权重Dense扫描、180次完整参数对照、真实识图借还验收，全部阶段结束后恢复日常服务。没有编译与测试并行。
+
+总预算默认72小时，`--budget-s 345600`可改为96小时，已经取消旧4小时硬上限。`--foreground`可让同一完整任务留在当前终端。参数组失败或输出过短会保留记录并继续其余组，最终报告incomplete；内核前置正确性失败则不启动模型阶段。中断保留已完成结果；不承诺断电后自动续跑。相互排斥的候选只在对照中切换，不自动改变日常配置。
+
+日志：`~/.local/state/strata/startup-benchmark/full-suite.log`。总报告：同目录`full-suite-latest.json`，内含各阶段报告与独立结果目录。每个参数组仍即时保存独立结果。单独检查命令继续保留，但不必逐条执行。
+
+```sh
+strata-headless-compare --all --plan
+systemctl status strata-headless-test.service
+sudo systemctl stop strata-headless-test.service
+```
+
+计划命令无服务副作用。停止命令会请求正常中断并恢复日常Strata；若此时桌面已启用，则不强行切回无头。重复启动会被服务名和运行锁拒绝，不同时争用GPU。识图验收每次用独立合成图缓存目录，确保冷图真实借显存、第二次缓存图不借，恢复后文本须达到3072-token目标的75%。
+
+本轮再次核对生产最终命令和环境，全部DAILY参数一致；prior0.5、spec4/confidence0.8、lookup16、成对行、NOWAIT1/lag2、tail skip7、Embedding计费1、GDN NP2、BF16 PLE及新PR开关均已选择。完整组合仍属未完成模型性能/质量验收的理论选择；新Dense扫描还没有产生新的生产赢家，保留原形状表。

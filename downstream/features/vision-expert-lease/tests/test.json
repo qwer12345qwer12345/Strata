@@ -19,7 +19,8 @@
     "serve.test_vision_tool_image",
     "serve.test_vision_cpu_fallback",
     "serve.test_vram",
-    "l2.test_vision_check"
+    "l2.test_vision_check",
+    "l2.test_full_suite"
   ],
   "settings_generation": false
 }
