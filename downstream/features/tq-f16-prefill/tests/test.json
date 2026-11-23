@@ -1,0 +1,16 @@
+{
+  "targets": [],
+  "cmake_args": [],
+  "ctest_regex": "",
+  "optional_targets": {
+    "cuda": [
+      "prefill_fused_iq_test"
+    ]
+  },
+  "optional_ctest_regex": {
+    "cuda": "^prefill_fused_iq_test_tq(h)?$"
+  },
+  "overlays": [],
+  "python_modules": [],
+  "settings_generation": false
+}

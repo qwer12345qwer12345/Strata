@@ -3,18 +3,19 @@
   "name": "K8V4 Q*K split-INT8 IMMA",
   "version": "0.1.0",
   "status": "active",
-  "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
-  "patched_tree": "03d3173b52031b30d7caf021351663d8119bf624",
+  "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
+  "patched_tree": "dcc3d202d66183d2cb625cdffbc49d6a323506f5",
   "requires": [],
   "patches": [
     {
       "id": "qsa-k8v4-imma",
       "path": "patches/0001-qsa-k8v4-imma.patch",
-      "sha256": "ecad859c6542f2ad6fbe42c725302a36c0901b1ee6611257e81aaf9f1d976750"
+      "sha256": "10de74ac5581834021c38b499283c3effb2a0daef99b274cc9abf3c277e94a9f"
     }
   ],
   "tests": "tests/test.json",
   "environment": {
     "STRATA_K8V4_QK_IMMA": "1"
-  }
+  },
+  "ported_from_base": "c6f6427d9de9016fd92d13e29740f65625261df7"
 }

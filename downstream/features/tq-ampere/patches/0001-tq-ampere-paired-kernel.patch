@@ -1,8 +1,8 @@
 diff --git a/engine/cmake/strata_gpu_engine.cmake b/engine/cmake/strata_gpu_engine.cmake
-index 120ebaf87..517c218cd 100644
+index e8c48729..fd7fecbf 100644
 --- a/engine/cmake/strata_gpu_engine.cmake
 +++ b/engine/cmake/strata_gpu_engine.cmake
-@@ -844,6 +844,9 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+@@ -847,6 +847,9 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
    target_include_directories(tq_pascal_bench PRIVATE ${_strata_gpu_include_directories} ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ggml)
    target_link_libraries(tq_pascal_bench PRIVATE strata_kernels ${_strata_gpu_runtime_target})
    add_test(NAME tq_pascal_bench COMMAND tq_pascal_bench)
@@ -13,10 +13,10 @@ index 120ebaf87..517c218cd 100644
    # the same Split path on the other routes it can meet: the generic multi kernels (no V2K) and the fused gate/up + SwiGLU kernel, and the sub-16-row
    # gate/up route switched off (a K-quant row has 160 dots, not the 80 the sub-16 rows assume: STRATA_KQ_SPLIT=1 must stay bitwise on all of them)
 diff --git a/engine/src/kernels/cuda/iq_kernels.cu b/engine/src/kernels/cuda/iq_kernels.cu
-index a92e56479..10e0f3188 100644
+index c479cc73..29a2328e 100644
 --- a/engine/src/kernels/cuda/iq_kernels.cu
 +++ b/engine/src/kernels/cuda/iq_kernels.cu
-@@ -1977,6 +1977,105 @@ __global__ void __launch_bounds__(256) native_gu_kernel(const unsigned long long
+@@ -2150,6 +2150,105 @@ __global__ void __launch_bounds__(256) native_gu_kernel(const unsigned long long
  // has halves of <= 4), so 4 takes such windows in one pass; 8 would take ~64-80 registers against ~48 (ptxas -v).
  constexpr int GRP_NC = 4;
  
@@ -122,7 +122,7 @@ index a92e56479..10e0f3188 100644
  template<int TG, bool STAGE_GRID = kStageIqGrid<TG>, bool SUB16 = true>
  __global__ void __launch_bounds__(256) native_gu_multi_kernel(const unsigned long long* __restrict__ grp_ptr,
                                                                const int32_t* __restrict__ grp_start,
-@@ -3502,6 +3601,27 @@ bool tq_sub8_on() {
+@@ -3760,6 +3859,27 @@ bool tq_sub8_on() {
      return on && g_stage_grid && !g_no_sub16_gu && !tq_stage_on();
  #endif
  }
@@ -150,7 +150,7 @@ index a92e56479..10e0f3188 100644
  // row chunks per block of the staged trellis gate/up and down kernels (STRATA_TQ_ROWCH, default 4)
  int tq_row_chunks() {
      static const int n = [] {
-@@ -4249,6 +4369,15 @@ void launch_gu(dim3 grid, cudaStream_t s, const unsigned long long* grp_ptr, con
+@@ -4552,6 +4672,15 @@ void launch_gu(dim3 grid, cudaStream_t s, const unsigned long long* grp_ptr, con
              if (tq_sub8_on() && (L.n_embd / Fmt<TG>::qk) * Fmt<TG>::ipb == 160) {
                  dim3 g8 = grid;
                  g8.x = (unsigned) ((2 * L.n_ff + 31) / 32);

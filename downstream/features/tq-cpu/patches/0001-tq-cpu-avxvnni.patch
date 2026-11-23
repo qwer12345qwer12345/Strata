@@ -1,8 +1,8 @@
 diff --git a/engine/cmake/backends/cpu.cmake b/engine/cmake/backends/cpu.cmake
-index 641b15b33..fdf50bdb4 100644
+index f0c8eb59..8d727b8b 100644
 --- a/engine/cmake/backends/cpu.cmake
 +++ b/engine/cmake/backends/cpu.cmake
-@@ -497,6 +497,9 @@ if(STRATA_BUILD_TESTS)
+@@ -532,6 +532,9 @@ if(STRATA_BUILD_TESTS)
      add_executable(tqp_cpu_test src/kernels/cpu/tqp_cpu_test.cpp)
      target_link_libraries(tqp_cpu_test PRIVATE strata_kernels_cpu)
      add_test(NAME tqp_cpu_test COMMAND tqp_cpu_test)
@@ -13,7 +13,7 @@ index 641b15b33..fdf50bdb4 100644
      # #5873: the opt-in fast AVX2 pair-trellis rows (STRATA_TQP_AVX2_FAST=1) bit for bit equal to the scalar kernel as well
      add_test(NAME tqp_cpu_test_fast COMMAND ${CMAKE_COMMAND} -E env STRATA_TQP_AVX2_FAST=1 $<TARGET_FILE:tqp_cpu_test>)
 diff --git a/engine/src/kernels/cpu/tq_avx2.cpp b/engine/src/kernels/cpu/tq_avx2.cpp
-index 357177239..f8b6b5334 100644
+index 35717723..f8b6b533 100644
 --- a/engine/src/kernels/cpu/tq_avx2.cpp
 +++ b/engine/src/kernels/cpu/tq_avx2.cpp
 @@ -11,6 +11,7 @@

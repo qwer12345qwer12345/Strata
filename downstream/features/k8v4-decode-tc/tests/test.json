@@ -1,0 +1,16 @@
+{
+  "targets": [],
+  "cmake_args": [],
+  "ctest_regex": "",
+  "optional_targets": {
+    "cuda": [
+      "qsa_decode_tc_parity"
+    ]
+  },
+  "optional_ctest_regex": {
+    "cuda": "^qsa_decode_tc_parity(_env)?$"
+  },
+  "overlays": [],
+  "python_modules": [],
+  "settings_generation": false
+}

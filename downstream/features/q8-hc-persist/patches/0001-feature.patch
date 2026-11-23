@@ -1,0 +1,551 @@
+diff --git a/engine/cmake/strata_gpu_engine.cmake b/engine/cmake/strata_gpu_engine.cmake
+index e8c48729..62db6c5b 100644
+--- a/engine/cmake/strata_gpu_engine.cmake
++++ b/engine/cmake/strata_gpu_engine.cmake
+@@ -1129,8 +1129,8 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+   target_include_directories(gr_multi_parity PRIVATE ${_strata_gpu_include_directories})
+   target_link_libraries(gr_multi_parity PRIVATE strata_kernels ${_strata_gpu_runtime_target})
+   add_test(NAME gr_multi_parity COMMAND gr_multi_parity)
+-  # STRATA_HC_PERSIST=1: the persistent hyper-connection read against the default multi read (bounded, two runs bitwise),
+-  # and with the variable unset it never runs (a skip where the card cannot hold its 80 blocks, and on CUDA)
++  # STRATA_HC_PERSIST=1: BF16 and Q8_0 persistent HC reads against the default paths, QFUSE output parity, and the
++  # existing 8 + tail fallback for wide Q8 windows; with the variable unset the persistent read never runs.
+   add_executable(hc_persist_parity src/kernels/hc_persist_parity.cpp)
+   target_include_directories(hc_persist_parity PRIVATE ${_strata_gpu_include_directories})
+   target_link_libraries(hc_persist_parity PRIVATE strata_kernels ${_strata_gpu_runtime_target})
+diff --git a/engine/include/strata/kernels/fused_gr.hpp b/engine/include/strata/kernels/fused_gr.hpp
+index fb32021c..d2054865 100644
+--- a/engine/include/strata/kernels/fused_gr.hpp
++++ b/engine/include/strata/kernels/fused_gr.hpp
+@@ -94,11 +94,13 @@ void fused_gr_v3_print_resources();
+ void fused_gr_check();
+ int fused_gr_variant();
+ 
+-/// Opt-in STRATA_HC_PERSIST=1 (HIP): the multi read as one persistent kernel (80 resident blocks, the down projection
+-/// split by column slices, two grid barriers).  Another summation order (not bitwise).
+-/// `fused_gr_persist_init` checks residency and the result against the default read once per card (Verifier::init);
+-/// `fused_gr_read_persist` returns false when it did not run (off, too many tokens, a Q8 / QFUSE read) - then the caller
+-/// runs `fused_gr_read_multi`.  Only for reads on a stream no other persistent read runs on concurrently (the verifier's).
++/// Opt-in STRATA_HC_PERSIST=1 (CUDA + HIP): the multi read as one persistent kernel (80 resident blocks, the down
++/// projection split by column slices, two grid barriers). Supports BF16 and Q8_0 HC weights, and writes QFUSE output
++/// when requested. Another summation order (not bitwise).
++/// `fused_gr_persist_init` checks BF16 parity and independently probes Q8_0 residency once per card (Verifier::init);
++/// `fused_gr_read_persist` returns false when it did not run (off, too many tokens, or an unsupported weight layout) -
++/// then the caller runs `fused_gr_read_multi`. Only for reads on a stream no other persistent read runs on concurrently
++/// (the verifier's).
+ void fused_gr_persist_init();
+ bool fused_gr_read_persist(const FusedGrArgs* a, int n_tok, void* stream);
+ 
+diff --git a/engine/src/kernels/cuda/fused_gr.cu b/engine/src/kernels/cuda/fused_gr.cu
+index 7c71256e..2c042caf 100644
+--- a/engine/src/kernels/cuda/fused_gr.cu
++++ b/engine/src/kernels/cuda/fused_gr.cu
+@@ -20,6 +20,7 @@
+ #endif
+ #include <cuda_runtime.h>
+ 
++#include <algorithm>
+ #include <atomic>
+ #include <mutex>
+ #include <type_traits>
+@@ -4861,6 +4862,39 @@ struct PArgs {
+     double* partd;      // STRATA_HC_PERSIST=3 (a reference only): the partial dots and sums of squares in double
+     double* sspd;
+ };
++struct PWeight8 {
++    uint32_t lo, hi;
++    float scale;
++};
++__device__ __forceinline__ uint16_t persist_load_u16(const uint8_t* p) {
++    return *reinterpret_cast<const uint16_t*>(p);
++}
++__device__ __forceinline__ PWeight8 persist_load_q8_0(const uint8_t* base, size_t e) {
++    const uint8_t* block = base + (e / 32) * 34;
++    const uint8_t* q = block + 2 + (e & 31);
++    const uint32_t lo = (uint32_t) persist_load_u16(q) | ((uint32_t) persist_load_u16(q + 2) << 16);
++    const uint32_t hi = (uint32_t) persist_load_u16(q + 4) | ((uint32_t) persist_load_u16(q + 6) << 16);
++    const float scale = __half2float(*reinterpret_cast<const __half*>(block));
++    return {lo, hi, scale};
++}
++__device__ __forceinline__ PWeight8 persist_load_q8(const FusedGrArgs& a, bool up, size_t e) {
++    return persist_load_q8_0(up ? a.q8_up : a.q8_down, e);
++}
++template <bool DP>
++__device__ __forceinline__ typename std::conditional<DP, double, float>::type persist_dot_q8(PWeight8 w, const float* x) {
++    if constexpr (DP) {
++        double acc = 0.0;
++#pragma unroll
++        for (int i = 0; i < 8; ++i) {
++            const uint32_t word = i < 4 ? w.lo : w.hi;
++            const int shift = (i & 3) * 8;
++            acc += (double) (int8_t) (word >> shift) * (double) x[i];
++        }
++        return (double) w.scale * acc;
++    } else {
++        return w.scale * dot8q(w.lo, w.hi, x);
++    }
++}
+ // Returns false when the read was aborted: a block waited longer than `ticks` (the 80 blocks were not all resident - the
+ // start-up check finds that out by running every T with a short timeout) or another block aborted.  Then every block
+ // leaves the kernel; the outputs are not written completely and bar[48] stays set until the host clears the words.
+@@ -4945,7 +4979,7 @@ __device__ __forceinline__ double dot8d(const uint4 w, const float* x) {
+     }
+     return acc;
+ }
+-template <int T, bool DP = false>
++template <int T, bool DP = false, int QMODE = 0>
+ __global__ void __launch_bounds__(THREADS) persist_kernel(PArgs f) {
+     using A = typename std::conditional<DP, double, float>::type;
+     __shared__ __align__(16) float xs[T][SL];
+@@ -4981,17 +5015,28 @@ __global__ void __launch_bounds__(THREADS) persist_kernel(PArgs f) {
+     }
+     __syncthreads();
+     const int hw = tid >> 4, hl = tid & 15;
+-    const bool inj = a0.w_inject != nullptr;
++    const bool inj = a0.w_inject != nullptr || a0.q8_inject != nullptr;
+     const int nrows = inj ? NR : LR;
+ #pragma unroll 3
+     for (int r = hw; r < nrows; r += 16) {
+-        const uint16_t* wrow = r < LR ? a0.w_down + (size_t) r * D : a0.w_inject + (size_t) (r - LR) * D;
+-        const uint4 w = __ldg(reinterpret_cast<const uint4*>(wrow + col0) + hl);
++        const bool bf16_row = QMODE == 0 || (r >= LR && a0.q8_inject == nullptr);
++        const uint16_t* wrow = nullptr;
++        if (bf16_row) wrow = r < LR ? a0.w_down + (size_t) r * D : a0.w_inject + (size_t) (r - LR) * D;
++        const uint4 w = bf16_row ? __ldg(reinterpret_cast<const uint4*>(wrow + col0) + hl) : make_uint4(0, 0, 0, 0);
+         A acc[T];
+ #pragma unroll
+         for (int k = 0; k < T; ++k) {
+             A v;
+-            if constexpr (DP) v = dot8d(w, &xs[k][hl * 8]); else v = dot8(w, &xs[k][hl * 8]);
++            if constexpr (QMODE == 0) {
++                if constexpr (DP) v = dot8d(w, &xs[k][hl * 8]); else v = dot8(w, &xs[k][hl * 8]);
++            } else if (r < LR || a0.q8_inject != nullptr) {
++                PWeight8 qw;
++                if (r < LR) qw = persist_load_q8(a0, false, (size_t) r * D + col0 + hl * 8);
++                else qw = persist_load_q8_0(a0.q8_inject, (size_t) (r - LR) * D + col0 + hl * 8);
++                v = persist_dot_q8<DP>(qw, &xs[k][hl * 8]);
++            } else {
++                if constexpr (DP) v = dot8d(w, &xs[k][hl * 8]); else v = dot8(w, &xs[k][hl * 8]);
++            }
+ #pragma unroll
+             for (int o = 8; o > 0; o >>= 1) v += shfl_xor_persist(v, o);
+             acc[k] = v;
+@@ -5062,21 +5107,30 @@ __global__ void __launch_bounds__(THREADS) persist_kernel(PArgs f) {
+     {
+         const int d0 = b * UPC;
+         const int ur = tid >> 1, uh = tid & 1, uc = ur / UPC, udd = ur - uc * UPC, ui = uc * N + d0 + udd;
+-        const uint4* w4u = reinterpret_cast<const uint4*>(a0.w_up + (size_t) ui * LR) + uh * 20;
+         A v[T];
+ #pragma unroll
+         for (int k = 0; k < T; ++k) v[k] = 0;
+ #pragma unroll 1
+         for (int j0 = 0; j0 < 20; j0 += 5) {   // five chunks a batch (all twenty at once costs registers)
+             uint4 w[5];
++            PWeight8 qw[5];
+ #pragma unroll
+-            for (int q = 0; q < 5; ++q) w[q] = __ldg(w4u + j0 + q);
++            for (int q = 0; q < 5; ++q) {
++                if constexpr (QMODE == 0) {
++                    const uint4* w4u = reinterpret_cast<const uint4*>(a0.w_up + (size_t) ui * LR) + uh * 20;
++                    w[q] = __ldg(w4u + j0 + q);
++                } else {
++                    qw[q] = persist_load_q8(a0, true, (size_t) ui * LR + (size_t) (uh * 160 + (j0 + q) * 8));
++                }
++            }
+ #pragma unroll
+             for (int q = 0; q < 5; ++q)
+ #pragma unroll
+                 for (int k = 0; k < T; ++k) {
+-                    if constexpr (DP) v[k] += dot8d(w[q], &lo[k][uh * 160] + (j0 + q) * 8);
+-                    else v[k] += dot8(w[q], &lo[k][uh * 160] + (j0 + q) * 8);
++                    if constexpr (QMODE == 0) {
++                        if constexpr (DP) v[k] += dot8d(w[q], &lo[k][uh * 160] + (j0 + q) * 8);
++                        else v[k] += dot8(w[q], &lo[k][uh * 160] + (j0 + q) * 8);
++                    } else v[k] += persist_dot_q8<DP>(qw[q], &lo[k][uh * 160] + (j0 + q) * 8);
+                 }
+         }
+         float acc[T];
+@@ -5104,6 +5158,22 @@ __global__ void __launch_bounds__(THREADS) persist_kernel(PArgs f) {
+         for (int c = 0; c < HC; ++c) s += g[k][c][col];
+         f.a[k].mixed[b * UPC + col] = s / (float) HC;
+     }
++    __syncthreads();
++    // This CTA owns one complete 32-value q8_1 group for every token, so QFUSE needs neither the multi-read counter
++    // nor a cross-CTA fence. It uses the same finite scale, rounding and (d, sum) epilogue as the ordinary q8 tail.
++    const int warp = tid >> 5;
++    if (f.a[0].q8_mixed != nullptr && warp < T) {
++        const float xi = f.a[warp].mixed[b * UPC + lane];
++        float amax = fabsf(xi), sum = xi;
++#pragma unroll
++        for (int o = 16; o > 0; o >>= 1) amax = fmaxf(amax, shfl_xor_persist(amax, o));
++#pragma unroll
++        for (int o = 16; o > 0; o >>= 1) sum += shfl_xor_persist(sum, o);
++        const float d = q8_1_finite(q81_div(amax, 127.0f));
++        GrQ81* y = reinterpret_cast<GrQ81*>(f.a[warp].q8_mixed) + b;
++        y->qs[lane] = q8_1_quant(xi, d, amax);
++        if (lane == 0) y->ds = q8_1_ds(d, sum);
++    }
+ }
+ struct DevState {
+     float* part = nullptr;
+@@ -5112,6 +5182,7 @@ struct DevState {
+     double* sspd = nullptr;
+     unsigned* bar = nullptr;
+     int max_t = 0;      // 0: off on this card
++    int max_t_q8 = 0;   // Q8_0 has its own residency check; it uses different load/dot code
+     bool tried = false;
+ };
+ DevState g_dev[64];
+@@ -5130,11 +5201,28 @@ KFn kernel_t(int T) {
+     }
+     return nullptr;
+ }
++template <bool DP>
++KFn kernel_q8_t(int T) {
++    switch (T) {
++        case 1: return persist_kernel<1, DP, 2>;
++        case 2: return persist_kernel<2, DP, 2>;
++        case 3: return persist_kernel<3, DP, 2>;
++        case 4: return persist_kernel<4, DP, 2>;
++        case 5: return persist_kernel<5, DP, 2>;
++        case 6: return persist_kernel<6, DP, 2>;
++        case 7: return persist_kernel<7, DP, 2>;
++        case 8: return persist_kernel<8, DP, 2>;
++    }
++    return nullptr;
++}
+ bool dp_on() {
+     static const bool dp = [] { const char* v = std::getenv("STRATA_HC_PERSIST"); return v != nullptr && std::atoi(v) == 3; }();
+     return dp;
+ }
+-KFn kernel_for(int T) { return dp_on() ? kernel_t<true>(T) : kernel_t<false>(T); }
++KFn kernel_for(int T, int qmode) {
++    if (qmode == 2) return dp_on() ? kernel_q8_t<true>(T) : kernel_q8_t<false>(T);
++    return dp_on() ? kernel_t<true>(T) : kernel_t<false>(T);
++}
+ // s_memrealtime runs at 100 MHz on RDNA: a barrier gives up after 2 s in a read (never in a working run; it only turns a
+ // hang into a wrong read) and after 50 ms in the start-up check (where a timeout means "not resident here")
+ #if defined(__CUDACC__)
+@@ -5148,7 +5236,8 @@ void launch(const FusedGrArgs* a, int n_tok, const DevState& st, cudaStream_t s,
+     PArgs f;
+     for (int t = 0; t < n_tok; ++t) f.a[t] = a[t];
+     f.part = st.part; f.ssp = st.ssp; f.bar = st.bar; f.partd = st.partd; f.sspd = st.sspd; f.timeout_ticks = ticks;
+-    kernel_for(n_tok)<<<NB, THREADS, 0, s>>>(f);
++    const int qmode = (a[0].q8_down != nullptr || a[0].q8_up != nullptr) ? 2 : 0;
++    kernel_for(n_tok, qmode)<<<NB, THREADS, 0, s>>>(f);
+ }
+ bool env_on() {
+     static const bool on = [] { const char* v = std::getenv("STRATA_HC_PERSIST"); return v != nullptr && std::atoi(v) != 0; }();
+@@ -5276,39 +5365,115 @@ void fused_gr_persist_init() {
+         if (r != 0) break;
+         max_t = T;
+     }
+-    cudaFree(dR); cudaFree(dbo); cudaFree(dinj); cudaFree(dwn); cudaFree(dxn); cudaFree(dlo); cudaFree(drs);
+-    cudaFree(dio); cudaFree(dmix); cudaFree(dwd); cudaFree(dwu); cudaFree(dwi);
+     cudaMemset(st.bar, 0, 64 * sizeof(unsigned));
+     cudaDeviceSynchronize();
+     cudaGetLastError();
+     if (!ok) {
++        cudaFree(dR); cudaFree(dbo); cudaFree(dinj); cudaFree(dwn); cudaFree(dxn); cudaFree(dlo); cudaFree(drs);
++        cudaFree(dio); cudaFree(dmix); cudaFree(dwd); cudaFree(dwu); cudaFree(dwi);
+         std::fprintf(stderr, "strata hc: CUDA%d: STRATA_HC_PERSIST=1 is off here: the check failed at %d tokens "
+                              "(max relative difference %.3g)\n", dev, bad_t, worst);
+         return;
+     }
+-    if (max_t == 0) {
+-        std::fprintf(stderr, "strata hc: CUDA%d: STRATA_HC_PERSIST=1 is off here: 80 blocks are not resident at once on %d "
+-                             "multiprocessors (the check timed out)\n", dev, mp);
+-        return;
+-    }
+     st.max_t = max_t;
+-    std::fprintf(stderr, "strata hc: CUDA%d: STRATA_HC_PERSIST=1: the verifier's hyper-connection read runs as one "
+-                         "persistent kernel (80 blocks on %d multiprocessors, up to %d tokens; %d token counts timed out in "
+-                         "the check; checked against the default read, max relative difference %.2g)\n", dev, mp, max_t,
+-                 timeouts, worst);
++    if (max_t == 0)
++        std::fprintf(stderr, "strata hc: CUDA%d: BF16 persistent read unavailable: 80 blocks did not stay resident on %d multiprocessors\n", dev, mp);
++    else
++        std::fprintf(stderr, "strata hc: CUDA%d: BF16 persistent read checked against the default path (80 blocks on %d multiprocessors, up to %d tokens; %d token counts timed out; max relative difference %.2g)\n",
++                     dev, mp, max_t, timeouts, worst);
++
++    // The Q8_0 specialization has different weight loads and register use from the BF16 specialization. Probe each row
++    // count independently before allowing it to enter the same grid barrier; if any block cannot stay resident, that
++    // count and larger counts use the ordinary Q8 path.
++    uint8_t *dq8d = nullptr, *dq8u = nullptr, *dq8i = nullptr;
++    const size_t q8d_blocks = wd.size() / 32, q8u_blocks = wu.size() / 32, q8i_blocks = wi.size() / 32;
++    bool q8_alloc = cudaMalloc((void**) &dq8d, q8d_blocks * 34) == cudaSuccess &&
++                    cudaMalloc((void**) &dq8u, q8u_blocks * 34) == cudaSuccess &&
++                    cudaMalloc((void**) &dq8i, q8i_blocks * 34) == cudaSuccess;
++    if (q8_alloc) {
++        fused_gr_quantize_q8_0(dwd, dq8d, (int64_t) q8d_blocks, nullptr);
++        fused_gr_quantize_q8_0(dwu, dq8u, (int64_t) q8u_blocks, nullptr);
++        fused_gr_quantize_q8_0(dwi, dq8i, (int64_t) q8i_blocks, nullptr);
++        q8_alloc = cudaDeviceSynchronize() == cudaSuccess;
++    }
++    if (q8_alloc) {
++        int q8_max_t = 0, q8_timeout = 0, q8_bad_t = 0;
++        bool q8_ok = true;
++        for (int T = 1; T <= kFusedGrMaxT; ++T) {
++            FusedGrArgs a[kFusedGrMaxT];
++            for (int t = 0; t < T; ++t) {
++                a[t] = FusedGrArgs{};
++                a[t].R = dR + (size_t) t * D; a[t].R_out = dR + (size_t) t * D; a[t].apply = true;
++                a[t].bo_prev = dbo + (size_t) t * N; a[t].inj_prev = dinj + (size_t) t * HC;
++                a[t].w_norm = dwn; a[t].q8_down = dq8d; a[t].q8_up = dq8u; a[t].q8_inject = dq8i; a[t].eps = 1e-6f;
++                a[t].lo = dlo + (size_t) t * LR; a[t].rs = drs + (size_t) t * HC;
++                a[t].inject_out = dio + (size_t) t * HC; a[t].mixed = dmix + (size_t) t * N;
++            }
++            cudaMemcpy(dR, R.data(), R.size() * sizeof(float), cudaMemcpyHostToDevice);
++            cudaMemset(dmix, 0xff, (size_t) TM * N * sizeof(float));
++            cudaMemset(dio, 0xff, (size_t) TM * HC * sizeof(float));
++            cudaMemset(st.bar, 0, 64 * sizeof(unsigned));
++            if (cudaDeviceSynchronize() != cudaSuccess) { cudaGetLastError(); q8_bad_t = T; q8_ok = false; break; }
++            hcp::launch(a, T, st, nullptr, hcp::kTicksCheck);
++            if (cudaDeviceSynchronize() != cudaSuccess) { cudaGetLastError(); q8_bad_t = T; q8_ok = false; break; }
++            unsigned abort_word = 0;
++            cudaMemcpy(&abort_word, st.bar + 48, sizeof abort_word, cudaMemcpyDeviceToHost);
++            if (abort_word != 0u) { ++q8_timeout; cudaMemset(st.bar, 0, 64 * sizeof(unsigned)); cudaDeviceSynchronize(); break; }
++            std::vector<float> out((size_t) T * (N + HC + D));
++            cudaMemcpy(out.data(), dmix, (size_t) T * N * sizeof(float), cudaMemcpyDeviceToHost);
++            cudaMemcpy(out.data() + (size_t) T * N, dio, (size_t) T * HC * sizeof(float), cudaMemcpyDeviceToHost);
++            cudaMemcpy(out.data() + (size_t) T * (N + HC), dR, (size_t) T * D * sizeof(float), cudaMemcpyDeviceToHost);
++            if (!std::all_of(out.begin(), out.end(), [](float x) { return std::isfinite(x); })) {
++                q8_bad_t = T; q8_ok = false; break;
++            }
++            q8_max_t = T;
++        }
++        st.max_t_q8 = q8_ok ? q8_max_t : 0;
++        if (!q8_ok)
++            std::fprintf(stderr, "strata hc: CUDA%d: Q8_0 persistent read is off: finite-output check failed at %d tokens\n", dev, q8_bad_t);
++        else if (q8_max_t == 0)
++            std::fprintf(stderr, "strata hc: CUDA%d: Q8_0 persistent read unavailable: 80 blocks did not stay resident on %d multiprocessors\n", dev, mp);
++        else
++            std::fprintf(stderr, "strata hc: CUDA%d: Q8_0 persistent read residency checked (up to %d tokens; %d token counts timed out)\n",
++                         dev, st.max_t_q8, q8_timeout);
++    } else {
++        cudaGetLastError();
++        st.max_t_q8 = 0;
++        std::fprintf(stderr, "strata hc: CUDA%d: Q8_0 persistent read is off: fixture allocation failed\n", dev);
++    }
++    if (dq8d) cudaFree(dq8d);
++    if (dq8u) cudaFree(dq8u);
++    if (dq8i) cudaFree(dq8i);
++    cudaFree(dR); cudaFree(dbo); cudaFree(dinj); cudaFree(dwn); cudaFree(dxn); cudaFree(dlo); cudaFree(drs);
++    cudaFree(dio); cudaFree(dmix); cudaFree(dwd); cudaFree(dwu); cudaFree(dwi);
+ }
+ 
+ bool fused_gr_read_persist(const FusedGrArgs* a, int n_tok, void* stream) {
+-    if (!hcp::env_on() || n_tok < 1) return false;
++    if (!hcp::env_on() || a == nullptr || n_tok < 1 || n_tok > kFusedGrMaxT) return false;
+     int dev = 0;
+     cudaGetDevice(&dev);
+     if (dev < 0 || dev >= 64) return false;
+     const hcp::DevState& st = hcp::g_dev[dev];
+-    if (n_tok > st.max_t) return false;
+-    if (a[0].q8_down != nullptr || a[0].q8_up != nullptr) return false;    // STRATA_HC_Q8: the default read
+-    if (a[0].s_down != nullptr || a[0].s_up != nullptr) return false;      // #5560 STRATA_HC_REQ8: int8 rows + scales, the default read (it knows them)
+-    for (int t = 0; t < n_tok; ++t)
+-        if (a[t].q8_mixed != nullptr) return false;                         // STRATA_QFUSE: the default read
++    const bool q8_0 = a[0].q8_down != nullptr || a[0].q8_up != nullptr;
++    if (n_tok > (q8_0 ? st.max_t_q8 : st.max_t)) return false;
++    const bool q8_scaled = a[0].s_down != nullptr || a[0].s_up != nullptr;
++    if (q8_scaled) return false;
++    if (q8_0 && (a[0].q8_down == nullptr || a[0].q8_up == nullptr)) return false;
++    if (!q8_0 && a[0].q8_inject != nullptr) return false;
++    if (!a[0].R || !a[0].w_norm || !a[0].lo || !a[0].rs || !a[0].mixed ||
++        (!q8_0 && (!a[0].w_down || !a[0].w_up)) ||
++        ((a[0].w_inject || a[0].q8_inject) && !a[0].inject_out)) return false;
++    const bool qfuse = a[0].q8_mixed != nullptr;
++    for (int t = 0; t < n_tok; ++t) {
++        if (!a[t].R || !a[t].w_norm || !a[t].lo || !a[t].rs || !a[t].mixed ||
++            (a[t].apply && (!a[t].R_out || !a[t].bo_prev || !a[t].inj_prev)) ||
++            ((a[t].w_inject || a[t].q8_inject) && !a[t].inject_out) ||
++            (a[t].q8_down != nullptr) != q8_0 || (a[t].q8_up != nullptr) != q8_0 ||
++            (a[t].q8_mixed != nullptr) != qfuse || a[t].q8_down != a[0].q8_down ||
++            a[t].q8_up != a[0].q8_up || a[t].s_down != a[0].s_down || a[t].s_up != a[0].s_up ||
++            a[t].q8_inject != a[0].q8_inject || a[t].w_down != a[0].w_down || a[t].w_up != a[0].w_up ||
++            a[t].w_inject != a[0].w_inject || a[t].w_norm != a[0].w_norm) return false;
++    }
+     hcp::launch(a, n_tok, st, (cudaStream_t) stream, hcp::kTicksRun);
+     return true;
+ }
+diff --git a/engine/src/kernels/hc_persist_parity.cpp b/engine/src/kernels/hc_persist_parity.cpp
+index 1808a092..46db28f3 100644
+--- a/engine/src/kernels/hc_persist_parity.cpp
++++ b/engine/src/kernels/hc_persist_parity.cpp
+@@ -9,6 +9,7 @@
+ // `--off`: with STRATA_HC_PERSIST unset the persistent read must never run (the default path is untouched).
+ // GPU, synthetic, no model.
+ #include "strata/kernels/fused_gr.hpp"
++#include "strata/kernels/native_mmvq.hpp"
+ 
+ #include <cuda_runtime.h>
+ 
+@@ -28,7 +29,7 @@
+ namespace k = strata::kernels;
+ 
+ namespace {
+-constexpr int N = 2560, HC = 4, D = N * HC, LR = 320, TM = 8;
++constexpr int N = 2560, HC = 4, D = N * HC, LR = 320, TM = k::kFusedGrWideT;
+ void ck(cudaError_t e, const char* w) {
+     if (e != cudaSuccess) {
+         std::fprintf(stderr, "%s: %s\n", w, cudaGetErrorString(e));
+@@ -87,7 +88,7 @@ int main(int argc, char** argv) {
+     float* dmix = dev<float>((size_t) TM * N);
+ 
+     int bad = 0, ran = 0;
+-    for (int T = 1; T <= TM; ++T) {
++    for (int T = 1; T <= k::kFusedGrMaxT; ++T) {
+         k::FusedGrArgs a[TM];
+         for (int t = 0; t < T; ++t) {
+             a[t] = k::FusedGrArgs{};
+@@ -149,6 +150,149 @@ int main(int argc, char** argv) {
+                     finite ? "finite" : "NON-FINITE", same ? "bitwise equal" : "DIFFER", ok ? "ok" : "FAIL");
+         if (!ok) ++bad;
+     }
++    if (!off) {
++        // Q8_0 weights are produced by the engine's packer so this covers its stored int8/half-scale layout, the default
++        // Q8 (including the TC dispatch when enabled), and the persistent path. QFUSE bytes are checked against the
++        // native quantizer for each path's own mixed values; numerical differences are reported for later acceptance work.
++        constexpr size_t Q8_0_BYTES = 34, Q8_1_BYTES = 36;
++        const size_t q8d_blocks = wd.size() / 32, q8u_blocks = wu.size() / 32, q8i_blocks = wi.size() / 32;
++        const size_t q8row_bytes = (size_t) (N / 32) * Q8_1_BYTES;
++        uint8_t* dq8d = dev<uint8_t>(q8d_blocks * Q8_0_BYTES);
++        uint8_t* dq8u = dev<uint8_t>(q8u_blocks * Q8_0_BYTES);
++        uint8_t* dq8i = dev<uint8_t>(q8i_blocks * Q8_0_BYTES);
++        uint8_t* dqmix = dev<uint8_t>((size_t) TM * q8row_bytes);
++        uint8_t* dqref = dev<uint8_t>((size_t) TM * q8row_bytes);
++        unsigned* dqcnt = dev<unsigned>(N / 32);
++        k::fused_gr_quantize_q8_0(dwd, dq8d, (int64_t) q8d_blocks, nullptr);
++        k::fused_gr_quantize_q8_0(dwu, dq8u, (int64_t) q8u_blocks, nullptr);
++        k::fused_gr_quantize_q8_0(dwi, dq8i, (int64_t) q8i_blocks, nullptr);
++        ck(cudaDeviceSynchronize(), "quantize Q8_0 fixtures");
++
++        auto make_q8_args = [&](int T) {
++            std::vector<k::FusedGrArgs> a((size_t) T);
++            for (int t = 0; t < T; ++t) {
++                a[(size_t) t] = k::FusedGrArgs{};
++                a[(size_t) t].R = dR + (size_t) t * D;
++                a[(size_t) t].R_out = dR + (size_t) t * D;
++                a[(size_t) t].apply = true;
++                a[(size_t) t].bo_prev = dbo + (size_t) t * N;
++                a[(size_t) t].inj_prev = dinj + (size_t) t * HC;
++                a[(size_t) t].w_norm = dwn;
++                a[(size_t) t].q8_down = dq8d;
++                a[(size_t) t].q8_up = dq8u;
++                a[(size_t) t].q8_inject = dq8i;
++                a[(size_t) t].eps = 1e-6f;
++                a[(size_t) t].lo = dlo + (size_t) t * LR;
++                a[(size_t) t].rs = drs + (size_t) t * HC;
++                a[(size_t) t].inject_out = dio + (size_t) t * HC;
++                a[(size_t) t].mixed = dmix + (size_t) t * N;
++                a[(size_t) t].q8_mixed = dqmix + (size_t) t * q8row_bytes;
++                a[(size_t) t].q8_cnt = dqcnt;
++            }
++            return a;
++        };
++        auto capture_q8 = [&](int T, std::vector<float>& out, std::vector<uint8_t>& qimage) {
++            out.resize((size_t) T * (N + HC + D));
++            qimage.resize((size_t) T * q8row_bytes);
++            ck(cudaMemcpy(out.data(), dmix, (size_t) T * N * sizeof(float), cudaMemcpyDeviceToHost), "Q8 mixed");
++            ck(cudaMemcpy(out.data() + (size_t) T * N, dio, (size_t) T * HC * sizeof(float), cudaMemcpyDeviceToHost), "Q8 inject");
++            ck(cudaMemcpy(out.data() + (size_t) T * (N + HC), dR, (size_t) T * D * sizeof(float), cudaMemcpyDeviceToHost), "Q8 R");
++            ck(cudaMemcpy(qimage.data(), dqmix, qimage.size(), cudaMemcpyDeviceToHost), "QFUSE image");
++        };
++        auto q8_read = [&](bool persist, int T, const std::vector<k::FusedGrArgs>& a, std::vector<float>& out,
++                           std::vector<uint8_t>& qimage, bool& used) {
++            ck(cudaMemcpy(dR, R.data(), R.size() * sizeof(float), cudaMemcpyHostToDevice), "Q8 reset R");
++            ck(cudaMemset(dqcnt, 0, (N / 32) * sizeof(unsigned)), "QFUSE counters");
++            ck(cudaDeviceSynchronize(), "Q8 pre-read sync");
++            used = persist ? k::fused_gr_read_persist(a.data(), T, nullptr)
++                           : k::fused_gr_read_multi(a.data(), T, dxn, nullptr);
++            if (!used) return true;
++            ck(cudaDeviceSynchronize(), persist ? "Q8 persistent read" : "Q8 default read");
++            capture_q8(T, out, qimage);
++            k::native_quantize_q8_1(dmix, dqref, N, T, nullptr);
++            ck(cudaDeviceSynchronize(), "native QFUSE reference");
++            std::vector<uint8_t> ref(qimage.size());
++            ck(cudaMemcpy(ref.data(), dqref, ref.size(), cudaMemcpyDeviceToHost), "QFUSE reference image");
++            return std::memcmp(qimage.data(), ref.data(), ref.size()) == 0;
++        };
++
++        int q8_ran = 0;
++        for (int T = 1; T <= k::kFusedGrMaxT; ++T) {
++            const auto a = make_q8_args(T);
++            std::vector<float> q8_default, q8_persist, q8_repeat;
++            std::vector<uint8_t> q8_default_img, q8_persist_img, q8_repeat_img;
++            bool default_used = false, persist_used = false, repeat_used = false;
++            const bool default_qfuse = q8_read(false, T, a, q8_default, q8_default_img, default_used);
++            const bool persist_qfuse = q8_read(true, T, a, q8_persist, q8_persist_img, persist_used);
++            if (!default_used || !default_qfuse) {
++                std::printf("Q8 T=%d: default QFUSE image differs from native q8_1  FAIL\n", T);
++                ++bad;
++                continue;
++            }
++            if (!persist_used) {
++                std::printf("Q8 T=%d: persistent kernel not resident on this card (skip)\n", T);
++                continue;
++            }
++            if (!persist_qfuse || !q8_read(true, T, a, q8_repeat, q8_repeat_img, repeat_used) || !repeat_used) {
++                std::printf("Q8 T=%d: persistent QFUSE image differs from native q8_1  FAIL\n", T);
++                ++bad;
++                continue;
++            }
++            const bool deterministic = q8_persist.size() == q8_repeat.size() && q8_persist_img == q8_repeat_img &&
++                                       std::memcmp(q8_persist.data(), q8_repeat.data(), q8_persist.size() * sizeof(float)) == 0;
++            bool finite = true;
++            double mag = 0.0, delta = 0.0;
++            for (size_t i = 0; i < q8_persist.size(); ++i) {
++                finite = finite && std::isfinite(q8_persist[i]);
++                mag = std::fmax(mag, std::fabs((double) q8_default[i]));
++                delta = std::fmax(delta, std::fabs((double) q8_persist[i] - q8_default[i]));
++            }
++            const double rel = delta / (mag > 0.0 ? mag : 1.0);
++            std::printf("Q8 T=%d: default (TC when enabled) vs persistent max relative difference %.3g; finite %s, repeat %s, QFUSE exact yes\n",
++                        T, rel, finite ? "yes" : "NO", deterministic ? "yes" : "NO");
++            if (!finite || !deterministic) ++bad;
++            ++q8_ran;
++        }
++
++        // The persistent kernel is an 8-row kernel. A wider window must use the existing Q8 multi-read slices, including
++        // QFUSE output for the tail rows; compare its automatic split with an explicit 8 + 1 call.
++        if constexpr (TM > k::kFusedGrMaxT) {
++            constexpr int T = k::kFusedGrMaxT + 1;
++            const auto a = make_q8_args(T);
++            std::vector<float> wide, split;
++            std::vector<uint8_t> wide_q, split_q;
++            bool wide_used = false;
++            const bool wide_qfuse = q8_read(false, T, a, wide, wide_q, wide_used);
++            const bool persist_wide = k::fused_gr_read_persist(a.data(), T, nullptr);
++            if (!wide_used || !wide_qfuse || persist_wide) {
++                std::printf("Q8 T=%d: wide read/QFUSE or persistent fallback contract failed  FAIL\n", T);
++                ++bad;
++            } else {
++                ck(cudaMemcpy(dR, R.data(), R.size() * sizeof(float), cudaMemcpyHostToDevice), "split reset R");
++                ck(cudaMemset(dqcnt, 0, (N / 32) * sizeof(unsigned)), "split QFUSE counters");
++                if (!k::fused_gr_read_multi(a.data(), k::kFusedGrMaxT, dxn, nullptr) ||
++                    !k::fused_gr_read_multi(a.data() + k::kFusedGrMaxT, 1,
++                                            dxn + (size_t) k::kFusedGrMaxT * D, nullptr)) {
++                    std::printf("Q8 T=%d: explicit 8 + tail slices declined  FAIL\n", T);
++                    ++bad;
++                } else {
++                    ck(cudaDeviceSynchronize(), "wide explicit slices");
++                    capture_q8(T, split, split_q);
++                    k::native_quantize_q8_1(dmix, dqref, N, T, nullptr);
++                    ck(cudaDeviceSynchronize(), "wide QFUSE reference");
++                    std::vector<uint8_t> ref(wide_q.size());
++                    ck(cudaMemcpy(ref.data(), dqref, ref.size(), cudaMemcpyDeviceToHost), "wide QFUSE reference image");
++                    const bool same = wide == split && wide_q == split_q;
++                    const bool fused = split_q == ref;
++                    std::printf("Q8 T=%d: automatic vs explicit 8 + tail slicing %s; QFUSE exact %s\n", T,
++                                same ? "equal" : "DIFFERS", fused ? "yes" : "NO");
++                    if (!same || !fused) ++bad;
++                }
++            }
++        }
++        if (q8_ran == 0) std::printf("Q8 persistent read: no candidate cases ran on this card\n");
++        cudaFree(dq8d); cudaFree(dq8u); cudaFree(dq8i); cudaFree(dqmix); cudaFree(dqref); cudaFree(dqcnt);
++    }
+     if (off) std::printf("%s: STRATA_HC_PERSIST unset, the persistent read never ran\n", bad ? "FAIL" : "PASS");
+     else if (ran == 0) std::printf("SKIP: the persistent read is not used on this card\n");
+     else std::printf("%s: %d token counts checked\n", bad ? "FAIL" : "PASS", ran);

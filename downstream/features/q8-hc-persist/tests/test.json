@@ -1,0 +1,16 @@
+{
+  "targets": [],
+  "cmake_args": [],
+  "ctest_regex": "",
+  "optional_targets": {
+    "cuda": [
+      "hc_persist_parity"
+    ]
+  },
+  "optional_ctest_regex": {
+    "cuda": "^hc_persist_(parity|default_off)$"
+  },
+  "overlays": [],
+  "python_modules": [],
+  "settings_generation": false
+}

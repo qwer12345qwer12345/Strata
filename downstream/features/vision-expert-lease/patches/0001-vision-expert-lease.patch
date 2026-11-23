@@ -1,8 +1,8 @@
 diff --git a/engine/cmake/strata_gpu_engine.cmake b/engine/cmake/strata_gpu_engine.cmake
-index 120ebaf87..95504011c 100644
+index e8c48729..b560857d 100644
 --- a/engine/cmake/strata_gpu_engine.cmake
 +++ b/engine/cmake/strata_gpu_engine.cmake
-@@ -410,6 +410,18 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+@@ -413,6 +413,18 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
      target_link_libraries(expert_cache_per_layer_test PRIVATE strata_engine)
      add_test(NAME expert_cache_per_layer_test COMMAND expert_cache_per_layer_test)
      set_tests_properties(expert_cache_per_layer_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
@@ -23,7 +23,7 @@ index 120ebaf87..95504011c 100644
      add_test(NAME expert_cache_segmented_test COMMAND expert_cache_segmented_test)
 diff --git a/engine/include/strata/core/vision_expert_lease.hpp b/engine/include/strata/core/vision_expert_lease.hpp
 new file mode 100644
-index 000000000..582166aee
+index 00000000..582166ae
 --- /dev/null
 +++ b/engine/include/strata/core/vision_expert_lease.hpp
 @@ -0,0 +1,61 @@
@@ -89,7 +89,7 @@ index 000000000..582166aee
 +};
 +} // namespace strata::core
 diff --git a/engine/src/program/generate.cpp b/engine/src/program/generate.cpp
-index 9d57f2b40..f57c5a340 100644
+index 65d0b054..9e64b5ce 100644
 --- a/engine/src/program/generate.cpp
 +++ b/engine/src/program/generate.cpp
 @@ -23,6 +23,7 @@
@@ -100,7 +100,7 @@ index 9d57f2b40..f57c5a340 100644
  #include "strata/core/residency_trim.hpp"
  #include "strata/core/kfd_settle.hpp"
  #include "strata/core/kfd_quiet.hpp"
-@@ -8715,7 +8716,7 @@ int main(int argc, char** argv) {
+@@ -8904,7 +8905,7 @@ int main(int argc, char** argv) {
      // The picture reader's room in the resident RAM mode (strata/core/reader_room.hpp): there the cache refuses the server's VRAM
      // command, so an on-demand reader keeps its room in the reserve, as before the reader went on demand.  Decided here, once, before
      // the cache is sized; the mode is not entered later.
@@ -109,8 +109,8 @@ index 9d57f2b40..f57c5a340 100644
                                                                 o.resident_cpu_experts);
          keep != o.vram_reserve_mib) {
          std::fprintf(stderr, "strata generate: the resident RAM mode cannot resize the expert cache, so the picture reader's %d MiB "
-@@ -16052,6 +16053,82 @@ int main(int argc, char** argv) {
-                         (long long) (free_b >> 20), (long long) o.prefill_chunk);
+@@ -16633,6 +16634,83 @@ int main(int argc, char** argv) {
+                         (long long) (free_b >> 20), (long long) o.prefill_chunk, extra.c_str());
              return true;
          };
 +        // Dedicated vision transaction. Unlike generic VRAM resize it never changes
@@ -164,6 +164,7 @@ index 9d57f2b40..f57c5a340 100644
 +            if(vision_lease.active()){e="vision lease: restore the active lease first";return false;}
 +            for(const PfPart& p:pf_parts)if(!p.lent.empty()){e="vision lease: a prompt loan is still out";return false;}
 +            if(!adapt_tick(true)){e="vision lease: adaptive refill failed";return false;}
++            if(src.exchanges_pending()){e="vision lease: RAM ownership exchange is still pending";return false;}
 +            if(!ver.wait_commit(e))return false;
 +            adapt_quiesce();
 +            if(cudaDeviceSynchronize()!=cudaSuccess){e="vision lease: device did not quiesce";return false;}
@@ -192,7 +193,7 @@ index 9d57f2b40..f57c5a340 100644
          // ---- --batch: the slots of the batch windows
          struct BSlot {
              bool active = false, stop = false;
-@@ -17650,7 +17727,7 @@ int main(int argc, char** argv) {
+@@ -18297,7 +18375,7 @@ int main(int argc, char** argv) {
              line_drain_ms = 0.0;
              strata::core::manifest::instance().flush_if_dirty("request");   // STRATA_MANIFEST: what the last request added (a no-op when off)
              // Between requests (nothing in flight): the park pools' upkeep, which the park and the prompt read leave alone
@@ -201,7 +202,7 @@ index 9d57f2b40..f57c5a340 100644
                  pool_topup();
                  segpool_kick();
              }
-@@ -17681,6 +17758,18 @@ int main(int argc, char** argv) {
+@@ -18328,6 +18406,18 @@ int main(int argc, char** argv) {
              } else if (!next_line(line)) {
                  break;
              }
@@ -222,7 +223,7 @@ index 9d57f2b40..f57c5a340 100644
              if (line.rfind("BSTOP ", 0) == 0) {
 diff --git a/engine/tests/core/vision_expert_lease_gpu_test.cpp b/engine/tests/core/vision_expert_lease_gpu_test.cpp
 new file mode 100644
-index 000000000..3e577eec2
+index 00000000..3e577eec
 --- /dev/null
 +++ b/engine/tests/core/vision_expert_lease_gpu_test.cpp
 @@ -0,0 +1,58 @@
@@ -286,7 +287,7 @@ index 000000000..3e577eec2
 +}
 diff --git a/engine/tests/core/vision_expert_lease_test.cpp b/engine/tests/core/vision_expert_lease_test.cpp
 new file mode 100644
-index 000000000..84a5549e4
+index 00000000..84a5549e
 --- /dev/null
 +++ b/engine/tests/core/vision_expert_lease_test.cpp
 @@ -0,0 +1,30 @@
@@ -322,7 +323,7 @@ index 000000000..84a5549e4
 +}
 diff --git a/terminal/l2/test_vision_check.py b/terminal/l2/test_vision_check.py
 new file mode 100644
-index 000000000..cacf44169
+index 00000000..cacf4416
 --- /dev/null
 +++ b/terminal/l2/test_vision_check.py
 @@ -0,0 +1,28 @@
@@ -356,7 +357,7 @@ index 000000000..cacf44169
 +if __name__=='__main__':unittest.main()
 diff --git a/terminal/l2/vision_check.py b/terminal/l2/vision_check.py
 new file mode 100644
-index 000000000..228068efe
+index 00000000..228068ef
 --- /dev/null
 +++ b/terminal/l2/vision_check.py
 @@ -0,0 +1,78 @@
@@ -439,10 +440,10 @@ index 000000000..228068efe
 +    print(f'Strata 手动识图检查 {result["status"]}；报告 {folder/"results.json"}',flush=True)
 +    return result
 diff --git a/terminal/serve/server.py b/terminal/serve/server.py
-index 9c53dcd40..4b4c1f723 100644
+index ef751b5c..13e2ceed 100644
 --- a/terminal/serve/server.py
 +++ b/terminal/serve/server.py
-@@ -1255,6 +1255,32 @@ class StrataEngine:
+@@ -1315,6 +1315,32 @@ class StrataEngine:
              if time.time() > deadline:
                  raise EngineDied("the engine did not answer the VRAM command")
  
@@ -475,7 +476,7 @@ index 9c53dcd40..4b4c1f723 100644
      def pen_from_key(self, orig_len: int, prompt_len: int) -> str:
          """` pen_from=N` for a leg that continues a request (prompt + what it generated): where the reply began, Strata's penalty window start. The all-cards split engine
          (sFNX) and Hy4-Flash (`strata-hy4`) refuse the key (GEN: unknown/unsupported key pen_from): it is not sent."""
-@@ -2892,7 +2918,17 @@ class Vision:
+@@ -2962,7 +2988,17 @@ class Vision:
  
      def __init__(self, cfg: dict, log=None, env: dict | None = None, lazy: bool = False):
          args = self.reader_args(cfg)
@@ -494,7 +495,7 @@ index 9c53dcd40..4b4c1f723 100644
          self.spawn = (args, log, env)                   # to start it again after an unload
          # AMD: the GPU reader (strata-vision-hip) has the CPU reader (strata-vision, same program, no GPU runtime) to
          # fall back on when it does not start; _start switches to it by itself
-@@ -2911,8 +2947,14 @@ class Vision:
+@@ -2982,8 +3018,14 @@ class Vision:
          # opt-in (the vision section's "elastic": true, with the config's "vram_elastic"): the encoder starts with the
          # first picture and stops after elastic_idle_s without one; while it runs, the engine's expert cache keeps
          # elastic_mib of VRAM free for it (Service._vision_up / _vision_idle_down)
@@ -510,7 +511,7 @@ index 9c53dcd40..4b4c1f723 100644
          self.elastic_mib = self.elastic_ask_mib(cfg, self.max_tokens)
          self.elastic_idle_s = float(cfg.get("elastic_idle_s") or 120)
          if not lazy and not self.elastic:
-@@ -3987,6 +4029,7 @@ class Service:
+@@ -4121,6 +4163,7 @@ class Service:
          self.before_load_strict = False                  # #1997: refuse (503) whenever it fails
          self.vram_reserve = None                         # #533: the last POST /v1/vram reserve (None: the start's)
          self.vram_reserve_asked = False                  # a POST /v1/vram was made (vram_reserve None is then asked)
@@ -518,7 +519,7 @@ index 9c53dcd40..4b4c1f723 100644
          self.vision_held = False                         # an elastic encoder holds VRAM the expert cache gave it
          self.vision_no_shrink = False                    # the engine said its cache never shrinks (no --vram-elastic)
          self.vision_no_shrink_said = False
-@@ -4296,6 +4339,56 @@ class Service:
+@@ -4491,6 +4534,56 @@ class Service:
          has no such command: it answered "VRAM n" with its usage text ("expected: GEN <max_new> ..."), 0.2.15 release test."""
          return "vram_elastic" in (getattr(self.engine, "info", None) or {})
  
@@ -575,7 +576,7 @@ index 9c53dcd40..4b4c1f723 100644
      def _vision_up(self):
          """The image turn's start for an elastic encoder that is not running (the caller holds self.fifo): the expert
          cache first keeps the encoder's elastic_mib of VRAM free on top of the reserve, then the encoder starts (load and
-@@ -5045,8 +5138,8 @@ class Service:
+@@ -5250,8 +5343,8 @@ class Service:
                              src = fetched[item["source"]] = Vision.download(src)   # outside the FIFO, as in prepare()
                          if self.vision is not None:
                              with self._turn(cancel):  # the encoder takes its turn with the requests (see below)
@@ -586,7 +587,7 @@ index 9c53dcd40..4b4c1f723 100644
                          else:
                              # Hy4-Flash in-process vision: validate readability without invoking a sidecar encoder
                              Vision.normalize(src if isinstance(src, bytes) else Vision.load(src))
-@@ -5068,6 +5161,9 @@ class Service:
+@@ -5273,6 +5366,9 @@ class Service:
          prompt; with thinking, Service.run writes it once the thinking is over."""
          # `cancel` (#1999): set when the client hangs up; the downloads, the wait for the turn and the encodes stop
          # between pictures and raise ClientGone
@@ -596,7 +597,7 @@ index 9c53dcd40..4b4c1f723 100644
          # Cached tool images are references in browser history, never arbitrary file paths or huge base64 strings.
          for message in messages:
              for part in message.get("content", []) if isinstance(message.get("content"), list) else []:
-@@ -5130,11 +5226,10 @@ class Service:
+@@ -5335,11 +5431,10 @@ class Service:
              # "reading the prompt" with CPU and GPU busy, for good (reproduced).  So encoding takes its turn in the
              # same FIFO as the requests.
              with self._turn(cancel):
@@ -611,7 +612,7 @@ index 9c53dcd40..4b4c1f723 100644
                  finally:
                      self.last_image_at = time.time()
              # one <|image_pad|> per image -> one per image token.  Only the markers the template writes for an image
-@@ -8197,6 +8292,13 @@ def apply_vision_defaults(cfg: dict) -> dict:
+@@ -8454,6 +8549,13 @@ def apply_vision_defaults(cfg: dict) -> dict:
      A config that says "vram_elastic" itself, and AMD (no shrinking expert cache on HIP), keep the room in the reserve as before: the reserve
      setup writes for a GPU reader that stays on the card (700 MiB, or none) becomes VISION_RESERVE_MIB; a reserve the person or the app chose
      (any other number) is kept."""
@@ -627,7 +628,7 @@ index 9c53dcd40..4b4c1f723 100644
      cfg["vision"] = {**cfg["vision"], "elastic": True}
 diff --git a/terminal/serve/test_vision_expert_lease.py b/terminal/serve/test_vision_expert_lease.py
 new file mode 100644
-index 000000000..cc5e8a414
+index 00000000..cc5e8a41
 --- /dev/null
 +++ b/terminal/serve/test_vision_expert_lease.py
 @@ -0,0 +1,148 @@

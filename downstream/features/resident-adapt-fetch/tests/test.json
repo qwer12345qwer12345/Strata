@@ -1,0 +1,16 @@
+{
+  "targets": [],
+  "cmake_args": [],
+  "ctest_regex": "",
+  "optional_targets": {
+    "cuda": [
+      "file_expert_source_test"
+    ]
+  },
+  "optional_ctest_regex": {
+    "cuda": "^file_expert_source_(test|rotation_gpu)$"
+  },
+  "overlays": [],
+  "python_modules": [],
+  "settings_generation": false
+}

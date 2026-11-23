@@ -1,5 +1,20 @@
+diff --git a/engine/cmake/backends/cuda.cmake b/engine/cmake/backends/cuda.cmake
+index c0965516..c74a4496 100644
+--- a/engine/cmake/backends/cuda.cmake
++++ b/engine/cmake/backends/cuda.cmake
+@@ -157,6 +157,10 @@ endmacro()
+ # the prompt kernels' tests: the fused experts' (linked to ${_strata_pf_tests_lib})
+ macro(strata_cuda_prompt_tests)
+     if(STRATA_BUILD_TESTS)
++      # SM86 K8V4: int8 K x split-INT8 query on IMMA, with the q4_0 V gather path unchanged.
++      add_test(NAME qsa_prompt_attn_parity_k8v4 COMMAND qsa_prompt_attn_parity 4096 512 2 --k8v4)
++      set_tests_properties(qsa_prompt_attn_parity_k8v4 PROPERTIES
++                           ENVIRONMENT "STRATA_K8V4_QK_IMMA=1" SKIP_RETURN_CODE 77 TIMEOUT 600)
+       # P4-SPLIT: the engine and Strata's prompt library hold none of llama.cpp's MMQ (names in the bytes, nm, cuobjdump; tools/check_no_mmq.py)
+       # The cuobjdump look is named, so a device look that did not run fails the test (exit 3, "NOT RUN (<why>)" in its output).  Each tool
+       # gets 600 s (--tool-timeout), under the test's own limit: a slow cuobjdump ends as a named NOT RUN, not as a test killed with no line.
 diff --git a/engine/include/strata/kernels/qsa_prompt_attn.hpp b/engine/include/strata/kernels/qsa_prompt_attn.hpp
-index 6191df085f2..903413e85ac 100644
+index 6191df08..903413e8 100644
 --- a/engine/include/strata/kernels/qsa_prompt_attn.hpp
 +++ b/engine/include/strata/kernels/qsa_prompt_attn.hpp
 @@ -51,6 +51,8 @@ bool qsa_decode_attn_split(const float* q, const QsaAttnPools& pools, const int3
@@ -12,7 +27,7 @@ index 6191df085f2..903413e85ac 100644
  /// that has not switched it off after a failed launch.  The prompt path's 96-slot expert ring follows it.  False off HIP.
  bool qsa_prompt_attn_matrix_cores_requested();
 diff --git a/engine/src/kernels/cuda/qsa_prompt_attn.cu b/engine/src/kernels/cuda/qsa_prompt_attn.cu
-index 1b9e701ccc3..c64ebd776e2 100644
+index 40fa3cb3..005c11ba 100644
 --- a/engine/src/kernels/cuda/qsa_prompt_attn.cu
 +++ b/engine/src/kernels/cuda/qsa_prompt_attn.cu
 @@ -87,21 +87,28 @@ __device__ __forceinline__ uint32_t pack_h2(float lo_k, float hi_k) {   // eleme
@@ -248,9 +263,9 @@ index 1b9e701ccc3..c64ebd776e2 100644
      {   // sm_75 or newer: the MMA above compiles for both.  sm_80+ runs the cp.async kernel (launch_i8); Turing has
          // no cp.async, so it runs the v1 kernel (launch<1>, same accuracy, another summation order).  An older card
          // keeps the old kernel.
-@@ -2500,12 +2557,13 @@ bool qsa_prompt_attn_batch(const float* q, const QsaAttnPools& pools, const int3
-         if (cc[dev] < 70) return false;
-         volta = cc[dev] < 75;     // sm_70: the m8n8k4 kernel (STRATA_PA_VOLTA); STRATA_QSA_WARP=1 still forces the old one
+@@ -2504,12 +2561,13 @@ bool qsa_prompt_attn_batch(const float* q, const QsaAttnPools& pools, const int3
+         volta = false;            // CUDA 13 builds without STRATA_EXPERIMENTAL_SM60 keep Tensor Core prompt attention
+ #endif
          turing = cc[dev] < 80;
 +        ampere86 = cc[dev] == 86;
          t75 = cc[dev] == 75;      // a Turing card, or one run as such (STRATA_EMULATE_CC=75, STRATA_QSA_WARP=1)
@@ -263,7 +278,7 @@ index 1b9e701ccc3..c64ebd776e2 100644
      if (pools.k_q != nullptr && pools.v_q != nullptr && pools.k_scale != nullptr && pools.v_scale != nullptr &&
          pools.k_q4 == nullptr && pools.v_q4 == nullptr && s.head_dim == HD && s.n_head == (int64_t) G * s.n_head_kv &&
          cap > 0 && ids && steps && pools.page_table && hip_wmma_usable(n_q, cap))
-@@ -2532,6 +2590,12 @@ bool qsa_prompt_attn_batch(const float* q, const QsaAttnPools& pools, const int3
+@@ -2536,6 +2594,12 @@ bool qsa_prompt_attn_batch(const float* q, const QsaAttnPools& pools, const int3
      if (pools.k_q != nullptr && pools.v_q4 != nullptr) {   // hybrid K8V4: int8 K + dequantized-q4 V
          if (!pools.k_scale) return false;
          if (volta) return launch70<3>(q, pools, ids, steps, cap, s, attn, n_q, st);
@@ -276,18 +291,3 @@ index 1b9e701ccc3..c64ebd776e2 100644
          return launch<3>(q, pools, ids, steps, cap, s, attn, n_q, st);
      }
      if (pools.k_q != nullptr) {
-diff --git a/engine/cmake/backends/cuda.cmake b/engine/cmake/backends/cuda.cmake
-index d90788f4cb2..3b17ba96759 100644
---- a/engine/cmake/backends/cuda.cmake
-+++ b/engine/cmake/backends/cuda.cmake
-@@ -115,6 +115,10 @@ endmacro()
- # the prompt kernels' tests: the fused experts' (linked to ${_strata_pf_tests_lib})
- macro(strata_cuda_prompt_tests)
-     if(STRATA_BUILD_TESTS)
-+      # SM86 K8V4: int8 K x split-INT8 query on IMMA, with the q4_0 V gather path unchanged.
-+      add_test(NAME qsa_prompt_attn_parity_k8v4 COMMAND qsa_prompt_attn_parity 4096 512 2 --k8v4)
-+      set_tests_properties(qsa_prompt_attn_parity_k8v4 PROPERTIES
-+                           ENVIRONMENT "STRATA_K8V4_QK_IMMA=1" SKIP_RETURN_CODE 77 TIMEOUT 600)
-       # P4-SPLIT: the engine and Strata's prompt library hold none of llama.cpp's MMQ (names in the bytes, nm, cuobjdump; tools/check_no_mmq.py)
-       # The cuobjdump look is named, so a device look that did not run fails the test (exit 3, "NOT RUN (<why>)" in its output).  Each tool
-       # gets 600 s (--tool-timeout), under the test's own limit: a slow cuobjdump ends as a named NOT RUN, not as a test killed with no line.

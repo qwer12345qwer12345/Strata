@@ -1,8 +1,8 @@
 diff --git a/engine/cmake/strata_gpu_engine.cmake b/engine/cmake/strata_gpu_engine.cmake
-index 120ebaf87..afa4ca598 100644
+index e8c48729..a130884d 100644
 --- a/engine/cmake/strata_gpu_engine.cmake
 +++ b/engine/cmake/strata_gpu_engine.cmake
-@@ -1208,6 +1208,12 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+@@ -1211,6 +1211,12 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
    add_test(NAME ple_iq4nl_dequant_test COMMAND ple_iq4nl_dequant_test)
    set_tests_properties(ple_iq4nl_dequant_test PROPERTIES SKIP_RETURN_CODE 77)
  
@@ -16,7 +16,7 @@ index 120ebaf87..afa4ca598 100644
    add_executable(kv_q8_parity src/kernels/kv_q8_parity.cpp)
    target_include_directories(kv_q8_parity PRIVATE ${_strata_gpu_include_directories})
 diff --git a/engine/include/strata/kernels/ngram.hpp b/engine/include/strata/kernels/ngram.hpp
-index c72a2c5ec..c719d8a0a 100644
+index c72a2c5e..c719d8a0 100644
 --- a/engine/include/strata/kernels/ngram.hpp
 +++ b/engine/include/strata/kernels/ngram.hpp
 @@ -208,6 +208,10 @@ public:
@@ -31,7 +31,7 @@ index c72a2c5ec..c719d8a0a 100644
      /// Fault injection (Direct mode): every row read completes no earlier than `us` after issue.
      void set_injected_delay_us(double us);
 diff --git a/engine/include/strata/kernels/ple.hpp b/engine/include/strata/kernels/ple.hpp
-index a558e1e27..b9ad04c47 100644
+index a558e1e2..b9ad04c4 100644
 --- a/engine/include/strata/kernels/ple.hpp
 +++ b/engine/include/strata/kernels/ple.hpp
 @@ -128,5 +128,8 @@ bool ple_block_available();
@@ -44,7 +44,7 @@ index a558e1e27..b9ad04c47 100644
  
  }  // namespace strata::kernels
 diff --git a/engine/src/kernels/cuda/ple.cu b/engine/src/kernels/cuda/ple.cu
-index 551490b38..de440e6fa 100644
+index 551490b3..de440e6f 100644
 --- a/engine/src/kernels/cuda/ple.cu
 +++ b/engine/src/kernels/cuda/ple.cu
 @@ -412,4 +412,19 @@ void ple_iq4nl_dequant(const uint8_t* raw, int64_t rows, float* out, void* strea
@@ -68,7 +68,7 @@ index 551490b38..de440e6fa 100644
 +
  }  // namespace strata::kernels
 diff --git a/engine/src/kernels/ngram.cpp b/engine/src/kernels/ngram.cpp
-index 8a008d933..791ce5b2f 100644
+index 8a008d93..791ce5b2 100644
 --- a/engine/src/kernels/ngram.cpp
 +++ b/engine/src/kernels/ngram.cpp
 @@ -840,6 +840,36 @@ bool PleTable::gather_batch(const uint32_t* rows, size_t n_tokens, float* out, s
@@ -110,7 +110,7 @@ index 8a008d933..791ce5b2f 100644
      if (impl_->data == nullptr || impl_->fmt->id != PleFormat::IQ4_NL || impl_->rb != PLE_ROW_BYTES) return false;
 diff --git a/engine/src/kernels/ple_bf16_widen_test.cpp b/engine/src/kernels/ple_bf16_widen_test.cpp
 new file mode 100644
-index 000000000..f6f4a29b1
+index 00000000..f6f4a29b
 --- /dev/null
 +++ b/engine/src/kernels/ple_bf16_widen_test.cpp
 @@ -0,0 +1,36 @@
@@ -151,7 +151,7 @@ index 000000000..f6f4a29b1
 +    std::printf("ple_bf16_widen_test: all 65536 encodings exact, 5 cross-stream passes\n");return 0;
 +}
 diff --git a/engine/src/ngram/ple_reader_test.cpp b/engine/src/ngram/ple_reader_test.cpp
-index d709e7484..34b813d57 100644
+index d709e748..34b813d5 100644
 --- a/engine/src/ngram/ple_reader_test.cpp
 +++ b/engine/src/ngram/ple_reader_test.cpp
 @@ -548,7 +548,44 @@ void ple_files_are_told_from_model_shards(const std::string& dir) {
@@ -200,7 +200,7 @@ index d709e7484..34b813d57 100644
      bf16_widening_is_exact();                      // BF16's own claim: a shift, exact for every pattern
      bad_sizes_are_refused(dir);
 diff --git a/engine/src/prefill/prefill.cpp b/engine/src/prefill/prefill.cpp
-index ad14b800a..4f0105b0c 100644
+index 20df4804..afc7cbf3 100644
 --- a/engine/src/prefill/prefill.cpp
 +++ b/engine/src/prefill/prefill.cpp
 @@ -297,6 +297,10 @@ bool ple_compact_on() {
@@ -214,7 +214,7 @@ index ad14b800a..4f0105b0c 100644
  bool ple_copy_stream_on() {
      static const bool on = [] { const char* v = std::getenv("STRATA_PLE_COPY_STREAM"); return v != nullptr && v[0] == '1'; }();
      return on;
-@@ -1683,6 +1687,7 @@ struct Prefill::Impl {
+@@ -1686,6 +1690,7 @@ struct Prefill::Impl {
      float* ple_emb_host[2] = {};             // pinned, double-buffered: the next chunk's rows are read while this
      cudaEvent_t ple_copied[2] = {};          // one runs; the event marks that buffer's upload done
      std::vector<uint32_t> ple_rows[2];
@@ -222,7 +222,7 @@ index ad14b800a..4f0105b0c 100644
      bool ple_compact[2] = {false, false};    // STRATA_PLE_COMPACT: the pinned buffer holds raw IQ4_NL rows
      uint8_t* ple_raw_dev = nullptr;          // their device copy (cudaMalloc'd, the chunk's 16 rows a token)
      cudaStream_t ple_copy = nullptr;         // STRATA_PLE_COPY_STREAM: the raw rows' upload stream (null: on cs)
-@@ -2590,6 +2595,8 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
+@@ -2593,6 +2598,8 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
          }
      }
      pf_mark("init: routing tables (pinned, mapped)", tr_last);
@@ -231,7 +231,7 @@ index ad14b800a..4f0105b0c 100644
      for (int b = 0; b < 2; ++b) {
          if (!m.ple_emb_host[b] &&
              (force_pageable() || cudaHostAlloc((void**) &m.ple_emb_host[b], (size_t) T * N * 4, cudaHostAllocDefault) != cudaSuccess)) {
-@@ -2600,8 +2607,9 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
+@@ -2603,8 +2610,9 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
          if (!m.ple_copied[b] && cudaEventCreateWithFlags(&m.ple_copied[b], cudaEventDisableTiming) != cudaSuccess)
              ok = false;
          m.ple_rows[b].resize(T * strata::kernels::PLE_N_HEADS);
@@ -243,7 +243,7 @@ index ad14b800a..4f0105b0c 100644
              m.ple_raw_dev = nullptr;
              (void) cudaGetLastError();
          }
-@@ -4334,6 +4342,11 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+@@ -4345,6 +4353,11 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
          }
          // STRATA_PLE_COMPACT=1: the raw rows (1,440 bytes a token instead of 10,240 floats' bytes) into the same pinned
          // buffer; ple_land uploads them and dequantizes on the device
@@ -255,7 +255,7 @@ index ad14b800a..4f0105b0c 100644
          if (ple_compact_on() && m.ple_pageable[buf].empty() && m.ple_raw_dev != nullptr &&
              ss.ple.table->gather_raw_iq4nl(m.ple_rows[buf].data(), (size_t) T, (uint8_t*) m.ple_emb_host[buf])) {
              m.ple_compact[buf] = true;
-@@ -4531,7 +4544,8 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+@@ -4542,7 +4555,8 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                  return false;
              }
              // #1996: the pageable fallback (no RAM to pin) goes up through a pinned slot; the pinned buffers as before
@@ -265,7 +265,7 @@ index ad14b800a..4f0105b0c 100644
              // STRATA_PLE_COPY_STREAM: the raw rows go up on their own stream once the previous chunk's dequant has read
              // the buffer (ple_raw_free), and the compute stream waits for them (ple_copied) only at the dequant - the
              // DMA overlaps layer 0 instead of idling the compute queue.  ple_copied still marks that buffer's upload
-@@ -4551,7 +4565,16 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
+@@ -4562,7 +4576,16 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                  return false;
              }
              if (m.ple_compact[ple_buf]) {

@@ -1,0 +1,22 @@
+{
+  "id": "k8v4-decode-tc",
+  "name": "K8V4 decode INT8 tensor-core score phase",
+  "version": "0.1.0",
+  "status": "active",
+  "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
+  "patched_tree": "1a80211ace51017718ddadf6f8bdba84e4bfa467",
+  "requires": [],
+  "source_pr": "https://github.com/qwer12345qwer12345/Strata/pull/6",
+  "reviewed_head": "17c4d042af47bdd083fe38db1fd8304e008bd5e5",
+  "patches": [
+    {
+      "id": "k8v4-decode-tc",
+      "path": "patches/0001-feature.patch",
+      "sha256": "ff4ff0a8834c6b36280ae27c63bc97cb4617fe9b93b90b33375f382d5853c7e2"
+    }
+  ],
+  "tests": "tests/test.json",
+  "environment": {
+    "STRATA_ATTN_DECODE_TC": "1"
+  }
+}

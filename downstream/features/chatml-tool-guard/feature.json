@@ -3,19 +3,20 @@
   "name": "Chat Completions ChatML tool boundary guard",
   "version": "0.1.0",
   "status": "active",
-  "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
-  "patched_tree": "a77bbe1004467fe06e815792f3d73a0ebe613272",
+  "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
+  "patched_tree": "cb2588fec3f9ed063d5f405a4f2ec2ea554cfee5",
   "requires": [],
   "patches": [
     {
       "id": "chatml-tool-boundary",
       "path": "patches/0001-chatml-tool-boundary.patch",
-      "sha256": "610ea5a45f2eaeeedb4c3e3e5090665fe533679fc63e855bc528e42108324509"
+      "sha256": "4f6fc92b02b6ca46e029338db2afe888db6bdb34292bf4593ce6be7f0bf41c89"
     }
   ],
   "tests": "tests/test.json",
   "environment": {},
   "configuration": {
     "chatml_tool_guard": true
-  }
+  },
+  "ported_from_base": "c6f6427d9de9016fd92d13e29740f65625261df7"
 }

@@ -1,8 +1,8 @@
 diff --git a/engine/cmake/strata_gpu_engine.cmake b/engine/cmake/strata_gpu_engine.cmake
-index 120ebaf87..6f534f422 100644
+index e8c48729..d8020320 100644
 --- a/engine/cmake/strata_gpu_engine.cmake
 +++ b/engine/cmake/strata_gpu_engine.cmake
-@@ -1365,6 +1365,12 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+@@ -1368,6 +1368,12 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
      add_test(NAME pinned_capture COMMAND pinned_capture)
    endif()
  
@@ -16,7 +16,7 @@ index 120ebaf87..6f534f422 100644
    # unconditionally: tests/ is added at the end of this file, but the flag has to be known before it runs.
    if(STRATA_ENABLE_CUDA)
 diff --git a/engine/include/strata/core/dflash2.hpp b/engine/include/strata/core/dflash2.hpp
-index 92a864914..fce839f54 100644
+index 92a86491..fce839f5 100644
 --- a/engine/include/strata/core/dflash2.hpp
 +++ b/engine/include/strata/core/dflash2.hpp
 @@ -137,6 +137,12 @@ public:
@@ -41,7 +41,7 @@ index 92a864914..fce839f54 100644
      int ndraft_ = kDrafts;          ///< drafts a window can use (set_max_drafts)
      int64_t have_ctx_ = 0;
 diff --git a/engine/src/core/dflash2.cpp b/engine/src/core/dflash2.cpp
-index 4d4d2f443..c37d2546b 100644
+index 3652596e..0f3a10a3 100644
 --- a/engine/src/core/dflash2.cpp
 +++ b/engine/src/core/dflash2.cpp
 @@ -45,6 +45,7 @@ Dflash2Drafter::~Dflash2Drafter() {
@@ -52,7 +52,7 @@ index 4d4d2f443..c37d2546b 100644
      auto fr = [](void* p) { if (p) cudaFree(p); };
      if (h_logq_) cudaFreeHost(h_logq_);
      if (h_logd_) cudaFreeHost(h_logd_);
-@@ -731,6 +732,7 @@ void Dflash2Drafter::set_max_drafts(int n) {
+@@ -745,6 +746,7 @@ void Dflash2Drafter::set_max_drafts(int n) {
      cudaDeviceSynchronize();
      for (auto& e : exec_)
          if (e) { cudaGraphExecDestroy(e); e = nullptr; }
@@ -60,7 +60,7 @@ index 4d4d2f443..c37d2546b 100644
      graph_taps_ = nullptr;
      ndraft_ = n;
  }
-@@ -1157,6 +1159,48 @@ bool Dflash2Drafter::draft(const float* taps, int n_new, int64_t pos0, int32_t a
+@@ -1171,6 +1173,48 @@ bool Dflash2Drafter::draft(const float* taps, int n_new, int64_t pos0, int32_t a
      return draft_launch(taps, n_new, pos0, anchor, err) && draft_finish(drafts, probs, err);
  }
  
@@ -111,7 +111,7 @@ index 4d4d2f443..c37d2546b 100644
      if (!context_wait(err)) return false;
 diff --git a/engine/src/core/dflash2_wide_test.cpp b/engine/src/core/dflash2_wide_test.cpp
 new file mode 100644
-index 000000000..460c23da1
+index 00000000..460c23da
 --- /dev/null
 +++ b/engine/src/core/dflash2_wide_test.cpp
 @@ -0,0 +1,68 @@
@@ -184,10 +184,10 @@ index 000000000..460c23da1
 + }catch(const std::exception&e){std::fprintf(stderr,"FAIL: %s\n",e.what());return 1;}
 +}
 diff --git a/engine/src/program/generate.cpp b/engine/src/program/generate.cpp
-index 9d57f2b40..07b209a62 100644
+index 65d0b054..d0de04ed 100644
 --- a/engine/src/program/generate.cpp
 +++ b/engine/src/program/generate.cpp
-@@ -21784,7 +21784,7 @@ int main(int argc, char** argv) {
+@@ -22533,7 +22533,7 @@ int main(int argc, char** argv) {
                  int32_t dd[strata::core::Dflash2Drafter::kDrafts];
                  float pp[strata::core::Dflash2Drafter::kDrafts];
                  const float* tp = df2_win_taps(a_ + 1, err);
@@ -196,7 +196,7 @@ index 9d57f2b40..07b209a62 100644
                  for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
                  if (ss.ple.ready() && ss.ple.table != nullptr) {   // the PLE rows of the next window's tokens, read ahead (as the MTP's draft does)
                      int n_pf = 0;
-@@ -21828,7 +21828,7 @@ int main(int argc, char** argv) {
+@@ -22577,7 +22577,7 @@ int main(int argc, char** argv) {
                      } else {
                          int32_t dd[strata::core::Dflash2Drafter::kDrafts];
                          float pp[strata::core::Dflash2Drafter::kDrafts];
@@ -205,7 +205,7 @@ index 9d57f2b40..07b209a62 100644
                          for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
                      }
                  }
-@@ -24061,7 +24061,7 @@ int main(int argc, char** argv) {
+@@ -24854,7 +24854,7 @@ int main(int argc, char** argv) {
                  if (wait_commit_first && !ver.wait_commit(err)) return false;
                  int32_t dd[strata::core::Dflash2Drafter::kDrafts];
                  float pp[strata::core::Dflash2Drafter::kDrafts];
@@ -214,7 +214,7 @@ index 9d57f2b40..07b209a62 100644
                  for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
                  // what the MTP does while it drafts: the PLE rows of the tokens the next window will hold are read ahead
                  // (the window's gather would otherwise wait for them: 1.8 ms a round on strix)
-@@ -24108,7 +24108,7 @@ int main(int argc, char** argv) {
+@@ -24901,7 +24901,7 @@ int main(int argc, char** argv) {
                  } else {
                      int32_t dd[strata::core::Dflash2Drafter::kDrafts];
                      float pp[strata::core::Dflash2Drafter::kDrafts];
@@ -225,7 +225,7 @@ index 9d57f2b40..07b209a62 100644
              }
 diff --git a/terminal/l2/chat_latency.py b/terminal/l2/chat_latency.py
 new file mode 100644
-index 000000000..95e38a2e7
+index 00000000..95e38a2e
 --- /dev/null
 +++ b/terminal/l2/chat_latency.py
 @@ -0,0 +1,121 @@
@@ -352,10 +352,10 @@ index 000000000..95e38a2e7
 +    main()
 diff --git a/terminal/l2/headless_experiments.py b/terminal/l2/headless_experiments.py
 new file mode 100644
-index 000000000..74f82f0b6
+index 00000000..b816708a
 --- /dev/null
 +++ b/terminal/l2/headless_experiments.py
-@@ -0,0 +1,415 @@
+@@ -0,0 +1,444 @@
 +"""One-shot headless spec, SM86 shape and wide lookup comparisons. Never select a winner automatically."""
 +import datetime
 +import hashlib
@@ -372,7 +372,7 @@ index 000000000..74f82f0b6
 +from collections import defaultdict
 +from pathlib import Path
 +from l2.chat_latency import measure, workloads
-+from l2.runtime_config import DAILY, PREVIOUS, set_options
++from l2.runtime_config import DAILY, PREVIOUS, REFERENCE, set_options
 +WINDOW = re.compile(r'strata decode timing: (\d+) windows, avg T ([\d.]+), ([\d.]+) tokens/window, ([\d.]+) ms/window')
 +
 +def meminfo():
@@ -589,8 +589,23 @@ index 000000000..74f82f0b6
 +    result += mirror('gdn-execution',('gdn_tiles','gdn_fuse'),[(1,1),(2,1),(2,0),(1,0)])
 +    result += mirror('prefill-cap',('prefill_cap',),[(8192,),(16384,),(32768,)])
 +    result += mirror('cpu-prefill',('cpu_nt','cpu_max'),[(0,0),(32,3072),(32,6144),(8,6144)])
-+    result += mirror('adapt-mode',('nowait','lag','overlap'),[(1,2,0),(0,1,1),(0,1,0)])
++    result += mirror('adapt-mode',('nowait','lag','overlap','fetch'),[(1,2,0,2),(1,2,0,0),(0,1,0,0),(0,1,1,0)])
++    for engine in (0,1,1,0):
++        result.append(arm('engine-reference','engine-reference-'+str(engine),{**REFERENCE,'engine':engine}))
++    official=dict(decode_tc=0,tq_f16=0,fetch=0,hc_persist=0)
++    for label,changes in [('official',official),('daily',{}),('daily',{}),('official',official)]:
++        result.append(arm('update-bundle','update-bundle-'+label,changes))
++    result += mirror('decode-tc-spec',('decode_tc','spec'),[(0,4),(1,4),(1,6),(0,6)])
++    result += mirror('tq-prefill',('tq_f16','prefill_cap'),[(0,8192),(1,8192),(1,16384),(0,16384)])
++    result += mirror('hc-qfuse',('hc_persist','qfuse'),[(0,0),(1,0),(1,1),(0,1)])
++    result += mirror('fetch-pin',('fetch','pin'),[(0,0),(2,0),(2,0.25),(0,0.25)])
++    result += mirror('fetch-mode',('fetch',),[(0,),(1,),(2,)])
++    result += mirror('upstream-adapt',('adapt_every','adapt_swaps','adapt_decay'),[(4,96,0.7),(2,192,0.92)])
++    result += mirror('qfuse-l3',('qfuse','l3'),[(0,0),(1,0),(1,1),(0,1)])
++    result += mirror('dense-min',('dense_min',),[(9,),(6,),(3,)])
 +    if groups:
++        if 'updates' in groups:
++            groups=[g for g in groups if g!='updates']+['engine-reference','update-bundle','decode-tc-spec','tq-prefill','hc-qfuse','fetch-pin','fetch-mode','upstream-adapt','qfuse-l3','dense-min']
 +        if 'numeric' in groups:
 +            groups=[g for g in groups if g!='numeric']+['emb-gdn','gdn-precision','hc-upmix','gdn-execution','prefill-cap','cpu-prefill','adapt-mode']
 +        aliases = {'spec':'spec-lookup','lookup':'spec-lookup','shape':'shape-qkv',
@@ -621,13 +636,13 @@ index 000000000..74f82f0b6
 +    args = cfg['args']
 +    for flag in ('--expert-profile-save', '--expert-profile', '--conversation-cache-mib',
 +                 '--conversation-cache-slots', '--spec', '--draft-conf', '--lookup-max-t',
-+                 '--lookup-sizes', '--spec-min-p', '--prefill'):
++                 '--lookup-sizes', '--spec-min-p', '--prefill', '--adapt-every', '--adapt-swaps', '--adapt-decay'):
 +        while flag in args:
 +            at = args.index(flag)
 +            del args[at:at + 2]
 +    sizes = list(range(2, 9)) + ([10, 12] if lookup >= 12 else []) + ([16] if lookup == 16 else [])
 +    options = ['--spec', str(spec), '--draft-conf', '0.8', '--lookup-max-t', str(lookup),
-+               '--lookup-sizes', ','.join(map(str, sizes)), '--prefill', f'auto:{arm["prefill_cap"]}']
++               '--lookup-sizes', ','.join(map(str, sizes)), '--prefill', f'auto:{arm["prefill_cap"]}', '--adapt-every', str(arm['adapt_every']), '--adapt-swaps', str(arm['adapt_swaps']), '--adapt-decay', str(arm['adapt_decay'])]
 +    args += ['--expert-profile', str(seed), '--conversation-cache-mib', '0',
 +             '--conversation-cache-slots', '0'] + options
 +    for key in ('startup_benchmark', 'slot_save_path', 'l2_backend_port', 'l2_disk_budget_mib'):
@@ -651,6 +666,10 @@ index 000000000..74f82f0b6
 +    for key, field in (('STRATA_PREFILL_CPU_SHARE_NT','cpu_nt'),('STRATA_PREFILL_CPU_SHARE_MAX','cpu_max')):
 +        cfg['env'].pop(key,None)
 +        if arm[field]:cfg['env'][key]=str(arm[field])
++    cfg['env'].update(STRATA_ATTN_DECODE_TC=str(arm['decode_tc']), STRATA_PF_FUSED_TQ_F16=str(arm['tq_f16']),
++                      STRATA_PF_BATCH='256', STRATA_ADAPT_FETCH=str(arm['fetch']), STRATA_HC_PERSIST=str(arm['hc_persist']),
++                      STRATA_QFUSE=str(arm['qfuse']), STRATA_L3_PF=str(arm['l3']), STRATA_CACHE_PIN_FRAC=str(arm['pin']),
++                      STRATA_DENSE_I8_TC_MIN_T=str(arm['dense_min']))
 +    return cfg
 +
 +
@@ -719,7 +738,7 @@ index 000000000..74f82f0b6
 +    work = directory / ('spec-shape-lookup-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
 +    work.mkdir(mode=0o700, parents=True)
 +    (work / 'request.json').write_text(json.dumps(request, indent=2)+'\n')
-+    report = {'status': 'failed', 'runs': [], 'sequence': sequence, 'suite': 'manual-theory-v3'}
++    report = {'status': 'failed', 'runs': [], 'sequence': sequence, 'suite': 'manual-theory-v4'}
 +    try:
 +        check_environment()
 +        exe = Path(cfg['exe'])
@@ -736,12 +755,20 @@ index 000000000..74f82f0b6
 +        print(f'Strata 开始 spec/形状/宽 lookup 无头对比，共 {len(sequence)} 组；完成后开放服务。报告 {work}', flush=True)
 +        for i, arm in enumerate(sequence, 1):
 +            folder = work / f'{i:02d}-{arm["name"]}'
-+            trial_cfg = configure(cfg, arm, folder, seed, port)
++            trial_root, trial_base = root, cfg
++            if not arm['engine']:
++                reference=cfg.get('comparison_reference')
++                if not reference:raise ValueError('the frozen previous-engine comparison reference is missing')
++                trial_root=Path(reference['root']);trial_base=reference['config']
++                if hashlib.sha256(Path(trial_base['exe']).read_bytes()).hexdigest()!=reference['engine_sha256']:
++                    raise ValueError('previous-engine comparison binary changed')
++            trial_cfg = configure(trial_base, arm, folder, seed, port)
 +            cases = comparison_workloads(arm['group'])
 +            # run_phase owns every child and closes it before the next arm.
-+            result = run_phase(root, trial_cfg, arm['name'], folder, seed, port, deadline,
++            result = run_phase(trial_root, trial_cfg, arm['name'], folder, seed, port, deadline,
 +                               workloads=cases, launch_profile=trial_cfg, stream_latency=True)
 +            result['settings'] = dict(arm)
++            result['trial_engine_sha256']=hashlib.sha256(Path(trial_cfg['exe']).read_bytes()).hexdigest()
 +            if result['status'] == 'passed' and any(
 +                r['timings']['predicted_n'] < r['target_tokens'] * .75
 +                for r in result['cases'] if r['case'] != 'warmup'
@@ -755,7 +782,9 @@ index 000000000..74f82f0b6
 +            result['effective_optimization_environment'] = {name:trial_cfg['env'][name] for name in
 +                ('STRATA_ADAPT_NOWAIT','STRATA_ADAPT_LAG','STRATA_ADAPT_OVERLAP','STRATA_ADAPT_OVERLAP_RESIDENT','STRATA_ROUTE_TAIL_SKIP','STRATA_ROUTE_TAIL_RENORM',
 +                 'STRATA_EMB_REUSE_ACCOUNT','STRATA_GDN_TC','STRATA_GDN_TC_NP','STRATA_GDN_TC_TILES',
-+                 'STRATA_GDN_TC_FUSE','STRATA_HC_UPMIX','STRATA_PREFILL_CPU_SHARE_NT','STRATA_PREFILL_CPU_SHARE_MAX')
++                 'STRATA_GDN_TC_FUSE','STRATA_HC_UPMIX','STRATA_PREFILL_CPU_SHARE_NT','STRATA_PREFILL_CPU_SHARE_MAX',
++                 'STRATA_ATTN_DECODE_TC','STRATA_PF_FUSED_TQ_F16','STRATA_ADAPT_FETCH','STRATA_HC_PERSIST',
++                 'STRATA_QFUSE','STRATA_L3_PF','STRATA_CACHE_PIN_FRAC','STRATA_DENSE_I8_TC_MIN_T')
 +                if name in trial_cfg['env']}
 +            report['runs'].append(result)
 +            (work / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
@@ -773,7 +802,7 @@ index 000000000..74f82f0b6
 +    return report
 diff --git a/terminal/l2/manual_compare.py b/terminal/l2/manual_compare.py
 new file mode 100644
-index 000000000..d41782b0a
+index 00000000..da68f193
 --- /dev/null
 +++ b/terminal/l2/manual_compare.py
 @@ -0,0 +1,101 @@
@@ -798,7 +827,7 @@ index 000000000..d41782b0a
 +    parser = argparse.ArgumentParser(description=__doc__)
 +    parser.add_argument('--profile', type=Path, default=Path('/etc/strata/server.json'))
 +    parser.add_argument('--state-dir', type=Path)
-+    parser.add_argument('--group', action='append', help='combined/spec-lookup/shape-qkv/dense-lookup/skip-lookup/rows/adapt-tail/tail-spec/emb-gdn/gdn-precision/hc-upmix/gdn-execution/prefill-cap/cpu-prefill/adapt-mode; numeric selects new groups; default all')
++    parser.add_argument('--group', action='append', help='combined/spec-lookup/shape-qkv/dense-lookup/skip-lookup/rows/adapt-tail/tail-spec/emb-gdn/gdn-precision/hc-upmix/gdn-execution/prefill-cap/cpu-prefill/adapt-mode; numeric selects numerical groups; updates selects 0.2.20 and PR groups; default all')
 +    parser.add_argument('--budget-s', type=int, default=14400)
 +    parser.add_argument('--vision-check',action='store_true',help='run the optional vision lease correctness suite only')
 +    parser.add_argument('--plan', action='store_true', help='show the comparison plan without stopping or starting anything')
@@ -880,10 +909,10 @@ index 000000000..d41782b0a
 +    raise SystemExit(main())
 diff --git a/terminal/l2/test_headless_experiments.py b/terminal/l2/test_headless_experiments.py
 new file mode 100644
-index 000000000..c49c153f3
+index 00000000..875705f4
 --- /dev/null
 +++ b/terminal/l2/test_headless_experiments.py
-@@ -0,0 +1,148 @@
+@@ -0,0 +1,149 @@
 +import copy
 +import hashlib
 +import json
@@ -950,7 +979,7 @@ index 000000000..c49c153f3
 +    self.assertEqual(cfg['env']['STRATA_ROUTE_TAIL_RENORM'],'0')
 +    self.assertEqual(cfg['env']['STRATA_ADAPT_LAG'],str(arm['lag']))
 +    self.assertEqual(cfg['env']['STRATA_ADAPT_OVERLAP'],str(arm['overlap']))
-+    if arm['overlap']:self.assertEqual((arm['nowait'],arm['lag']),(0,1))
++    if arm['overlap']:self.assertEqual((arm['nowait'],arm['lag'],arm['fetch']),(0,1,0))
 +    self.assertEqual(cfg['env']['STRATA_DF2_WIDE_CONTEXT'],'1' if arm['lookup']>8 else '0')
 +    if arm['group']=='spec-lookup':
 +     expected='2,3,4,5,6,7,8'+(',10,12' if arm['lookup']>=12 else '')+(',16' if arm['lookup']==16 else '')
@@ -1016,14 +1045,15 @@ index 000000000..c49c153f3
 +   with socket.socket() as probe:self.assertNotEqual(probe.connect_ex(('127.0.0.1',port)),0)
 +
 + def test_groups_balanced_and_each_ablation_changes_one_field(self):
-+  seq=h.arms();self.assertEqual(len(seq),114)
++  seq=h.arms();self.assertEqual(len(seq),180)
 +  for group in {r['group'] for r in seq}:
 +   rows=h.arms([group]);self.assertEqual(rows,rows[::-1])
-+   if group!='combined':
++   if group not in ('combined','engine-reference'):
 +    fields={k for k in h.DAILY if len({r[k] for r in rows})>1}
-+    expected={'spec-lookup':{'spec','lookup'},'shape-qkv':{'shapes','tc'},'dense-lookup':{'dense','lookup'},'skip-lookup':{'skip','lookup'},'rows':{'rows'},'adapt-tail':{'nowait','tail'},'tail-spec':{'tail','spec'},'emb-gdn':{'emb','gdn_np'},'gdn-precision':{'gdn_np'},'hc-upmix':{'upmix'},'gdn-execution':{'gdn_tiles','gdn_fuse'},'prefill-cap':{'prefill_cap'},'cpu-prefill':{'cpu_nt','cpu_max'},'adapt-mode':{'nowait','lag','overlap'}}
++    expected={'spec-lookup':{'spec','lookup'},'shape-qkv':{'shapes','tc'},'dense-lookup':{'dense','lookup'},'skip-lookup':{'skip','lookup'},'rows':{'rows'},'adapt-tail':{'nowait','tail'},'tail-spec':{'tail','spec'},'emb-gdn':{'emb','gdn_np'},'gdn-precision':{'gdn_np'},'hc-upmix':{'upmix'},'gdn-execution':{'gdn_tiles','gdn_fuse'},'prefill-cap':{'prefill_cap'},'cpu-prefill':{'cpu_nt','cpu_max'},'adapt-mode':{'nowait','lag','overlap','fetch'},'update-bundle':{'decode_tc','tq_f16','fetch','hc_persist'},'decode-tc-spec':{'decode_tc','spec'},'tq-prefill':{'tq_f16','prefill_cap'},'hc-qfuse':{'hc_persist','qfuse'},'fetch-pin':{'fetch','pin'},'fetch-mode':{'fetch'},'upstream-adapt':{'adapt_every','adapt_swaps','adapt_decay'},'qfuse-l3':{'qfuse','l3'},'dense-min':{'dense_min'}}
 +    self.assertEqual(fields,expected[group],group)
-+  self.assertEqual(len(h.arms(['numeric'])),44)
++  self.assertEqual(len(h.arms(['numeric'])),46)
++  self.assertEqual(len(h.arms(['updates'])),64)
 +  self.assertEqual({(a['emb'],a['gdn_np']) for a in h.arms(['emb-gdn'])},{(0,3),(1,3),(0,2),(1,2)})
 +  self.assertEqual(len({(a['spec'],a['lookup']) for a in h.arms(['spec-lookup'])}),9)
 +  self.assertEqual(len({(a['shapes'],a['tc']) for a in h.arms(['shape-qkv'])}),4)
@@ -1034,7 +1064,7 @@ index 000000000..c49c153f3
 +if __name__=='__main__':unittest.main()
 diff --git a/terminal/l2/test_manual_compare.py b/terminal/l2/test_manual_compare.py
 new file mode 100644
-index 000000000..5c1f01021
+index 00000000..0959f835
 --- /dev/null
 +++ b/terminal/l2/test_manual_compare.py
 @@ -0,0 +1,39 @@
@@ -1056,7 +1086,7 @@ index 000000000..5c1f01021
 +   with patch.object(manual_compare.subprocess,'run') as run,patch.object(manual_compare.subprocess,'Popen') as popen,contextlib.redirect_stdout(out):
 +    self.assertEqual(manual_compare.main(['--profile',str(profile),'--plan']),0)
 +   run.assert_not_called();popen.assert_not_called()
-+   result=json.loads(out.getvalue());self.assertEqual(result['arms'],114);self.assertFalse(result['automatic_tests'])
++   result=json.loads(out.getvalue());self.assertEqual(result['arms'],180);self.assertFalse(result['automatic_tests'])
 + def test_active_desktop_rejected_before_service_stop(self):
 +  with tempfile.TemporaryDirectory() as t:
 +   _,profile,_=self.fixture(Path(t))

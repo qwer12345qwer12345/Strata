@@ -3,8 +3,8 @@
   "name": "Single-GPU resident expert VRAM lease for on-demand image encoding",
   "version": "0.1.0",
   "status": "active",
-  "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
-  "patched_tree": "ff4a00e941a5585e352f96d9cccc99cd5adbdaaf",
+  "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
+  "patched_tree": "129ce7f8ca7d6efe1c3cd0f674208ce1d657cd07",
   "requires": [
     "dflash2-wide-lookup"
   ],
@@ -12,11 +12,12 @@
     {
       "id": "vision-expert-lease",
       "path": "patches/0001-vision-expert-lease.patch",
-      "sha256": "9565a49d04bb4539312dc8a9c984c830c1374e01407797f6a025dd7eca24da9b"
+      "sha256": "a5ae3790aad52df59dd73e6a9393adf77da30a3fa4e3c45cedd71480d89d122b"
     }
   ],
   "tests": "tests/test.json",
   "environment": {
     "STRATA_VISION_EXPERT_LEASE": "1"
-  }
+  },
+  "ported_from_base": "c6f6427d9de9016fd92d13e29740f65625261df7"
 }

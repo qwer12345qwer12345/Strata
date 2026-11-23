@@ -5,8 +5,8 @@
     "url": "https://github.com/Niko1221/Strata.git",
     "branch": "main"
   },
-  "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
-  "patched_tree": "fb23dfa93e948392b550e9d3474add554aa8acd3",
+  "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
+  "patched_tree": "0c161bb2eddce44204277c492c306e354c508e31",
   "feature_order": [
     "tq-cpu",
     "tq-ampere",
@@ -16,7 +16,11 @@
     "ple-bf16-compact",
     "ampere-tc-dispatch",
     "dflash2-wide-lookup",
-    "vision-expert-lease"
+    "vision-expert-lease",
+    "k8v4-decode-tc",
+    "tq-f16-prefill",
+    "resident-adapt-fetch",
+    "q8-hc-persist"
   ],
   "features": [
     {
@@ -66,6 +70,22 @@
     {
       "id": "vision-expert-lease",
       "path": "features/vision-expert-lease/feature.json"
+    },
+    {
+      "id": "k8v4-decode-tc",
+      "path": "features/k8v4-decode-tc/feature.json"
+    },
+    {
+      "id": "tq-f16-prefill",
+      "path": "features/tq-f16-prefill/feature.json"
+    },
+    {
+      "id": "resident-adapt-fetch",
+      "path": "features/resident-adapt-fetch/feature.json"
+    },
+    {
+      "id": "q8-hc-persist",
+      "path": "features/q8-hc-persist/feature.json"
     }
   ]
 }

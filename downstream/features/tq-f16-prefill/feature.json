@@ -1,0 +1,24 @@
+{
+  "id": "tq-f16-prefill",
+  "name": "TQ-only fused F16 prefill candidate",
+  "version": "0.1.0",
+  "status": "active",
+  "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
+  "patched_tree": "4e59a46d3e72b5ec29c57bbc498ddf21682bf7c2",
+  "requires": [],
+  "source_pr": "https://github.com/qwer12345qwer12345/Strata/pull/7",
+  "reviewed_head": "cdc24503aa7b2763b70d06ccac0358c18e9d7af3",
+  "patches": [
+    {
+      "id": "tq-f16-prefill",
+      "path": "patches/0001-feature.patch",
+      "sha256": "df82d7303cef4a76713d0f44e038581673dd4ff517b66a2908382445837839a5"
+    }
+  ],
+  "tests": "tests/test.json",
+  "environment": {
+    "STRATA_PF_FUSED_TQ": "1",
+    "STRATA_PF_FUSED_TQ_F16": "1",
+    "STRATA_PF_BATCH": "256"
+  }
+}

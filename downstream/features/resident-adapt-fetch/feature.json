@@ -1,0 +1,22 @@
+{
+  "id": "resident-adapt-fetch",
+  "name": "ADAPT_FETCH admissions with resident complement",
+  "version": "0.1.0",
+  "status": "active",
+  "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
+  "patched_tree": "12527429faaa7e0563266d6d0c7811e0cb08c6d5",
+  "requires": [],
+  "source_pr": "https://github.com/qwer12345qwer12345/Strata/pull/8",
+  "reviewed_head": "eac1392f4194ba1e86356d36f84bb88b012e4d43",
+  "patches": [
+    {
+      "id": "resident-adapt-fetch",
+      "path": "patches/0001-feature.patch",
+      "sha256": "a35fa934005d71f72951df482c1c7f3700603ee19e98944223b552241f5d729c"
+    }
+  ],
+  "tests": "tests/test.json",
+  "environment": {
+    "STRATA_ADAPT_FETCH": "2"
+  }
+}

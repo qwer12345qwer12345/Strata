@@ -1,0 +1,22 @@
+{
+  "id": "q8-hc-persist",
+  "name": "Q8_0 HC persistent read and QFUSE",
+  "version": "0.1.0",
+  "status": "active",
+  "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
+  "patched_tree": "18075708ee9d78dabeb190af924f400eed6daa1e",
+  "requires": [],
+  "source_pr": "https://github.com/qwer12345qwer12345/Strata/pull/9",
+  "reviewed_head": "2ae4d6c208c698e39c4fa478941a37eccd9e8268",
+  "patches": [
+    {
+      "id": "q8-hc-persist",
+      "path": "patches/0001-feature.patch",
+      "sha256": "a32e5619c48e35af95932c46cd21668210ac364190a9885c659ae02464cf0947"
+    }
+  ],
+  "tests": "tests/test.json",
+  "environment": {
+    "STRATA_HC_PERSIST": "1"
+  }
+}

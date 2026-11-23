@@ -5,12 +5,15 @@
   "optional_targets": {
     "cuda": [
       "dflash2_q4_parity",
-      "dense_i8_tc_test"
+      "dense_i8_tc_test",
+      "dense_layout_sweep"
     ]
   },
   "optional_ctest_regex": {
     "cuda": "^dflash2_q4_parity_ampere(_columns)?$"
   },
-  "overlays": [],
+  "overlays": [
+    "overlay/engine/tests/cuda/dense_layout_sweep.cpp"
+  ],
   "settings_generation": false
 }

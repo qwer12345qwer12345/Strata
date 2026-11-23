@@ -3,14 +3,14 @@
   "name": "SM86 DFlash2 scalar/INT8 TC and short-window dense shape dispatch",
   "version": "0.2.0",
   "status": "active",
-  "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
-  "patched_tree": "541ec5f5ae188ecc89e3039a152ae21ae3cc29da",
+  "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
+  "patched_tree": "340cd67f9cab59b83a8db80a7b2fd80930744e9f",
   "requires": [],
   "patches": [
     {
       "id": "ampere-tc-dispatch",
       "path": "patches/0001-ampere-tc-dispatch.patch",
-      "sha256": "cb10732f8a3a3718db1c0603f28da75482b8b74ccad147282b324db1746b70ec"
+      "sha256": "c42a30dda26bd6836a902156f8f81d870e4c3df29a05b413d0d02cddaa44de0c"
     }
   ],
   "tests": "tests/test.json",
@@ -18,5 +18,6 @@
     "STRATA_DF2_AMPERE_TUNING": "2",
     "STRATA_DF2_GEMM_TC": "0",
     "STRATA_DENSE_I8_AMPERE_SHAPES": "1"
-  }
+  },
+  "ported_from_base": "c6f6427d9de9016fd92d13e29740f65625261df7"
 }
