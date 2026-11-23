@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--with-cuda", action="store_true", help="also build and run optional CUDA/VMM tests")
     parser.add_argument("--cmake-arg", action="append", default=[], help="extra CMake argument; may be repeated")
     parser.add_argument("--skip-configure", action="store_true")
+    parser.add_argument("--build-only", action="store_true", help="configure and build requested targets without running CTest")
     args = parser.parse_args()
 
     stack = load_stack()
@@ -117,7 +118,7 @@ def main():
             if targets:
                 run(["cmake", "--build", build, "--parallel", "--target", *targets], source)
 
-            if regex:
+            if regex and not args.build_only:
                 run(["ctest", "--test-dir", build, "--output-on-failure", "--no-tests=error", "-R", regex], source)
         finally:
             for destination, backup in restore.items():
@@ -127,6 +128,8 @@ def main():
                     shutil.copy2(backup, destination)
 
     print(f"tests completed: {args.feature}")
+    if args.build_only:
+        print("CTest not run (--build-only).")
 
 
 if __name__ == "__main__":

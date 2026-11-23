@@ -1,16 +1,16 @@
 {
   "id": "ampere-tc-dispatch",
   "name": "SM86 DFlash2 scalar/INT8 TC and short-window dense shape dispatch",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "status": "active",
   "base_commit": "c6f6427d9de9016fd92d13e29740f65625261df7",
-  "patched_tree": "541ec5f5ae188ecc89e3039a152ae21ae3cc29da",
+  "patched_tree": "2a8dcc0af69b62185724f56c8b537ad82afa447e",
   "requires": [],
   "patches": [
     {
       "id": "ampere-tc-dispatch",
       "path": "patches/0001-ampere-tc-dispatch.patch",
-      "sha256": "cb10732f8a3a3718db1c0603f28da75482b8b74ccad147282b324db1746b70ec"
+      "sha256": "7ea42c68d5a4f3143215fec04c23bd80c4a0fede7be9fd39b6236cc4261157e6"
     }
   ],
   "tests": "tests/test.json",

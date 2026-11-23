@@ -1,5 +1,5 @@
 diff --git a/engine/cmake/strata_gpu_engine.cmake b/engine/cmake/strata_gpu_engine.cmake
-index 120ebaf87..3ce40334f 100644
+index 120ebaf87..a999345a2 100644
 --- a/engine/cmake/strata_gpu_engine.cmake
 +++ b/engine/cmake/strata_gpu_engine.cmake
 @@ -526,6 +526,13 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
@@ -16,6 +16,19 @@ index 120ebaf87..3ce40334f 100644
    add_executable(dflash2_gemm_bench EXCLUDE_FROM_ALL src/core/dflash2_gemm_bench.cpp)
    target_include_directories(dflash2_gemm_bench PRIVATE ${_strata_gpu_include_directories})
    target_link_libraries(dflash2_gemm_bench PRIVATE strata_kernels ${_strata_gpu_runtime_target})
+@@ -795,6 +802,12 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+     add_executable(mmvq_multi_parity src/kernels/mmvq_multi_parity.cpp)
+     target_include_directories(mmvq_multi_parity PRIVATE ${_strata_gpu_include_directories})
+     target_link_libraries(mmvq_multi_parity PRIVATE strata_kernels ${_strata_gpu_runtime_target})
++    # Downstream SM86 layout sweep source is supplied temporarily as a feature test overlay.
++    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/cuda/dense_layout_sweep.cpp")
++      add_executable(dense_layout_sweep tests/cuda/dense_layout_sweep.cpp)
++      target_include_directories(dense_layout_sweep PRIVATE ${_strata_gpu_include_directories})
++      target_link_libraries(dense_layout_sweep PRIVATE strata_prefill strata_kernels ${_strata_gpu_runtime_target})
++    endif()
+     add_test(NAME mmvq_multi_parity COMMAND mmvq_multi_parity)
+     if(STRATA_HIP_GFX906)   # the CUDA layout, where the negative control has power (the wave64 one is exact at every T)
+       add_test(NAME mmvq_multi_parity_cuda_layout COMMAND mmvq_multi_parity)
 diff --git a/engine/src/kernels/cuda/dflash2.cu b/engine/src/kernels/cuda/dflash2.cu
 index 2b6014a1f..fc0d6a314 100644
 --- a/engine/src/kernels/cuda/dflash2.cu

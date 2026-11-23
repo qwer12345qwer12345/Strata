@@ -38,3 +38,7 @@
 ## 从其他设备借用的scalar变体
 
 [稳定时钟的variant数据](df2-row-variants.json)与[原始输出](df2-row-variants-raw.json)：8列主干中，variant17→26的gate/up为45.30→39.90μs，output17.45→15.05μs；variant17→31的down为37.80→27.65μs、FC60.80→46.55μs、selector7.95→4.95μs。它们是同一整数点积的线程/展开分配差异，未增加权重副本或要求更多专家驻留。完整drafter主体固定计算8行，selector/context部分列数另行变化。
+
+## Dense generic reduction 下一步
+
+为计划第 2 项新增 `bench/run_dense_layout_sweep.py` 和 `tests/overlay/engine/tests/cuda/dense_layout_sweep.cpp`。这台准备环境的 GPU 是 RTX 4060 8 GB（SM89），目标为 RTX 3080 12 GB（SM86）；未运行也未生成该卡的性能结论。默认生产分派保持原样。应在目标卡执行 build-only 命令后，用 `--run` 保存每个 `(type,K,N,T)` 的候选对照；再据稳定赢家更新 runtime shape table，并单独完成模型级输出、接受率、lookup 和长输出验收。
