@@ -408,6 +408,9 @@ struct GpuPlanSink {
     void (*publish)(void* ctx) = nullptr;
     /// Starts the DMA copies of `n` host blobs (pinned) into staging slots 0..n-1 and signals the GPU when they land.
     void (*fetch)(void* ctx, const uint8_t* const* src, int n, size_t bytes) = nullptr;
+    /// Resident ADAPT_FETCH: preserve the cache slots' old experts before the graph overwrites them.  This runs
+    /// before `publish`, on an independent transfer stream, and must return only after every host copy has completed.
+    bool (*fetch_copyback)(void* ctx, const uint8_t* const* src, uint8_t* const* dst, int n, size_t bytes) = nullptr;
     void* ctx = nullptr;
     /// Plan v0.3 P6: how a PCIe group reaches the GPU.  0 = the copy engine stages it (DMA, `fetch`); 1 = the grouped
     /// kernel reads the mapped arena directly; 2 = a copy kernel stages it inside the graph.  For 1 and 2 `ptr2`
@@ -675,7 +678,11 @@ struct ExpertDispatch {
     /// of staging - a swap with no RAM read of its own.  `res_mut` is `host_res`, written here (and listed in
     /// `res_dirty_idx`); `in_flight`: experts the adaptive tier is copying in.
     int fetch_admit = 0;
+    bool fetch_resident = false;          ///< resident-RAM mode: direct admissions must exchange complementary ownership
+    bool fetch_exchange_active = false;   ///< staged exchanges belong to this verifier window, not the adaptive tier
     float fetch_min = 1.0f, fetch_margin = 0.5f;
+    struct FetchExchange { int32_t layer, in, out, slot; int64_t q; };
+    std::vector<FetchExchange> fetch_exchanges;  ///< committed after the verifier window's graph has completed
     int32_t* res_mut = nullptr;
     std::vector<uint8_t> in_flight;
     std::vector<uint8_t> fetch_mark;   ///< per expert of the layer: routed in the window
@@ -834,11 +841,15 @@ public:
     int64_t exchange_capacity() const { return xstage_cap_; }
     /// The exchange buffers are page-locked (cudaHostAlloc): copies to and from them are asynchronous.
     bool exchange_pinned() const { return xstage_pinned_; }
+    /// Whether any adaptive ownership exchanges are staged but not committed yet.
+    bool exchanges_pending() const { return !staged_.empty(); }
     /// Buffer `q`.  `layer` >= 0: the buffer an exchange of that layer's experts stages into (STRATA_EXCHANGE_ROTATE with
     /// several block sizes keeps one per size); without it, one that holds any layer's block.
     uint8_t* exchange_buffer(int64_t q, int64_t layer = -1) const;
     /// Requires `has_resident(layer, in)`, `!has_resident(layer, out)` and `exchange_buffer(q)` holding out's blob.
     bool stage_exchange(int64_t layer, int64_t in, int64_t out, int64_t q);
+    /// Atomically validate and stage a batch of ownership exchanges after their cache-slot copybacks have completed.
+    bool stage_exchanges(const int32_t* layers, const int32_t* ins, const int32_t* outs, const int64_t* qs, size_t n);
     /// --pipeline-windows: size the exchange table now, so a `stage_exchange` on the adaptive tier's thread never
     /// reallocates it under a concurrent `blob` (the pool reads it while windows are in flight).
     void prepare_overrides() { if (override_.empty()) override_.assign((size_t) blobs_, nullptr); }
