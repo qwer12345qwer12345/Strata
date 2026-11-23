@@ -4017,12 +4017,14 @@ void experts_native(const WideBatch& b, const NativeGeom& g, int n_expert, int64
         const int64_t tiles = (n + kTileRows - 1) / kTileRows + (b.e1 - b.e0);
         const unsigned g_gu = (unsigned) std::min<int64_t>(tiles * (GU_ROWS_N / weight_rows(2)), (int64_t) d.sms * d.occ_tq_f16_gu);
         const unsigned g_d = (unsigned) std::min<int64_t>(tiles * (D_ROWS_N / weight_rows(2)), (int64_t) d.sms * d.occ_tq_f16_d);
+        // Gate/up writes this call's FP32 H rows into dm when the down rotation is on;
+        // enqueue the rotation after that write and before down consumes ha.
+        if (g.gu_type == T_TQK6) launch_tq_f16<T_TQK6, true>(g_gu, b, g, tb, xa, src, ha, g_rot_on ? dm : nullptr, s);
+        else launch_tq_f16<T_TQ2_T, true>(g_gu, b, g, tb, xa, src, ha, g_rot_on ? dm : nullptr, s);
         if (g_rot_on) {
             const int64_t nw = n * (D_ROWS_K / 128);
             rot_quant_h_kernel<<<blocks(nw, 8), 256, 0, s>>>(dm, tb.off, b.e0, b.e1, n, g_rot_signs, (uint8_t*) ha);
         }
-        if (g.gu_type == T_TQK6) launch_tq_f16<T_TQK6, true>(g_gu, b, g, tb, xa, src, ha, g_rot_on ? dm : nullptr, s);
-        else launch_tq_f16<T_TQ2_T, true>(g_gu, b, g, tb, xa, src, ha, g_rot_on ? dm : nullptr, s);
         if (g.d_type == T_TQK7) launch_tq_f16<T_TQK7, false>(g_d, b, g, tb, ha, src, nullptr, dm, s);
         else launch_tq_f16<T_TQ2_T, false>(g_d, b, g, tb, ha, src, nullptr, dm, s);
         ck(cudaGetLastError(), "experts_native (TQ F16 / NT = 256)");
