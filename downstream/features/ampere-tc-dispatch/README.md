@@ -15,6 +15,19 @@
 
 这些是 dense projections，不是 Gyro TQ 专家；本机 Gyro-S 包的36个 `attn_qkv` 是 Q5_K / [2560,10240]，因此存在真实命中对象。微测试的误差约 1e-7 相对 RMS，不宣称逐位相同。
 
+## Generic reduction 候选
+
+`tests/overlay/engine/tests/cuda/dense_layout_sweep.cpp` 加入 build-only 的 CUDA 扫描目标。它按格式、K、N、T 记录 generic reduction、B6、IL table、packed 和 INT8 TC 相对 exact 基线的中位时延、相对 RMS、最大绝对误差与逐位相同比例。权重轮换至少 128 MiB；IL 的交错准备延迟单独计时并计入有效延迟。扫描不会修改生产默认或自动生成分派表。
+
+需要 Python、CMake、CUDA Toolkit 和可用的 C++/CUDA 构建工具。先按仓库的 `downstream/scripts/prepare.py` 准备这个功能，再构建专用 SM86 目录；构建阶段不会运行 CTest 或基准：
+
+```powershell
+python downstream/scripts/prepare.py --feature ampere-tc-dispatch --target ../Strata-3080-prepared
+python downstream/features/ampere-tc-dispatch/bench/run_dense_layout_sweep.py --source ../Strata-3080-prepared --build ../Strata-build-dense-layout --output ../Strata-results-dense-layout
+```
+
+构建会为 SM86 和 16 行窗口生成专用二进制，并把显卡、驱动、CUDA 编译器版本写入 `environment.json`。只有在 RTX 3080 12 GiB 上加入 `--run` 才会计时；其他显卡会被拒绝。此扫描只产生微内核证据；赢家表和真实模型接受率、lookup、长输出检查仍须根据目标卡结果完成。不要把不同 SM86 型号的结果混成同机数据。
+
 ## 接受率与9行
 
 当前 DFlash2 固定 anchor+7 masks，最多8行；其 Transformer 主体每轮仍计算8行。spec=6 主要限制送入主模型验证的窗口，以及 drafter head/selector 的输出数量；confidence=.8 再筛短验证窗口，并不会把 drafter 主体的8行计算同比缩短。本机 engine 构建也为8行。历史约90%的 accepted/offered 只计算已经过筛选的草稿；每轮实际提交远低于6，不能据此外推更长链的接受概率。
