@@ -1,0 +1,254 @@
+..........[strata] done: 109 tokens in 0 s (no speed) (length, cancel=False)
+.[strata] stopped on a generated ChatML role token (tool incomplete=False)
+[strata] done: 137 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] stopped on a generated ChatML role token (tool incomplete=False)
+[strata] done: 137 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] done: 137 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] done: 24 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] done: 2 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] done: 140 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] stopped on a generated ChatML role token (tool incomplete=False)
+[strata] done: 9 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] stopped on a generated ChatML role token (tool incomplete=True)
+[strata] done: 110 tokens in 0 s (no speed) (length, cancel=False)
+[strata] stopped on a generated ChatML role token (tool incomplete=True)
+[strata] done: 110 tokens in 0 s (no speed) (length, cancel=False)
+.[strata] done: 146 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] done: 119 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 119 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 119 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 119 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 134 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 134 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 134 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 134 tokens in 0 s (no speed) (length, cancel=False)
+.[strata] done: 120 tokens in 0 s (no speed) (stop, cancel=False)
+[strata] done: 120 tokens in 0 s (no speed) (stop, cancel=False)
+[strata] done: 120 tokens in 0 s (no speed) (stop, cancel=False)
+[strata] done: 120 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] done: 147 tokens in 0 s (no speed) (stop, cancel=False)
+[strata] done: 147 tokens in 0 s (no speed) (stop, cancel=False)
+[strata] done: 147 tokens in 0 s (no speed) (stop, cancel=False)
+[strata] done: 147 tokens in 0 s (no speed) (stop, cancel=False)
+....[strata] done: 165 tokens in 0 s (no speed) (stop, cancel=False)
+[strata] done: 165 tokens in 0 s (no speed) (stop, cancel=False)
+[strata] done: 165 tokens in 0 s (no speed) (stop, cancel=False)
+[strata] done: 165 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] done: 262 tokens in 0 s (no speed) (stop, cancel=False)
+[strata] done: 262 tokens in 0 s (no speed) (stop, cancel=False)
+[strata] done: 262 tokens in 0 s (no speed) (stop, cancel=False)
+[strata] done: 262 tokens in 0 s (no speed) (stop, cancel=False)
+....[strata] repeated reasoning detected at 2048 tokens (coverage=1.000); resuming the same output with the low-effort instruction (reasoning_loop_recovery)
+[strata] done: 2086 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] repeated reasoning detected at 2048 tokens (coverage=1.000); resuming the same output with the low-effort instruction (reasoning_loop_recovery)
+[strata] done: 2071 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] done: 1 tokens in 0 s (no speed) (cancel, cancel=True)
+.[strata] done: 16384 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+.[strata] done: 28001 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] repeated reasoning detected at 2048 tokens (coverage=1.000); resuming the same output with the low-effort instruction (reasoning_loop_recovery)
+[strata] done: 2082 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] done: 28001 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] repeated reasoning detected at 2048 tokens (coverage=1.000); resuming the same output with the low-effort instruction (reasoning_loop_recovery)
+[strata] done: 2106 tokens in 0 s (no speed) (stop, cancel=False)
+.[strata] repeated reasoning detected at 2048 tokens (coverage=1.000); resuming the same output with the low-effort instruction (reasoning_loop_recovery)
+[strata] done: 2086 tokens in 0 s (no speed) (stop, cancel=False)
+..[strata] repeated reasoning detected at 2048 tokens (coverage=1.000); resuming the same output with the low-effort instruction (reasoning_loop_recovery)
+[strata] done: 16384 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+.[strata] done: 28001 tokens in 0 s (no speed) (stop, cancel=False)
+..[strata] the thinking repeated the same passages (coverage=1.000) at 2560 tokens: ended as "length" (reasoning_loop_recovery: "stop" in strata-<model>.json; remove it to turn this off)
+[strata] done: 2560 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+.[strata] the thinking repeated the same passages (coverage=1.000) at 2048 tokens: ended as "length" (reasoning_loop_recovery: "stop" in strata-<model>.json; remove it to turn this off)
+[strata] done: 2048 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+...[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+..[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 1 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+.[strata] done: 15 tokens in 0 s (no speed) (stop, cancel=False)
+[strata] done: 9 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the reply reached max tokens while still thinking, so it has no answer: a thinking budget (reasoning_budget_tokens, in the request or in strata-<model>.json for every request) leaves room to answer
+[strata] done: 15 tokens in 0 s (no speed) (stop, cancel=False)
+..[strata] the engine stopped unexpectedly (exit code -9).  The next request starts the engine again.
+[strata] done: 20 tokens in 0 s (no speed) (error, cancel=False)
+[strata] done: 100 tokens in 0 s (no speed) (length, cancel=False)
+[strata] the engine reported an error: the engine said: ERR prompt too long for this card
+[strata] done: 20 tokens in 0 s (no speed) (error, cancel=False)
+[strata] done: 100 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 100 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 100 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 100 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 100 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] error in a started stream:
+Traceback (most recent call last):
+  File "<redacted-path>", line 8263, in _openai
+    for c in chunks:
+             ^^^^^^
+  File "<redacted-path>", line 6726, in openai_chunks
+    for kind, x in run if run is not None else svc.run(ids, thinking, tools, max_new, req, cancel, force=force, declared_only=True):
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<redacted-path>", line 5817, in run
+    yield from self._run(ids, thinking, tools, max_new, sampling, cancel, force, declared_only, deferred)
+  File "<redacted-path>", line 6067, in _run
+    for t in gen:
+             ^^^
+  File "<redacted-path>", line 39, in generate
+    raise self.fail()
+RuntimeError: boom in the server
+
+[strata] done: 100 tokens in 0 s (no speed) (length, cancel=False)
+.[strata] the engine stopped unexpectedly (exit code -9).  The next request starts the engine again.
+[strata] done: 20 tokens in 0 s (no speed) (error, cancel=False)
+[strata] the engine reported an error: the engine said: ERR prompt too long for this card
+[strata] done: 20 tokens in 0 s (no speed) (error, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] error in a started stream:
+Traceback (most recent call last):
+  File "<redacted-path>", line 8566, in _anthropic
+    for item in events:
+                ^^^^^^
+  File "<redacted-path>", line 6863, in anthropic_events
+    for kind, x in svc.run(ids, thinking, tools, max_new, req, cancel, force=force, declared_only=True,
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<redacted-path>", line 5817, in run
+    yield from self._run(ids, thinking, tools, max_new, sampling, cancel, force, declared_only, deferred)
+  File "<redacted-path>", line 6067, in _run
+    for t in gen:
+             ^^^
+  File "<redacted-path>", line 39, in generate
+    raise self.fail()
+RuntimeError: boom in the server
+
+.[strata] the engine stopped unexpectedly (exit code -9).  The next request starts the engine again.
+[strata] done: 20 tokens in 0 s (no speed) (error, cancel=False)
+[strata] the engine reported an error: the engine said: ERR prompt too long for this card
+[strata] done: 20 tokens in 0 s (no speed) (error, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] done: 20 tokens in 0 s (no speed) (length, cancel=False)
+[strata] error in a started stream:
+Traceback (most recent call last):
+  File "<redacted-path>", line 8402, in _responses
+    for e in items:
+             ^^^^^
+  File "<redacted-path>", line 8358, in events
+    for kind, x in svc.run(ids, thinking, tools, max_new, req, cancel, force):
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<redacted-path>", line 5817, in run
+    yield from self._run(ids, thinking, tools, max_new, sampling, cancel, force, declared_only, deferred)
+  File "<redacted-path>", line 6067, in _run
+    for t in gen:
+             ^^^
+  File "<redacted-path>", line 39, in generate
+    raise self.fail()
+RuntimeError: boom in the server
+
+.{"l2": "queue", "ms": 0.1}
+{"l2": "saveinc", "status": 200, "ms": 1.6, "incremental": null}
+{"l2": "queue", "ms": 0.1}
+{"l2": "saveinc", "status": 200, "ms": 1.4, "incremental": null}
+{"l2": "queue", "ms": 0.1}
+{"l2": "preload", "status": 200, "ms": 1.1, "tokens": 9000, "partial": null}
+.{"l2": "queue", "ms": 0.1}
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 37604)
+Traceback (most recent call last):
+  File "<redacted-path>", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+  File "<redacted-path>", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "<redacted-path>", line 766, in __init__
+    self.handle()
+  File "<redacted-path>", line 440, in handle
+    self.handle_one_request()
+  File "<redacted-path>", line 428, in handle_one_request
+    method()
+  File "<redacted-path>", line 24, in do_POST
+    elif self.path=='/v1/chat/completions':self.reply({'choices':[{'message':{'role':'assistant','content':'ok'}}],**({'strata_generation_failure':{'reason':'repetition'}} if body['messages'][-1].get('content')=='repeat-failure' else {})})
+                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<redacted-path>", line 13, in reply
+    b=json.dumps(obj).encode();self.send_response(200);self.send_header('Content-Length',str(len(b)));self.end_headers();self.wfile.write(b)
+                                                                                                                         ^^^^^^^^^^^^^^^^^^^
+  File "<redacted-path>", line 845, in write
+    self._sock.sendall(b)
+BrokenPipeError: [Errno 32] Broken pipe
+----------------------------------------
+..{"l2": "queue", "ms": 0.1}
+{"l2": "saveinc", "status": 200, "ms": 1.6, "incremental": null}
+{"l2": "queue", "ms": 0.0}
+{"l2": "preload", "status": 200, "ms": 1.2, "tokens": 9000, "partial": null}
+{"l2": "queue", "ms": 0.3}
+{"l2": "preload", "status": 200, "ms": 1.1, "tokens": 9000, "partial": null}
+..{"l2": "queue", "ms": 0.1}
+{"l2": "saveinc", "status": 200, "ms": 1.6, "incremental": null}
+.{"l2": "queue", "ms": 0.1}
+{"l2": "saveinc", "status": 200, "ms": 1.2, "incremental": null}
+{"l2": "queue", "ms": 0.0}
+{"l2": "saveinc", "status": 200, "ms": 0.6, "incremental": null}
+{"l2": "queue", "ms": 0.1}
+{"l2": "preload", "status": 200, "ms": 0.8, "tokens": 9000, "partial": null}
+.{"l2": "queue", "ms": 0.1}
+{"l2": "saveinc", "status": 200, "ms": 1.4, "incremental": null}
+{"l2": "queue", "ms": 0.0}
+{"l2": "preload", "status": 200, "ms": 1.1, "tokens": 9000, "partial": null}
+{"l2": "saveinc", "status": 200, "ms": 1.0, "incremental": null}
+{"l2": "queue", "ms": 0.1}
+{"l2": "preload", "status": 200, "ms": 0.9, "tokens": 9000, "partial": null}
+{"l2": "saveinc", "status": 200, "ms": 0.8, "incremental": null}
+.{"l2": "queue", "ms": 0.1}
+{"l2": "saveinc", "status": 200, "ms": 1.2, "incremental": null}
+{"l2": "queue", "ms": 0.0}
+{"l2": "preload", "status": 200, "ms": 0.8, "tokens": 9000, "partial": null}
+{"l2": "saveinc", "status": 200, "ms": 1.1, "incremental": null}
+.{"l2": "queue", "ms": 0.1}
+{"l2": "saveinc", "status": 200, "ms": 1.6, "incremental": null}
+.{"l2": "queue", "ms": 0.1}
+{"l2": "saveinc", "status": 200, "ms": 1.4, "incremental": null}
+......Strata 手动无头对比 failed。报告 <redacted-path>
+.Strata 开始 spec/形状/宽 lookup 无头对比，共 8 组；完成后开放服务。报告 <redacted-path>
+Strata 手动无头对比 failed。报告 <redacted-path>
+.....Strata 无头对照 shape2/fixture 预填充 10 ms，解码 80.0 token/s，输出 8 token。
+...............
+----------------------------------------------------------------------
+Ran 93 tests in 29.026s
+
+OK

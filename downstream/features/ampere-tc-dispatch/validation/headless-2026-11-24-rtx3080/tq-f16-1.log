@@ -1,0 +1,62 @@
+no MMQ in this build: the fused path against the references alone
+TQK6 + TQK7 - folded: the gate/up input and H rotated per 128 values with random signs
+TQK6 + TQK7 - reference part: 256 tokens, 64 experts, rows per expert: max 230, experts without rows 4
+  fused vs the int8-rounded model (same activation / H rounding, double sums): rel RMS 2.991e-03  worst 5.989e-03
+  fused vs FP32 reference: rel RMS 1.722e-02  worst row max rel 3.081e-02
+  int8-rounded model vs FP32 reference: rel RMS 1.721e-02  worst row max rel 2.966e-02
+TQK6 + TQK7 - folded: the gate/up input and H rotated per 128 values with random signs
+TQK6 + TQK7 - reference part: 33 tokens, 16 experts, rows per expert: max 33, experts without rows 4
+  fused vs the int8-rounded model (same activation / H rounding, double sums): rel RMS 3.050e-03  worst 5.074e-03
+  fused vs FP32 reference: rel RMS 1.714e-02  worst row max rel 2.682e-02
+  int8-rounded model vs FP32 reference: rel RMS 1.713e-02  worst row max rel 2.638e-02
+TQK6 + TQK7 - folded: the gate/up input and H rotated per 128 values with random signs
+TQK6 + TQK7 - reference part: 1 tokens, 16 experts, rows per expert: max 1, experts without rows 6
+  fused vs the int8-rounded model (same activation / H rounding, double sums): rel RMS 2.972e-03  worst 3.616e-03
+  fused vs FP32 reference: rel RMS 1.698e-02  worst row max rel 2.416e-02
+  int8-rounded model vs FP32 reference: rel RMS 1.699e-02  worst row max rel 2.290e-02
+TQK6 + TQK7 - folded: the gate/up input and H rotated per 128 values with random signs
+TQK6 + TQK7 - reference part: 130 tokens, 32 experts, rows per expert: max 124, experts without rows 4
+  fused vs the int8-rounded model (same activation / H rounding, double sums): rel RMS 3.012e-03  worst 5.290e-03
+  fused vs FP32 reference: rel RMS 1.727e-02  worst row max rel 2.827e-02
+  int8-rounded model vs FP32 reference: rel RMS 1.725e-02  worst row max rel 2.834e-02
+TQK6 + TQK7 - folded: the gate/up input and H rotated per 128 values with random signs
+TQK6 + TQK7 - reference part: 517 tokens, 32 experts, rows per expert: max 475, experts without rows 4
+  fused vs the int8-rounded model (same activation / H rounding, double sums): rel RMS 2.982e-03  worst 5.751e-03
+  fused vs FP32 reference: rel RMS 1.718e-02  worst row max rel 3.210e-02
+  int8-rounded model vs FP32 reference: rel RMS 1.717e-02  worst row max rel 3.053e-02
+TQK6 + TQK7 - folded: the gate/up input and H rotated per 128 values with random signs
+TQK6 + TQK7 - reference part: 640 tokens, 16 experts, rows per expert: max 627, experts without rows 4
+  fused vs the int8-rounded model (same activation / H rounding, double sums): rel RMS 2.993e-03  worst 5.863e-03
+  fused vs FP32 reference: rel RMS 1.720e-02  worst row max rel 3.256e-02
+  int8-rounded model vs FP32 reference: rel RMS 1.719e-02  worst row max rel 3.094e-02
+TQ2_T + TQ2_T - folded: the gate/up input and H rotated per 128 values with random signs
+TQ2_T + TQ2_T - reference part: 256 tokens, 64 experts, rows per expert: max 231, experts without rows 4
+  fused vs the int8-rounded model (same activation / H rounding, double sums): rel RMS 2.992e-03  worst 6.057e-03
+  fused vs FP32 reference: rel RMS 1.720e-02  worst row max rel 2.895e-02
+  int8-rounded model vs FP32 reference: rel RMS 1.718e-02  worst row max rel 2.914e-02
+TQ2_T + TQ2_T - folded: the gate/up input and H rotated per 128 values with random signs
+TQ2_T + TQ2_T - reference part: 33 tokens, 16 experts, rows per expert: max 31, experts without rows 4
+  fused vs the int8-rounded model (same activation / H rounding, double sums): rel RMS 2.992e-03  worst 5.331e-03
+  fused vs FP32 reference: rel RMS 1.721e-02  worst row max rel 2.466e-02
+  int8-rounded model vs FP32 reference: rel RMS 1.721e-02  worst row max rel 2.563e-02
+TQ2_T + TQ2_T - folded: the gate/up input and H rotated per 128 values with random signs
+TQ2_T + TQ2_T - reference part: 1 tokens, 16 experts, rows per expert: max 1, experts without rows 6
+  fused vs the int8-rounded model (same activation / H rounding, double sums): rel RMS 3.024e-03  worst 4.154e-03
+  fused vs FP32 reference: rel RMS 1.729e-02  worst row max rel 2.024e-02
+  int8-rounded model vs FP32 reference: rel RMS 1.726e-02  worst row max rel 2.063e-02
+TQ2_T + TQ2_T - folded: the gate/up input and H rotated per 128 values with random signs
+TQ2_T + TQ2_T - reference part: 130 tokens, 32 experts, rows per expert: max 124, experts without rows 4
+  fused vs the int8-rounded model (same activation / H rounding, double sums): rel RMS 2.998e-03  worst 5.461e-03
+  fused vs FP32 reference: rel RMS 1.720e-02  worst row max rel 2.961e-02
+  int8-rounded model vs FP32 reference: rel RMS 1.719e-02  worst row max rel 3.012e-02
+TQ2_T + TQ2_T - folded: the gate/up input and H rotated per 128 values with random signs
+TQ2_T + TQ2_T - reference part: 517 tokens, 32 experts, rows per expert: max 472, experts without rows 4
+  fused vs the int8-rounded model (same activation / H rounding, double sums): rel RMS 2.986e-03  worst 6.065e-03
+  fused vs FP32 reference: rel RMS 1.717e-02  worst row max rel 3.070e-02
+  int8-rounded model vs FP32 reference: rel RMS 1.716e-02  worst row max rel 3.039e-02
+TQ2_T + TQ2_T - folded: the gate/up input and H rotated per 128 values with random signs
+TQ2_T + TQ2_T - reference part: 640 tokens, 16 experts, rows per expert: max 628, experts without rows 4
+  fused vs the int8-rounded model (same activation / H rounding, double sums): rel RMS 2.985e-03  worst 6.182e-03
+  fused vs FP32 reference: rel RMS 1.717e-02  worst row max rel 3.013e-02
+  int8-rounded model vs FP32 reference: rel RMS 1.716e-02  worst row max rel 3.050e-02
+prefill fused MoE (native formats) parity passed

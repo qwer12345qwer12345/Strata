@@ -1,0 +1,187 @@
+{
+  "phase": "vision",
+  "status": "failed",
+  "cases": [
+    {
+      "case": "warmup",
+      "target_tokens": 64,
+      "first_content_ms": 289.013,
+      "wall_ms": 1347.094,
+      "finish": "length",
+      "stream": {
+        "content_events": 64,
+        "gap_p50_ms": 19.86,
+        "gap_p90_ms": 38.481,
+        "gap_p95_ms": 44.39,
+        "gap_p99_ms": 51.459,
+        "gap_max_ms": 51.459
+      },
+      "timings": {
+        "prompt_n": 23,
+        "prompt_ms": 249.9,
+        "predicted_n": 64,
+        "predicted_ms": 1089.2,
+        "predicted_per_token_ms": 17.019,
+        "predicted_per_second": 58.8,
+        "prompt_per_token_ms": 10.865,
+        "prompt_per_second": 92.0,
+        "draft_n": 36,
+        "draft_n_accepted": 29,
+        "cache_n": 0
+      },
+      "output_sha256": "8de42007aa910c33bbcbda0a29e2b97e6858ba013ab07f59bbbea1b7e6462d17",
+      "verify_rounds": 35,
+      "verify_width_mean": 2.03,
+      "tokens_per_round": 1.83,
+      "ms_per_round": 31.12,
+      "expert_file_reads": 0,
+      "expert_mb_accounted": 5580.7
+    },
+    {
+      "case": "image_cold",
+      "target_tokens": 64,
+      "first_content_ms": 2970.414,
+      "wall_ms": 3044.669,
+      "finish": "stop",
+      "stream": {
+        "content_events": 5,
+        "gap_p50_ms": 0.025,
+        "gap_p90_ms": 37.475,
+        "gap_p95_ms": 37.475,
+        "gap_p99_ms": 37.475,
+        "gap_max_ms": 37.475
+      },
+      "timings": {
+        "prompt_n": 47,
+        "prompt_ms": 505.7,
+        "predicted_n": 6,
+        "predicted_ms": 89.7,
+        "predicted_per_token_ms": 14.95,
+        "predicted_per_second": 66.9,
+        "prompt_per_token_ms": 10.76,
+        "prompt_per_second": 92.9,
+        "draft_n": 6,
+        "draft_n_accepted": 3,
+        "cache_n": 0
+      },
+      "output_sha256": "4bd1193d04bac374348fd108b4fc42c8fe1e07fac6a9fc46fb613e80a4035c21",
+      "verify_rounds": 3,
+      "verify_width_mean": 3.0,
+      "tokens_per_round": 2.0,
+      "ms_per_round": 29.91,
+      "expert_file_reads": 0,
+      "expert_mb_accounted": 0.0
+    },
+    {
+      "case": "image_cached",
+      "target_tokens": 64,
+      "first_content_ms": 66.251,
+      "wall_ms": 123.366,
+      "finish": "stop",
+      "stream": {
+        "content_events": 5,
+        "gap_p50_ms": 0.076,
+        "gap_p90_ms": 35.32,
+        "gap_p95_ms": 35.32,
+        "gap_p99_ms": 35.32,
+        "gap_max_ms": 35.32
+      },
+      "timings": {
+        "prompt_n": 7,
+        "prompt_ms": 46.4,
+        "predicted_n": 6,
+        "predicted_ms": 73.3,
+        "predicted_per_token_ms": 12.217,
+        "predicted_per_second": 81.9,
+        "prompt_per_token_ms": 6.629,
+        "prompt_per_second": 150.9,
+        "draft_n": 4,
+        "draft_n_accepted": 3,
+        "cache_n": 40
+      },
+      "output_sha256": "122fe9a2bd27419eb72bd81503ffbc8ee73a0b309ff84cc9112391afdd1d8b95",
+      "verify_rounds": 3,
+      "verify_width_mean": 2.33,
+      "tokens_per_round": 2.0,
+      "ms_per_round": 24.43,
+      "expert_file_reads": 0,
+      "expert_mb_accounted": 0.0
+    },
+    {
+      "case": "text_after_restore",
+      "target_tokens": 3072,
+      "first_content_ms": 1055.2,
+      "wall_ms": 21934.079,
+      "finish": "length",
+      "stream": {
+        "content_events": 2554,
+        "gap_p50_ms": 0.011,
+        "gap_p90_ms": 20.013,
+        "gap_p95_ms": 96.65,
+        "gap_p99_ms": 102.2,
+        "gap_max_ms": 105.094
+      },
+      "timings": {
+        "prompt_n": 89,
+        "prompt_ms": 1035.6,
+        "predicted_n": 3072,
+        "predicted_ms": 20894.6,
+        "predicted_per_token_ms": 6.802,
+        "predicted_per_second": 147.0,
+        "prompt_per_token_ms": 11.636,
+        "prompt_per_second": 85.9,
+        "draft_n": 2773,
+        "draft_n_accepted": 2745,
+        "cache_n": 0
+      },
+      "output_sha256": "41b374bc68068e6d1d0a7aac2ed8851630ae1fa2abad060dab26ce76576165db",
+      "verify_rounds": 327,
+      "verify_width_mean": 9.48,
+      "tokens_per_round": 9.39,
+      "ms_per_round": 63.9,
+      "expert_file_reads": 0,
+      "expert_mb_accounted": 0.0
+    }
+  ],
+  "memory": {
+    "min_available_mib": 1924,
+    "max_new_swap_mib": 0
+  },
+  "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --vram-segment-mib 128 --prefill auto:8192 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --ple-gguf <redacted-path> --session-save-reclaim --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+  "resources": [
+    "strata generate: PCIe probe: 25.2 GB/s host->device (best of 25.2 25.2 25.2 25.2) -> pcie_frac 0.55 (default 0.55)",
+    "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+    "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+    "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+    "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+    "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+    "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+    "FileExpertSource: 2252 of the prompt path's 2252 lendable slots keep their experts in RAM too",
+    "strata generate: resident RAM mode: 21.03 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+    "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 21.0 GiB RAM copy (2252 lend slots kept), file tier 0.0 GiB; 1.5 GiB available for the page cache; PCIe 25.2 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+    "08:29:21 strata serve: prompt chunk auto: 8192 tokens, a 96-slot ring",
+    "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 2 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+    "08:29:21 strata serve: 558 MiB of VRAM free with everything loaded"
+  ],
+  "error": "logged Ampere CUDA path differs from the requested mode",
+  "spec": {
+    "suite": "vision-lease-v1",
+    "automatic_tests": false,
+    "checks": [
+      "text warmup",
+      "cold synthetic image",
+      "same image cached",
+      "3072-token text after expert restoration"
+    ],
+    "requires": "full resident RAM complement and zero decode expert file reads",
+    "image_fixture_sha256": "d0c919113adf862590eb0cdd7533b65cff70784717507c8595be181f8769f1ec"
+  },
+  "lease_begins": 1,
+  "lease_ends": 1,
+  "borrow_records": [
+    "released_mib=1610 restore_experts=1608 vram_free_mib=2052 staging_bytes=1049600 elapsed_ms=15.5"
+  ],
+  "restore_records": [
+    "restored_experts=1608 elapsed_ms=311.3"
+  ]
+}
