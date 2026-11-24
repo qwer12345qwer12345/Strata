@@ -679,6 +679,7 @@ struct ExpertDispatch {
     /// `res_dirty_idx`); `in_flight`: experts the adaptive tier is copying in.
     int fetch_admit = 0;
     bool fetch_resident = false;          ///< resident-RAM mode: direct admissions must exchange complementary ownership
+    const uint8_t* fetch_pin = nullptr;    ///< profile-pinned (layer, expert) entries protected from adaptive eviction
     bool fetch_exchange_active = false;   ///< staged exchanges belong to this verifier window, not the adaptive tier
     float fetch_min = 1.0f, fetch_margin = 0.5f;
     struct FetchExchange { int32_t layer, in, out, slot; int64_t q; };

@@ -45,6 +45,7 @@ Dflash2Drafter::~Dflash2Drafter() {
     if (cs_) cudaStreamSynchronize(cs_);
     for (cudaGraphExec_t& e : exec_)
         if (e) cudaGraphExecDestroy(e);
+    if (wide_exec_) cudaGraphExecDestroy(wide_exec_);
     auto fr = [](void* p) { if (p) cudaFree(p); };
     if (h_logq_) cudaFreeHost(h_logq_);
     if (h_logd_) cudaFreeHost(h_logd_);
@@ -731,6 +732,7 @@ void Dflash2Drafter::set_max_drafts(int n) {
     cudaDeviceSynchronize();
     for (auto& e : exec_)
         if (e) { cudaGraphExecDestroy(e); e = nullptr; }
+    if (wide_exec_) { cudaGraphExecDestroy(wide_exec_); wide_exec_ = nullptr; }
     graph_taps_ = nullptr;
     ndraft_ = n;
 }
@@ -1155,6 +1157,48 @@ bool Dflash2Drafter::context_wait(std::string& err) {
 
 bool Dflash2Drafter::draft(const float* taps, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err) {
     return draft_launch(taps, n_new, pos0, anchor, err) && draft_finish(drafts, probs, err);
+}
+
+bool Dflash2Drafter::draft_extended(const float* taps, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err) {
+    if (n_new >= 1 && n_new <= kRows) return draft(taps, n_new, pos0, anchor, drafts, probs, err);
+    const char* enabled = std::getenv("STRATA_DF2_WIDE_CONTEXT");
+    if (!enabled || std::strcmp(enabled, "1") != 0 || n_new <= kRows || n_new > 16 ||
+        !bound_ || !taps || !landing_ || launched_ || (graph_taps_ && graph_taps_ != taps)) {
+        err = "dflash2: wide context requires STRATA_DF2_WIDE_CONTEXT=1, stable taps and 9..16 committed rows";
+        return false;
+    }
+    const OnDevice on_device(device_);
+    const auto t0 = Clock::now();
+    // Reuse the narrow context scratch. A 9..16-row lookup must not allocate the
+    // large prompt-context batch arena. Chunking also matches ring-log rebuild GEMMs.
+    const size_t row = taps_.size() * (size_t) N_;
+    for (int from = 0; from < n_new - 1; from += kRows) {
+        const int count = std::min(kRows, n_new - 1 - from);
+        if (!context(taps + (size_t) from * row, count, pos0 + from, err)) return false;
+    }
+    if (cudaMemcpyAsync(landing_, taps + (size_t) (n_new - 1) * row, row * sizeof(float), cudaMemcpyDeviceToDevice, cs_) != cudaSuccess) {
+        err = "dflash2: wide context landing copy failed";
+        return false;
+    }
+    const double prefix_ms = ms_since(t0);
+    // Keep all normal graphs bound to their original buffer. The synchronous bridge
+    // borrows slot 1 only while using its own graph, so subsequent narrow calls replay
+    // exactly the original graph. Restore on every return, including capture failures.
+    struct Restore {
+        cudaGraphExec_t &slot, &wide;
+        const float*& taps;
+        cudaGraphExec_t old;
+        const float* old_taps;
+        ~Restore() { wide = slot; slot = old; taps = old_taps; }
+    } restore{exec_[1], wide_exec_, graph_taps_, exec_[1], graph_taps_};
+    exec_[1] = wide_exec_;
+    graph_taps_ = landing_;
+    if (!draft(landing_, 1, pos0 + n_new - 1, anchor, drafts, probs, err)) return false;
+    ms_draft += prefix_ms;
+    ++wide_rounds;
+    wide_rows += n_new;
+    if (wide_rounds == 1) std::fprintf(stderr, "dflash2: wide context bridge active (%d committed rows, unchanged 8-row block)\n", n_new);
+    return true;
 }
 
 bool Dflash2Drafter::draft_launch(const float* taps, int n_new, int64_t pos0, int32_t anchor, std::string& err) {

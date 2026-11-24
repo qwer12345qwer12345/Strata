@@ -111,6 +111,9 @@ struct Fixture {
             for (size_t j=0;j<data.size();++j) data[j]=(uint8_t)(salt+i*31+j*7+j/257);
             if (!data.empty()) cuda_check(cudaMemcpy(sources[i],data.data(),data.size(),cudaMemcpyDefault));
         }
+        // Pageable H2D copies may return after staging. Snapshot copies use a nonblocking
+        // stream, so finish fixture writes before a capture/restore can read these bytes.
+        cuda_check(cudaDeviceSynchronize());
     }
     void fill_after(uint8_t salt, int64_t first_dirty) {
         for (size_t i=0;i<sources.size();++i) {
@@ -390,6 +393,7 @@ int main() {
             check(conversation_kv_restore(a,f.state,f.g,upto,index,err),"restore A over B");
             cuda_check(cudaDeviceSynchronize());
             check(conversation_kv_save(restored,f.state,f.g,upto,index,err),"read back restored A");
+            if (!equal(a,restored)) std::fprintf(stderr,"DETAIL fmt=%d mode=%d upto=%lld k=%d v=%d ks=%d vs=%d pooled=%d\n",fmt,mode,(long long)upto,a.k==restored.k,a.v==restored.v,a.k_scale==restored.k_scale,a.v_scale==restored.v_scale,a.pooled==restored.pooled);
             check(equal(a,restored),"A/B/A byte-exact K/V and indexer state");
             uint64_t fingerprint = 0;
             check(conversation_kv_verify(a,f.state,f.g,upto,index,fingerprint,err),"verify restored authoritative and resident bytes without rewriting them");

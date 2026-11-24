@@ -5532,6 +5532,7 @@ void expert_pool_dispatch_multi(ExpertDispatch& d, const float* x_f, const int32
             int nv = 0;
             for (int32_t e = 0; e < (int32_t) d.n_expert && nc > 0; ++e) {
                 if (d.res_mut[lb + (size_t) e] < 0 || d.fetch_mark[(size_t) e] != 0 ||
+                    (d.fetch_pin != nullptr && d.fetch_pin[lb + (size_t) e] != 0) ||
                     (d.fetch_resident && resident_file->has_resident(d.layers, e))) continue;
                 if (nv < nc) vic[nv++] = e;
                 else if (use[e] < use[vic[nv - 1]]) vic[nv - 1] = e;

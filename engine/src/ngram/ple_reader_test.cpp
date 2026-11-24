@@ -548,7 +548,44 @@ void ple_files_are_told_from_model_shards(const std::string& dir) {
     std::printf("ple_gguf_table_only: %zu files checked\n", cases.size());
 }
 
+void raw_bf16_round_trip(const std::string& dir) {
+    const auto& f = k::ple_format_info(k::PleFormat::BF16);
+    const uint32_t count = 4096;
+    const std::string path = write_format_table(dir, f, count);
+    for (auto mode : {k::PleIo::Direct, k::PleIo::Mmap}) for (bool threaded : {false, true}) {
+        k::PleTable t;
+        k::PleIoOptions io; io.mode = mode; io.io_thread = threaded;
+        io.cache_rows = 32; io.max_inflight = 8;
+        std::string err;
+        CHECK(t.open(path, err, io), "raw BF16 open: %s", err.c_str());
+        for (size_t tokens : {size_t(1), size_t(17), size_t(259)}) {
+            const size_t nr = tokens * k::PLE_N_HEADS;
+            std::vector<uint32_t> ids(nr);
+            for (size_t i = 0; i < nr; ++i) ids[i] = (uint32_t)((i * 193) % (count + 3));
+            ids[0] = count; ids[1] = count - 1; ids[2] = 0; ids[3] = count - 1;
+            std::vector<uint8_t> raw(nr * f.row_bytes, 0xcc), want(f.row_bytes);
+            t.prefetch_rows(ids.data());
+            CHECK(t.gather_raw_bf16(ids.data(), tokens, raw.data(), err), "raw BF16 gather: %s", err.c_str());
+            for (size_t i = 0; i < nr; ++i) {
+                if (ids[i] >= count) std::fill(want.begin(), want.end(), 0);
+                else expected_row(ids[i], f.row_bytes, want.data());
+                CHECK(std::memcmp(raw.data()+i*f.row_bytes, want.data(), want.size())==0,
+                      "raw BF16 bytes differ at row %zu", i);
+            }
+        }
+        CHECK(t.gather_raw_bf16(nullptr, 0, nullptr, err), "empty raw BF16");
+        CHECK(!t.gather_raw_bf16(nullptr, SIZE_MAX, nullptr, err), "BF16 extent overflow refused");
+        uint32_t ids[16] = {}; uint8_t raw[16 * k::PLE_ROW_BYTES_BF16];
+        CHECK(t.issue(ids), "pending BF16 token issue");
+        CHECK(!t.gather_raw_bf16(ids, 1, raw, err), "pending token refuses raw gather");
+        float values[16 * k::PLE_HEAD_DIM];
+        CHECK(t.collect(values, err), "pending token can still collect");
+    }
+    std::filesystem::remove(path);
+}
+
 void all_formats_round_trip(const std::string& dir) {
+    raw_bf16_round_trip(dir);
     ple_files_are_told_from_model_shards(dir);     // #6026: which --ple-gguf files stay out of the dense shard list
     bf16_widening_is_exact();                      // BF16's own claim: a shift, exact for every pattern
     bad_sizes_are_refused(dir);

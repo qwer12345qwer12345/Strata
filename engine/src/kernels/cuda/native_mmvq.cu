@@ -3583,12 +3583,30 @@ static int dense_i8_tc_min_t() {
     return v;
 }
 
+// Allow only independently measured short-window shapes, without lowering the global 9-row threshold.
+// These are dense projections, not the TQ experts; tiny matrices and Q8_0 keep the original path.
+static bool ampere_dense_i8_shape(int type, int K, int N, int T) {
+#if !defined(__HIPCC__)
+    static const bool on = [] {
+        const char* e=std::getenv("STRATA_DENSE_I8_AMPERE_SHAPES");
+        if (!e || e[0]!='1') return false;
+        int dev=0,major=0,minor=0;
+        return cudaGetDevice(&dev)==cudaSuccess &&
+               cudaDeviceGetAttribute(&major,cudaDevAttrComputeCapabilityMajor,dev)==cudaSuccess &&
+               cudaDeviceGetAttribute(&minor,cudaDevAttrComputeCapabilityMinor,dev)==cudaSuccess && major==8 && minor==6;
+    }();
+    return on && K==2560 && N==10240 &&
+           (((type==12 || type==13) && T>=6 && T<=8) || (type==14 && T==8));
+#else
+    return false;
+#endif
+}
 void native_mmvq(int ggml_type, const void* weights, const void* x_q8_1, float* y,
                  int n_in, int n_out, int ncols, void* stream) {
     // Clean-room MIT coalesced INT8 Tensor Core path (sm_80+: RTX 3090 & RTX 5090):
-    // Evaluates T >= min_t (default 3; STRATA_DENSE_I8_TC=0 disables; STRATA_DENSE_I8_TC_MIN_T overrides)
+    // Evaluates T >= min_t (default 9; STRATA_DENSE_I8_TC=0 disables; STRATA_DENSE_I8_TC_MIN_T overrides)
     // up to T=16 in a single coalesced smem-staged weight pass using mma.m16n8k32/k16.
-    if (n_out >= 1024 && ncols >= dense_i8_tc_min_t() && ncols <= 16 &&
+    if (n_out >= 1024 && (ncols >= dense_i8_tc_min_t() || ampere_dense_i8_shape(ggml_type,n_in,n_out,ncols)) && ncols <= 16 &&
         dense_i8_tc_type_ok(ggml_type) && dense_i8_tc_decode_enabled()) {
         if (dense_i8_tc_mmvq(ggml_type, weights, x_q8_1, y, n_in, n_out, ncols, stream)) {
             strata::dispatch::kernel(strata::dispatch::kDense, 30, ggml_type, n_in, n_out, ncols);

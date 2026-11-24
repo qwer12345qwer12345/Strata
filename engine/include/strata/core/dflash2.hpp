@@ -137,6 +137,12 @@ public:
     /// selector's pick and its probability).  The taps pointer must be the same device buffer on every call (graphs are captured on it).
     bool draft(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err);
 
+    /// Opt-in solo serve bridge for lookup windows of 9..16 rows. Prefix rows enter the
+    /// existing context ring; only the final row launches the unchanged eight-row block.
+    /// Synchronous: the caller owns the taps until return. Normal 1..8 calls are unchanged.
+    bool draft_extended(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err);
+    uint64_t wide_rounds = 0, wide_rows = 0;
+
     /// draft() in two halves: draft_launch queues the round's graph and returns, draft_finish waits and reads the picks.  Several drafters (batch slots, each on its
     /// own stream) can launch first and finish after, so their graphs run at the same time.
     bool draft_launch(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, std::string& err);
@@ -235,6 +241,7 @@ private:
     int32_t *toptok_ = nullptr, *out_tok_ = nullptr;
     uint32_t* topscratch_ = nullptr;
     cudaGraphExec_t exec_[kRows + 1] = {};
+    cudaGraphExec_t wide_exec_ = nullptr;   ///< one-row graph bound to the existing landing buffer
     const float* graph_taps_ = nullptr;
     int ndraft_ = kDrafts;          ///< drafts a window can use (set_max_drafts)
     int64_t have_ctx_ = 0;

@@ -726,9 +726,9 @@ __global__ void __launch_bounds__(Q32_THREADS) gr_up_q32_kernel(GrMulti m) {
         const float xi = mixed_s[warp][lane];
         float amax = fabsf(xi), sum = xi;
 #pragma unroll
-        for (int o = 16; o > 0; o >>= 1) amax = fmaxf(amax, shfl_xor_persist(amax, o));
+        for (int o = 16; o > 0; o >>= 1) amax = fmaxf(amax, __shfl_xor_sync(0xffffffffu, amax, o));
 #pragma unroll
-        for (int o = 16; o > 0; o >>= 1) sum += shfl_xor_persist(sum, o);
+        for (int o = 16; o > 0; o >>= 1) sum += __shfl_xor_sync(0xffffffffu, sum, o);
         const float d = q8_1_finite(q81_div(amax, 127.0f));
         const int8_t q = q8_1_quant(xi, d, amax);
         GrQ81* y = reinterpret_cast<GrQ81*>(m.a[warp].q8_mixed) + d0 / 32;
@@ -4240,7 +4240,7 @@ __global__ void __launch_bounds__(THREADS) persist_kernel(PArgs f) {
     __shared__ __align__(16) float lo[T][LR];
     __shared__ float s_rs[T][HC];
     __shared__ float g[T][HC][UPC];
-    const int tid = threadIdx.x, lane = tid & 31, b = blockIdx.x;
+    const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, b = blockIdx.x;
     const FusedGrArgs& a0 = f.a[0];
     // (A) block b: columns [128 b, 128 b + 128) of D (one stream): R' * w_norm into LDS, the slice's sum of squares, and
     // the UNSCALED partial dots of the 320 down + 4 inject rows (w . xn = sum_c rs[c] (w[:, c] . x'[c]))
@@ -4419,9 +4419,9 @@ __global__ void __launch_bounds__(THREADS) persist_kernel(PArgs f) {
         const float xi = f.a[warp].mixed[b * UPC + lane];
         float amax = fabsf(xi), sum = xi;
 #pragma unroll
-        for (int o = 16; o > 0; o >>= 1) amax = fmaxf(amax, __shfl_xor_sync(0xffffffffu, amax, o));
+        for (int o = 16; o > 0; o >>= 1) amax = fmaxf(amax, shfl_xor_persist(amax, o));
 #pragma unroll
-        for (int o = 16; o > 0; o >>= 1) sum += __shfl_xor_sync(0xffffffffu, sum, o);
+        for (int o = 16; o > 0; o >>= 1) sum += shfl_xor_persist(sum, o);
         const float d = q8_1_finite(q81_div(amax, 127.0f));
         GrQ81* y = reinterpret_cast<GrQ81*>(f.a[warp].q8_mixed) + b;
         y->qs[lane] = q8_1_quant(xi, d, amax);

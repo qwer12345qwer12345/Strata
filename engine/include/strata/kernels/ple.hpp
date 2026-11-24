@@ -128,5 +128,8 @@ bool ple_block_available();
 /// STRATA_PLE_COMPACT: `rows` raw IQ4_NL PLE rows (PleTable::gather_raw_iq4nl, PLE_ROW_BYTES each) to 160 floats each,
 /// the floats iq4nl_dequant_row writes (d times the code's value, one multiply), on `stream`.
 void ple_iq4nl_dequant(const uint8_t* raw, int64_t rows, float* out, void* stream);
+/// Bit-preserving BF16 -> FP32 widening (uint16 << 16), including subnormals, signed zero and NaN payloads.
+/// No tensor conversion or arithmetic rounding; asynchronous on stream.
+void ple_bf16_widen(const uint8_t* raw, int64_t rows, float* out, void* stream);
 
 }  // namespace strata::kernels

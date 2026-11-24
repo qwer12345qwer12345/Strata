@@ -74,10 +74,10 @@ __device__ __forceinline__ void df2_topk_step3(float& bv, int& bi, int& bp) {
     if (ov > bv || (ov == bv && oi < bi)) { bv = ov; bi = oi; bp = op; }
 }
 
-template <int R, typename SegT>
-__device__ __forceinline__ void df2_reduce_store_cols(float (&acc)[R][8], int lane, int ncols, const SegT& sg, int row_base) {
+template <int R, int NC, typename SegT>
+__device__ __forceinline__ void df2_reduce_store_cols(float (&acc)[R][NC], int lane, int ncols, const SegT& sg, int row_base) {
 #pragma unroll
-    for (int c = 0; c < 8; ++c) {
+    for (int c = 0; c < NC; ++c) {
         if (c >= ncols) break;
         float vr[R];
 #pragma unroll
@@ -996,7 +996,7 @@ __global__ void __launch_bounds__(WARPS * 32) gemm4_kernel(Df2Segs segs, const i
 // The Q4_0 GEMM with R rows a warp (R = 4, 2, 1) instead of 8, as gemm_rows_kernel is to gemm8_kernel: a group of 8 rows is shared by 8 / R warps, each reading only its
 // rows' nibbles and scales; every output keeps the arithmetic of gemm4_kernel (same steps in the same order per lane, the same xsum and shuffle tree), so the result is bitwise
 // the same.  The activations' per-column sum is recomputed by each of the group's warps (4 dp4a a column and step).
-template <int WARPS, int R, int UNR>
+template <int WARPS, int R, int UNR, int NC = 8>
 __global__ void __launch_bounds__(WARPS * 32) gemm4_rows_kernel(Df2Segs segs, const int8_t* __restrict__ xq, const float* __restrict__ xd, int n_in, int ncols) {
     constexpr int SUBS = 8 / R;
     const int warp = threadIdx.x >> 5, lane = threadIdx.x & 31;
@@ -1008,11 +1008,11 @@ __global__ void __launch_bounds__(WARPS * 32) gemm4_rows_kernel(Df2Segs segs, co
     const uint2* wq = reinterpret_cast<const uint2*>(sg.q + (size_t) row0 * (n_in / 2)) + lane + sub * R * 32;
     const __half* wd = sg.d + (size_t) row0 * nb + (lane >> 1) + sub * R * 16;
     const int4* xv = reinterpret_cast<const int4*>(xq) + lane;
-    float acc[R][8];
+    float acc[R][NC];
 #pragma unroll
     for (int r = 0; r < R; ++r)
 #pragma unroll
-        for (int c = 0; c < 8; ++c) acc[r][c] = 0.0f;
+        for (int c = 0; c < NC; ++c) acc[r][c] = 0.0f;
 #pragma unroll UNR
     for (int st = 0; st < steps; ++st) {
         int4 w[R];
@@ -1023,11 +1023,11 @@ __global__ void __launch_bounds__(WARPS * 32) gemm4_rows_kernel(Df2Segs segs, co
             w[r] = make_int4((int) (raw.x & 0x0F0F0F0Fu), (int) ((raw.x >> 4) & 0x0F0F0F0Fu), (int) (raw.y & 0x0F0F0F0Fu), (int) ((raw.y >> 4) & 0x0F0F0F0Fu));
             dw[r] = __half2float(wd[(size_t) st * 128 + r * 16]);
         }
-        float xs[8];
+        float xs[NC];
 #pragma unroll
-        for (int c = 0; c < 8; ++c) xs[c] = xd[(size_t) c * nb + st * 16 + (lane >> 1)];
+        for (int c = 0; c < NC; ++c) xs[c] = xd[(size_t) c * nb + st * 16 + (lane >> 1)];
 #pragma unroll
-        for (int c = 0; c < 8; ++c) {
+        for (int c = 0; c < NC; ++c) {
             const int4 x = xv[(size_t) c * (n_in / 16) + st * 32];
             int xsum = STRATA_DP4A(0x01010101, x.x, 0);
             xsum = STRATA_DP4A(0x01010101, x.y, xsum);
@@ -1766,6 +1766,23 @@ void df2_attention_variant(int v) { g_attn_variant = v; }
 // 110 SMs) for every matrix, within 0-2 us of the best on a 188-SM RTX PRO 6000.  gfx12 (R9700, gfx1201, p620, 8 columns, cold weights, two bench runs): the same shape with unroll 1
 // (26) is 25-45% faster on every matrix of 1000 rows and more (gate+up 56 -> 44.5 us, down 39 -> 23.4, qkv 26.8 -> 21.4, o 23.6 -> 14.9, fc 61.5 -> 35.2, kv 15.2 -> 10.0), and one
 // warp a row with unroll 1 (31) is 2x faster on the 256 and 640 row matrices (akp / mkp 12.1 -> 6.3 us, selector 11.1 -> 5.2); all bitwise the same results.
+// Reuse the exact integer-dot row variants measured on AMD, with an SM86-specific shape table.
+// Opt-in: the original auto table and forced variants retain their meanings.
+static bool df2_ampere_tuning() {
+#if !defined(__HIPCC__)
+    static const bool on = [] {
+        const char* e = std::getenv("STRATA_DF2_AMPERE_TUNING");
+        if (!e || (e[0] != '1' && e[0] != '2')) return false;
+        int dev=0,major=0,minor=0;
+        return cudaGetDevice(&dev)==cudaSuccess &&
+               cudaDeviceGetAttribute(&major,cudaDevAttrComputeCapabilityMajor,dev)==cudaSuccess &&
+               cudaDeviceGetAttribute(&minor,cudaDevAttrComputeCapabilityMinor,dev)==cudaSuccess && major==8 && minor==6;
+    }();
+    return on;
+#else
+    return false;
+#endif
+}
 static int df2_q4_auto(int rows) {
 #if defined(STRATA_USE_HIP)
     static strata::core::PerDeviceFlag<> rdna34_dev;   // per card (#4431): RDNA3 (gfx1100..gfx1151) + RDNA4 (gfx12) Wave32 tuning
@@ -1845,7 +1862,12 @@ void df2_gemm(const Df2Mat* mats, int n, const void* xq, const float* xd, int n_
         }
         return major >= 8;
     }();
-    if (tc_gemm_ok && g_gemm_variant == 0 && ncols >= 2 && rows >= 1024 && (rows & 15) == 0) {
+    static const bool shape_tc = [] { const char* e=std::getenv("STRATA_DF2_GEMM_TC"); return e && e[0]=='2'; }();
+    // Mode 2 uses TC only on the measured QKV shape; all other matrices keep their scalar choice.
+    // Mode 1 is the upstream unrestricted opt-in. Mode 2 requires the measured SM86 tuning flag.
+    const bool qkv_tc = df2_ampere_tuning() && mats[0].q4 && n_in==2560 && n==3 &&
+                        mats[0].n_out==4096 && mats[1].n_out==1024 && mats[2].n_out==1024;
+    if (tc_gemm_ok && (!shape_tc || qkv_tc) && g_gemm_variant == 0 && ncols >= 2 && rows >= 1024 && (rows & 15) == 0) {
         if (mats[0].q4) {
             gemm_tc_kernel<true><<<rows / 16, 128, 0, st>>>(segs, xqp, xd, n_in, ncols);
             check("gemm4_tc");
@@ -1858,7 +1880,25 @@ void df2_gemm(const Df2Mat* mats, int n, const void* xq, const float* xd, int n_
 #endif
     if (mats[0].q4) {   // the Q4_0 pack: 4 warps a block when the rows allow, else 2; the rows-a-warp variants (bitwise the same results) by matrix size
         static const int tune4 = [] { const char* e = std::getenv("STRATA_DF2_GEMM4"); return e ? std::atoi(e) : 0; }();   // 0: the table; 1: 8 rows a warp as before; 10 and up: that variant for every matrix (bench / A/B)
-        int v4 = g_gemm_variant != 0 ? g_gemm_variant : tune4 >= 10 ? tune4 : tune4 != 0 ? 1 : DF2_Q4_AUTO(rows);
+        int auto4 = DF2_Q4_AUTO(rows);
+        if (df2_ampere_tuning()) {
+            if ((rows==2560 && (n_in==7680 || n_in==12800)) || (n_in==2560 && rows<=640)) auto4=31;
+            else if ((n_in==2560 && (rows==15360 || rows==6144 || rows==2048)) ||
+                     (n_in==4096 && rows==2560)) auto4=26;
+        }
+        if (df2_ampere_tuning()) {
+            const char* mode = std::getenv("STRATA_DF2_AMPERE_TUNING");
+            if (mode && mode[0] == '2') {
+                const bool measured = (rows == 2560 && (n_in == 7680 || n_in == 12800 || n_in == 4096)) ||
+                                      (n_in == 2560 && (rows == 15360 || rows == 6144 || rows == 2048 || rows == 640 || rows == 256));
+                if (measured) {
+                    if (ncols <= 2) auto4 = 51;
+                    else if (ncols <= 4) auto4 = rows <= 640 ? 46 : 47;
+                    else auto4 = rows <= 640 ? 31 : 41;
+                }
+            }
+        }
+        int v4 = g_gemm_variant != 0 ? g_gemm_variant : tune4 >= 10 ? tune4 : tune4 != 0 ? 1 : auto4;
 #define DF2_ROWS4_CASE(V, W, R, U) case V: gemm4_rows_kernel<W, R, U><<<(rows / 8) * (8 / R) / W, W * 32, 0, st>>>(segs, xqp, xd, n_in, ncols); break;
         switch (v4) {
             DF2_ROWS4_CASE(10, 4, 4, 2)
@@ -1897,6 +1937,18 @@ void df2_gemm(const Df2Mat* mats, int n, const void* xq, const float* xd, int n_
             DF2_ROWS4_CASE(43, 4, 4, 1)
             DF2_ROWS4_CASE(44, 8, 1, 1)
             DF2_ROWS4_CASE(45, 1, 8, 1)
+#define DF2_COLS4_CASE(V, W, R, U) case V: { \
+    if (ncols == 1) gemm4_rows_kernel<W,R,U,1><<<(rows/8)*(8/R)/W,W*32,0,st>>>(segs,xqp,xd,n_in,ncols); \
+    else if (ncols == 2) gemm4_rows_kernel<W,R,U,2><<<(rows/8)*(8/R)/W,W*32,0,st>>>(segs,xqp,xd,n_in,ncols); \
+    else if (ncols <= 4) gemm4_rows_kernel<W,R,U,4><<<(rows/8)*(8/R)/W,W*32,0,st>>>(segs,xqp,xd,n_in,ncols); \
+    else gemm4_rows_kernel<W,R,U,8><<<(rows/8)*(8/R)/W,W*32,0,st>>>(segs,xqp,xd,n_in,ncols); break; }
+            DF2_COLS4_CASE(46, 1, 1, 1)
+            DF2_COLS4_CASE(47, 2, 2, 1)
+            DF2_COLS4_CASE(48, 2, 1, 1)
+            DF2_COLS4_CASE(49, 1, 2, 1)
+            DF2_COLS4_CASE(50, 4, 2, 1)
+            DF2_COLS4_CASE(51, 2, 2, 2)
+#undef DF2_COLS4_CASE
             case 2: gemm4_kernel<2><<<rows / 16, 64, 0, st>>>(segs, xqp, xd, n_in, ncols); break;
             default: if (rows % 32 == 0) gemm4_kernel<4><<<rows / 32, 128, 0, st>>>(segs, xqp, xd, n_in, ncols);
                      else gemm4_kernel<2><<<rows / 16, 64, 0, st>>>(segs, xqp, xd, n_in, ncols);

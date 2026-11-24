@@ -318,6 +318,9 @@ from serve.frontend import (CALL_END, CALL_START, FUNC_END, FUNC_START, THINK_EN
                             tool_choice_of, unmark_think_literals)
 from serve.mcp import McpCancelled, hub_from_config, resolve_image_results  # noqa: E402
 from serve import appendlog  # noqa: E402
+from l2.cache_control import extend_fields as l2_extend_fields  # L2 RAM control-plane parser
+from l2.cache_control import handle_cache_get as l2_cache_get
+from l2.cache_control import handle_cache_post as l2_cache_post
 from serve import runconfig  # noqa: E402
 from serve import expert_heat  # noqa: E402
 from serve import commit_limit  # noqa: E402
@@ -948,6 +951,8 @@ class StrataEngine:
             pass
         self.ended = False                              # READY: alive from here (restart() set it True, #344)
         self.closing = False                            # #6055: close() is ending this engine (set before its STOP)
+        self.l2_writer_pending = 0
+        self.l2_commits = {}
         # the engine's stdout on a thread, so a request can wait with a timeout (heartbeats, cancel checks)
         self.gen = self.__dict__.get("gen", 0) + 1      # which engine process this is (a request notes its own); first, so
         #                                                 a request that sees the new number sees the new queues (#4451)
@@ -1042,6 +1047,27 @@ class StrataEngine:
                 sample = parse_stage_in_flight_sample(line)
                 if sample is not None and self.proc is proc:
                     self.terminal_stage_sample = {**sample, "observed_monotonic": time.monotonic()}
+                continue
+            # generation-tracking: L2C/L2W pump writer
+            if line.startswith("L2W ") and self.proc is proc:
+                f2 = line.split()
+                if len(f2) >= 3 and f2[1] == "q":
+                    self.l2_writer_pending = int(f2[2])
+                continue
+            if line.startswith("L2C ") and self.proc is proc:
+                f2 = line.split()
+                if len(f2) >= 5:
+                    if not hasattr(self, "l2_commits"): self.l2_commits = {}
+                    rec = {"status": int(f2[3]), "tokens": int(f2[4]), "ts": time.time()}
+                    for item in f2[5:]:
+                        key, sep, value = item.partition("=")
+                        if sep and key in ("copy_bytes", "copy_ms", "saveinc_ms", "writer_ms", "growth_bytes", "copy_used", "inplace"):
+                            try: rec[key] = int(value)
+                            except ValueError: pass
+                    self.l2_commits[(f2[1], int(f2[2]))] = rec
+                    if len(self.l2_commits) > 256:
+                        oldest = min(self.l2_commits, key=lambda k: self.l2_commits[k]["ts"])
+                        del self.l2_commits[oldest]
                 continue
             if line.startswith(("BT ", "BDONE ")) and slot_q:   # --batch: a batch slot's own lines
                 try:
@@ -1254,6 +1280,32 @@ class StrataEngine:
                 return out
             if time.time() > deadline:
                 raise EngineDied("the engine did not answer the VRAM command")
+
+    def vision_lease(self, reserve_mib: int | None, timeout: float = 300.0) -> dict:
+        """Borrow/restore experts only while the service holds its request FIFO."""
+        with self._exclusive_control():
+            if not self.alive():
+                raise EngineDied("the engine is not running")
+            command = "END" if reserve_mib is None else f"BEGIN {int(reserve_mib)}"
+            self.proc.stdin.write("VISION_LEASE " + command + "\n")
+            self.proc.stdin.flush()
+            expected = "idle" if reserve_mib is None else "held"
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                try:
+                    line = self.lines.get(timeout=max(.1, deadline-time.monotonic()))
+                except queue.Empty:
+                    raise EngineDied("the engine did not answer the vision lease command") from None
+                if line is None:
+                    raise EngineDied("the engine ended during a vision lease")
+                if line.startswith("ERR"):
+                    raise ValueError(line[4:].strip())
+                if line.startswith("VISION_LEASE "):
+                    out = dict(item.split("=",1) for item in line.split()[1:] if "=" in item)
+                    if out.get("state") == expected:
+                        print("[strata] " + line.strip(), flush=True)
+                        return out
+            raise EngineDied("vision lease response timed out")
 
     def pen_from_key(self, orig_len: int, prompt_len: int) -> str:
         """` pen_from=N` for a leg that continues a request (prompt + what it generated): where the reply began, Strata's penalty window start. The all-cards split engine
@@ -2715,16 +2767,29 @@ class StrataEngine:
         a step that blocks in one call (a flush, the device transfer): until the next line the wait is that step's
         explicit allowance (at most SESSION_WAIT_MAX_S) when it is longer than engine_silence_s - no more, so a step
         that never ends is still ended."""
-        if action not in ("save", "restore") or any(c in path for c in "\r\n\0"):
+        # L2: restorep (
+        # L2: saveinc + restorepp actions
+        if action not in ("save", "restore", "restorep", "restorepp", "saveinc", "verify") or any(c in path for c in "\r\n\0"):
             raise ValueError("invalid session command")
         try:
-            self.proc.stdin.write(f"{'SAVE' if action == 'save' else 'RESTORE'} {path}\n")
+            cmd = ("SAVEINC" if action == "saveinc" else
+                   "RESTOREPP" if action == "restorepp" else
+                   "RESTOREP" if action == "restorep" else
+                   "VERIFY" if action == "verify" else
+                   "SAVE" if action == "save" else "RESTORE")
+            line = cmd + " " + path
+            if action == "restorepp":
+                ids = getattr(self, '_restorepp_ids', [])
+                line += " " + ",".join(str(i) for i in ids)
+            self.proc.stdin.write(line + "\n")
             self.proc.stdin.flush()
         except OSError:
             raise EngineDied(f"the engine stopped unexpectedly (exit code {self.exit_code()})") from None
         silence = float(self.silence_s or 0)
         heard = time.monotonic()
-        want = "SAVED" if action == "save" else "RESTORED"
+        want = {"saveinc": "SAVEINC'D", "save": "SAVED", "restorep": "RESTOREDP",
+                "restorepp": "RESTOREDP", "verify": "VERIFIED"}.get(action, "RESTORED")
+        alt = "SAVED" if action == "saveinc" else None
 
         def out_of_step(line: str) -> EngineDied:
             self.ended = True                               # not alive from now: the next request restarts it
@@ -2787,8 +2852,43 @@ class StrataEngine:
                 if len(parts) != 4 or parts[1] not in SessionRefused.STATUS or parts[2] not in ("0", "1"):
                     raise out_of_step(line)
                 raise SessionRefused(parts[1], parts[3].strip(), parts[2] == "1")
-            if head == want:
+            if head == want or (alt and head == alt):
                 try:
+                    if head == "VERIFIED":
+                        return {"ok": True}
+                    if head == "RESTOREDP" and len(f) >= 5:
+                        tokens, size = count(f[1]), count(f[2])
+                        ms = float(f[3])
+                        if not math.isfinite(ms) or ms < 0:
+                            raise ValueError
+                        # L2 control-plane serial, old five-field form still accepted.
+                        return l2_extend_fields(f, {"tokens": tokens, "bytes": size, "ms": ms,
+                                                    "partial": f[4] == "1"})
+                    if head == "L2W" and len(f) >= 3 and f[1] == "q":
+                        self.l2_writer_pending = int(f[2])
+                    if head == "L2C" and len(f) >= 5:
+                        rec = {"status": int(f[3]), "tokens": int(f[4]), "ts": time.time()}
+                        for item in f[5:]:
+                            key, sep, value = item.partition("=")
+                            if sep and key in ("copy_bytes", "copy_ms", "saveinc_ms", "writer_ms", "growth_bytes", "copy_used", "inplace"):
+                                try: rec[key] = int(value)
+                                except ValueError: pass
+                        self.l2_commits[(f[1], int(f[2]))] = rec
+                        if len(self.l2_commits) > 256:
+                            oldest = min(self.l2_commits, key=lambda k: self.l2_commits[k]["ts"])
+                            del self.l2_commits[oldest]
+                    if head == "SAVEINC'D":
+                        # L2 v3 + generation-tracking: 6/7/8
+                        if len(f) not in (6, 7, 8):
+                            raise ValueError
+                        tokens, reuse, keep, size = count(f[1]), count(f[2]), count(f[3]), count(f[4])
+                        ms = float(f[5])
+                        if not math.isfinite(ms) or ms < 0:
+                            raise ValueError
+                        return {"tokens": tokens, "bytes": size, "ms": ms, "incremental": True,
+                                "reused": reuse, "kept": keep,
+                                "async_pending": int(f[6]) if len(f) >= 7 else 0,
+                                "gen": int(f[7]) if len(f) == 8 else 0}
                     if len(f) != 4:
                         raise ValueError
                     tokens, size, ms = count(f[1]), count(f[2]), float(f[3])
@@ -2892,7 +2992,17 @@ class Vision:
 
     def __init__(self, cfg: dict, log=None, env: dict | None = None, lazy: bool = False):
         args = self.reader_args(cfg)
-        self.dir = self.work_dir()
+        # /tmp may be tmpfs on a 32GiB Linux host. Lease-mode image caches live
+        # under the disk cache, keeping the existing per-reader lifecycle/eviction.
+        cache_parent = cfg.get("cache_parent")
+        if cache_parent is None and cfg.get("expert_lease") is True:
+            cache_parent = Path(os.environ.get("XDG_CACHE_HOME", str(Path.home()/".cache")))/"strata"/"vision"
+        if cache_parent is not None:
+            parent = Path(cache_parent).expanduser()
+            parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            self.dir = Path(tempfile.mkdtemp(prefix="strata-vision-", dir=parent))
+        else:
+            self.dir = self.work_dir()
         self.spawn = (args, log, env)                   # to start it again after an unload
         # AMD: the GPU reader (strata-vision-hip) has the CPU reader (strata-vision, same program, no GPU runtime) to
         # fall back on when it does not start; _start switches to it by itself
@@ -2911,8 +3021,14 @@ class Vision:
         # opt-in (the vision section's "elastic": true, with the config's "vram_elastic"): the encoder starts with the
         # first picture and stops after elastic_idle_s without one; while it runs, the engine's expert cache keeps
         # elastic_mib of VRAM free for it (Service._vision_up / _vision_idle_down)
+        self.expert_lease = cfg.get("expert_lease") is True
+        if self.expert_lease:
+            if cfg.get("gpu") is not True:
+                raise ValueError("vision.expert_lease requires the GPU reader")
+            # A CPU fallback could exhaust this low-RAM host's complement budget.
+            self.fallback = self.cpu_spawn = None
         self.max_tokens = self.token_limit(cfg)
-        self.elastic = cfg.get("elastic") is True
+        self.elastic = self.expert_lease or cfg.get("elastic") is True
         self.elastic_mib = self.elastic_ask_mib(cfg, self.max_tokens)
         self.elastic_idle_s = float(cfg.get("elastic_idle_s") or 120)
         if not lazy and not self.elastic:
@@ -3914,6 +4030,8 @@ class Service:
         self.keep_awake = None                        # #1727 (opt-in): serve.keepawake.KeepAwake, the config's "prevent_sleep"
         self.fifo = threading.Lock()
         self.slot_save_path = None                    # --slot-save-path: /slots/0?action=save|restore (off when None)
+        self.l2_writer_pending = 0
+        self.l2_commits = {}                          # generation-tracking
         self.embeddings = threading.local()           # the current request's image embeddings file (GENI)
         self.api_key = ""                              # when set, /v1/* needs it (Bearer or x-api-key)
         # #458 (opt-in, the config's "effort_position": "end"): a non-default reasoning effort goes in a short system
@@ -3956,6 +4074,8 @@ class Service:
         self.api_monitor = False
         self.api_requests = collections.deque(maxlen=100)  # bounded I/O in memory; no headers or API keys
         self.request_trace = threading.local()
+        self.restore_events = {}                        # P0: rid -> this request's own restore
+        self.last_restore = None                        # legacy fallback for callers without a gateway rid
         self.history = collections.deque(maxlen=500)    # the last finished requests, newest last (GET /metrics)
         # since the server started (the Monitor's totals, issue #35)
         self.totals = {"since": time.time(), "requests": 0, "prompt_tokens": 0, "reused": 0, "output_tokens": 0,
@@ -3987,6 +4107,7 @@ class Service:
         self.before_load_strict = False                  # #1997: refuse (503) whenever it fails
         self.vram_reserve = None                         # #533: the last POST /v1/vram reserve (None: the start's)
         self.vram_reserve_asked = False                  # a POST /v1/vram was made (vram_reserve None is then asked)
+        self.vision_lease_held = False                   # dedicated transaction, protected by the request FIFO
         self.vision_held = False                         # an elastic encoder holds VRAM the expert cache gave it
         self.vision_no_shrink = False                    # the engine said its cache never shrinks (no --vram-elastic)
         self.vision_no_shrink_said = False
@@ -4004,6 +4125,10 @@ class Service:
         self.images = None                                # serve/images.py's ImageGen when the config has "images"
         self.restore_after_load = None                    # a session file an image job saved before it unloaded
         self.stop_ids = end_token_ids(tokenizer)
+        self.chatml_tool_guard = False
+        role_marker = "<|im_start|>"
+        role_ids = tokenizer.encode(role_marker, parse_special=True) if role_marker in getattr(tokenizer, "control_tokens", ()) else ()
+        self.chatml_role_id = role_ids[0] if len(role_ids) == 1 else None
         self.hy4 = getattr(engine, "hy4_engine", False) is True      # the Hy4-Flash engine: its end tokens, its tagged texts that stay text in a message
         self.inkling = getattr(engine, "inkling_engine", False) is True   # the Inkling-2-Mini engine: its end tokens & channel tags
         if self.hy4:
@@ -4136,7 +4261,40 @@ class Service:
             cancel.set()
         return len(active)
 
-    def slot_action(self, slot: str, action: str, filename) -> tuple[int, dict]:
+    def remember_restore(self, rid, *, ms, tokens, partial, filename, bytes=None, action=None):
+        """Keep a restore under its gateway rid; the global last value remains only a legacy fallback."""
+        event = {"ts": time.time(), "rid": rid or "", "ms": ms, "tokens": tokens,
+                 "partial": bool(partial), "filename": filename, "bytes": bytes, "action": action}
+        with self.status_lock:
+            self.last_restore = event
+            if rid:
+                self.restore_events[rid] = event
+                for key, old in list(self.restore_events.items()):
+                    if event["ts"] - old.get("ts", 0) > 900:
+                        self.restore_events.pop(key, None)
+                while len(self.restore_events) > 128:
+                    self.restore_events.pop(next(iter(self.restore_events)))
+        return event
+
+    def restore_for_request(self, rid, started, finished, consume=False, locked=False):
+        """A rid never falls back to another request's restore; no-rid callers retain the old time-window behavior."""
+        def lookup():
+            if rid:
+                restore = self.restore_events.get(rid)
+                if consume:
+                    self.restore_events.pop(rid, None)
+                return restore
+            return self.last_restore
+        if locked:
+            restore = lookup()
+        else:
+            with self.status_lock:
+                restore = lookup()
+        if not isinstance(restore, dict) or not (started - 300 <= restore.get("ts", 0) <= finished + 1):
+            return None
+        return restore
+
+    def slot_action(self, slot: str, action: str, filename, rid: str = "") -> tuple[int, dict]:
         """llama-server's POST /slots/{id}?action=save|restore {"filename": ...}: the conversation the engine holds,
         to or from a file in slot_save_path.  -> (HTTP status, body)."""
         def error(code, message):
@@ -4150,13 +4308,15 @@ class Service:
             return error(501, "slot save/restore is not available with parallel requests (\"parallel\" / --batch)")
         if slot != "0":
             return error(400, "this server has one slot: 0")
-        if action not in ("save", "restore"):
-            return error(400, "action must be save or restore")
+        if action not in ("save", "restore", "restorep", "restorepp", "saveinc", "verify", "probe"):
+            return error(400, "action must be save, restore, restorep, restorepp, saveinc, verify or probe")
+        pp_ids = getattr(self, '_restorepp_ids', [])
+        self.engine._restorepp_ids = pp_ids
         why = slot_filename_problem(filename)
         if why:
             return error(400, f"filename {why}")
         path = os.path.join(self.slot_save_path, filename)
-        if action == "restore":
+        if action in ("restore", "restorep", "restorepp", "verify"):
             try:
                 os.lstat(path)                              # the engine opens it without following a link
             except OSError:
@@ -4173,11 +4333,11 @@ class Service:
                 if not self.loaded():
                     return error(503, "the model is not loaded")
                 with self.status_lock:
-                    self.status.update(busy=True, phase="saving the session" if action == "save"
+                    self.status.update(busy=True, phase="saving the session" if action in ("save", "saveinc")
                                        else "restoring a session", started=time.time(), first_token=None,
                                        prompt_tokens=None, generated=None, max_tokens=None)
                 try:
-                    if action == 'save' and getattr(self.engine, 'session_save_reclaim', False):
+                    if action in ('save', 'saveinc') and getattr(self.engine, 'session_save_reclaim', False):
                         from serve.session_save_retry import session_file
                         r = session_file(self, action, path, SessionRefused)
                     else:
@@ -4198,11 +4358,30 @@ class Service:
             if waiting:                                     # never reached the FIFO (an exception while waiting)
                 with self.status_lock:
                     self.status["queued"] -= 1
-        if action == "save":
-            return 200, {"id_slot": 0, "filename": filename, "n_saved": r["tokens"], "n_written": r["bytes"],
-                         "timings": {"save_ms": r["ms"]}}
-        return 200, {"id_slot": 0, "filename": filename, "n_restored": r["tokens"], "n_read": r["bytes"],
-                     "timings": {"restore_ms": r["ms"]}}
+        if action == "verify":
+            return 200, {"ok": True, "filename": filename}
+        if action in ("save", "saveinc"):
+            body = {"id_slot": 0, "filename": filename, "n_saved": r["tokens"], "n_written": r["bytes"],
+                    "timings": {"save_ms": r["ms"]}}
+            if r.get("incremental"):
+                body["incremental"] = True
+                body["n_reused"] = r["reused"]
+                body["n_kept"] = r["kept"]
+                if r.get("async_pending"):
+                    body["async_pending"] = r["async_pending"]
+                if r.get("gen"):
+                    body["gen"] = r["gen"]
+            return 200, body
+        body = {"id_slot": 0, "filename": filename, "n_restored": r["tokens"], "n_read": r["bytes"],
+                "timings": {"restore_ms": r["ms"]}}
+        if "partial" in r:
+            body["partial"] = r["partial"]
+        if "serial" in r:
+            body["serial"] = r["serial"]
+        # P0: exact request correlation when the gateway supplies rid; legacy remains for old callers.
+        self.remember_restore(rid, ms=r["ms"], tokens=r["tokens"],
+                              partial=r.get("partial"), filename=filename, bytes=r.get("bytes"), action=action)
+        return 200, body
 
     def set_aliases(self, aliases) -> None:
         """#297: the config's `aliases` - a list of names (or one comma-separated string), like llama-server's --alias.
@@ -4295,6 +4474,56 @@ class Service:
         since 0.1.39; 0 refuses the command with its reason).  The Qwen3.6 engine path (src/qwen35/q36_engine.cu) reports no such key and
         has no such command: it answered "VRAM n" with its usage text ("expected: GEN <max_new> ..."), 0.2.15 release test."""
         return "vram_elastic" in (getattr(self.engine, "info", None) or {})
+
+    def _finish_vision_expert_lease(self):
+        """Stop and reap the reader before remapping/refilling experts. FIFO held."""
+        if not self.vision_lease_held:
+            return
+        try:
+            proc = getattr(self,"_vision_lease_process",None) or getattr(self.vision,"proc",None)
+            self._vision_lease_process = proc
+            self.vision.unload()
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=10)
+            if self.vision.alive() or (proc is not None and proc.poll() is None):
+                raise RuntimeError("the image encoder is still running")
+            self.engine.vision_lease(None)
+        except Exception as exc:
+            # The engine continues to reject model work. A later request retries END.
+            raise EngineDied(f"the vision expert cache has not been restored: {exc}") from exc
+        self.vision_lease_held = False
+        self._vision_lease_process = None
+
+    @contextlib.contextmanager
+    def _vision_encoding(self, images):
+        """The caller holds _turn(); cached images borrow nothing."""
+        v = self.vision
+        cached = hasattr(v,"all_cached") and v.all_cached(images)
+        if not getattr(v,"expert_lease",False):
+            if not cached:
+                self._vision_up()
+            yield
+            return
+        if self.vision_lease_held:
+            self._finish_vision_expert_lease()
+        if cached:
+            yield
+            return
+        self.ensure_loaded()
+        self.vision_lease_held = True   # even an ambiguous BEGIN failure needs END
+        try:
+            try:
+                self.engine.vision_lease((self._engine_reserve() or 0) + v.elastic_mib)
+            except (ValueError,RuntimeError) as exc:
+                raise EngineDied(f"the expert cache could not be lent to vision: {exc}") from exc
+            try:
+                v.restart()
+            except Exception as exc:
+                raise EngineDied(f"the image encoder failed to start: {exc}") from exc
+            yield
+        finally:
+            self._finish_vision_expert_lease()
 
     def _vision_up(self):
         """The image turn's start for an elastic encoder that is not running (the caller holds self.fifo): the expert
@@ -4773,12 +5002,13 @@ class Service:
             reading = self.status.get("busy") and self.status.get("first_token") is None
         return getattr(self.engine, "prefill_tok_s_mean", None) if reading else 0.0
 
-    def begin_request(self, path, req):
+    def begin_request(self, path, req, rid=None, l2_trace=None):
         """#332: a monitor record for this request, or None when the monitor is off (nothing is kept then)."""
         if not self.api_monitor:
             return None
         raw = json.dumps(req, ensure_ascii=False, indent=2)
-        record = {"id": uuid.uuid4().hex[:12], "path": path, "model": req.get("model") or self.model,
+        record_id = uuid.uuid4().hex[:12]
+        record = {"id": record_id, "rid": rid or record_id, "path": path, "model": req.get("model") or self.model,
                   "started_at": time.time(), "state": "queued", "stream": bool(req.get("stream")),
                   "response_format": (req.get("response_format") or {}).get("type")
                   if isinstance(req.get("response_format"), dict) else None,
@@ -4786,6 +5016,8 @@ class Service:
                   "output": "", "reasoning": "", "output_truncated": False, "reasoning_truncated": False,
                   "queue_s": 0.0, "load_s": 0.0, "first_token_s": None,
                   "_clock": time.perf_counter()}
+        if isinstance(l2_trace, dict):
+            record["l2"] = l2_trace
         with self.status_lock:
             self.api_requests.append(record)
         self.request_trace.record = record
@@ -5004,6 +5236,23 @@ class Service:
         return self.tok.encode(prompt, parse_special=True, plain=plain) if plain else \
             self.tok.encode(prompt, parse_special=True)
 
+    def verified_prompt_prefixes(self, messages, tools, kwargs, full_ids, counts):
+        """Exact token watermarks for selected message boundaries, accepted only as full prompt ID prefixes."""
+        verified, rejected = {}, []
+        unique = sorted({k for k in counts if isinstance(k, int) and not isinstance(k, bool) and 0 < k <= len(messages)})
+        for k in unique[:8]:
+            if k == len(messages):
+                ids = full_ids   # the whole incoming request is a prefix of the longer snapshot
+            else:
+                prefix_kwargs = dict(kwargs)
+                prefix_kwargs["add_generation_prompt"] = False
+                ids = self.encode_prompt(messages[:k], tools, prefix_kwargs, store=False)
+            if ids == full_ids[:len(ids)]:
+                verified[str(k)] = len(ids)
+            else:
+                rejected.append(k)
+        return verified, rejected
+
     @contextlib.contextmanager
     def _turn(self, cancel=None):
         """The engine's single turn (self.fifo) for an image encode.  #1999: a client that leaves while this request
@@ -5045,8 +5294,8 @@ class Service:
                             src = fetched[item["source"]] = Vision.download(src)   # outside the FIFO, as in prepare()
                         if self.vision is not None:
                             with self._turn(cancel):  # the encoder takes its turn with the requests (see below)
-                                self._vision_up()         # an elastic encoder is not running until a picture needs it
-                                self.vision.encode(src)
+                                with self._vision_encoding([src]):
+                                    self.vision.encode(src)
                         else:
                             # Hy4-Flash in-process vision: validate readability without invoking a sidecar encoder
                             Vision.normalize(src if isinstance(src, bytes) else Vision.load(src))
@@ -5068,6 +5317,9 @@ class Service:
         prompt; with thinking, Service.run writes it once the thinking is over."""
         # `cancel` (#1999): set when the client hangs up; the downloads, the wait for the turn and the encodes stop
         # between pictures and raise ClientGone
+        if self.vision_lease_held:
+            with self._turn(cancel):
+                self._finish_vision_expert_lease()
         # Cached tool images are references in browser history, never arbitrary file paths or huge base64 strings.
         for message in messages:
             for part in message.get("content", []) if isinstance(message.get("content"), list) else []:
@@ -5130,11 +5382,10 @@ class Service:
             # "reading the prompt" with CPU and GPU busy, for good (reproduced).  So encoding takes its turn in the
             # same FIFO as the requests.
             with self._turn(cancel):
-                if not (hasattr(self.vision, "all_cached") and self.vision.all_cached(images)):
-                    self._vision_up()
                 try:
-                    encoded = (self.vision.encode_all(images, cancel) if hasattr(self.vision, "encode_all")
-                               else [self.vision.encode(src) for src in images])
+                    with self._vision_encoding(images):
+                        encoded = (self.vision.encode_all(images, cancel) if hasattr(self.vision, "encode_all")
+                                   else [self.vision.encode(src) for src in images])
                 finally:
                     self.last_image_at = time.time()
             # one <|image_pad|> per image -> one per image token.  Only the markers the template writes for an image
@@ -5392,6 +5643,8 @@ class Service:
         parser = self.parser_cls(thinking=thinking, tools=with_history_tools(tools, sampling), stream_tools=True,
                                  recover=self.tool_call_recovery, declared_only=declared_only,
                                  deferred=deferred or self.undeclared_tool_calls == "call")   # #4622: opt-in, as for a deferred tool
+        guard_role_id = self.chatml_role_id if self.chatml_tool_guard and tools and self.family != "deepseek41" else None
+        boundary_events = None
         detok, n, finish = Detokenizer(self.tok), 0, "length"
         run_tok, run_len, repeated = None, 0, False     # #606: the current run of one repeated token
         thinking_n = 0                                  # tokens written while thinking (Responses' reasoning_tokens)
@@ -5604,6 +5857,14 @@ class Service:
                                 if trace is not None and trace["first_token_s"] is None:
                                     with self.status_lock:
                                         trace["first_token_s"] = round(time.perf_counter() - trace["_clock"], 3)
+                                if t == guard_role_id:
+                                    was_in_call = parser.state in ("call", "rcall", "json")
+                                    # A closing tag may still be held for lookahead. Finish before the role token.
+                                    boundary_events = parser.finish("stop")
+                                    incomplete = was_in_call and not any(ev.kind == "tool_call" for ev in boundary_events)
+                                    finish = "length" if incomplete else "stop"
+                                    print(f"[strata] stopped on a generated ChatML role token (tool incomplete={incomplete})", flush=True)
+                                    break
                                 if t in self.stop_ids:
                                     if force and parser.state == "reasoning" and parser.buf == THINK_END:
                                         opens = True    # #537: the held </think> was the end: the call opens there
@@ -5736,6 +5997,7 @@ class Service:
                                   "instruction (reasoning_loop_recovery)", flush=True)
                             continue
                         if (self.reasoning_close_retry and thinking and finish == "stop" and not close_retried
+                                and boundary_events is None
                                 and not answered and not wrap and not opens and parser.state == "reasoning"
                                 and parser.buf != THINK_END         # #537: not after a held </think>, the end
                                 and (stops is None or stops.hit is None) and not cancel.is_set()):
@@ -5877,13 +6139,27 @@ class Service:
                             pcie_share = round(last["offloaded"] / routed, 3) \
                                 if last.get("offloaded") is not None and routed else None
                             seen = 0 if admission_rejected else prompt_tokens_seen(len(ids), last)   # #471: < len(ids) when cancelled mid-read; #3040
+                            # v2.4.4: the request's cache decision - reused vs the prompt whole
+                            ru_n, tot_n = last.get("reused") or 0, last.get("prompt_tokens") or 0
+                            cache = ("warm" if ru_n >= tot_n and tot_n else f"partial {round(100 * ru_n / tot_n)}%"
+                                     if ru_n else "cold") if tot_n else None
+                            # Exact rid correlation; only legacy requests without rid use the time-window fallback.
+                            rid = getattr(self.request_trace, "rid", None)
+                            l2_trace = getattr(self.request_trace, "l2_trace", None)
+                            lr = self.restore_for_request(rid, started, time.time(), locked=True)
+                            restore = {k: lr[k] for k in ("ms", "tokens", "partial", "bytes", "action")} if lr else None
                             self.history.append({
-                                "id": request_id,
+                                "id": request_id, "rid": rid or request_id,
+                                **({"l2": l2_trace} if l2_trace else {}),
                                 "projection": (sampling or {}).get("experimental_speed_projection") is not False
                                 if loaded else None,
                                 "time": started, "duration_s": round(time.time() - started, 1), "finish": finish,
                                 "gen": getattr(self.engine, "gen", None),       # #4636: the engine process this record is from
                                 "prompt_tokens": seen, "reused": last.get("reused"), "output_tokens": n,
+                                "cache": cache,
+                                **({"restore_ms": round(restore["ms"], 1), "restore_tokens": restore["tokens"],
+                                    "restore_partial": restore["partial"], "restore_bytes": restore["bytes"],
+                                    "restore_action": restore["action"]} if restore else {}),
                                 "first_engine_token_s": first_engine_token_s,
                                 # the request's whole prompt, and the tokens read of it (None: an older engine)
                                 "prompt_total": len(ids), "prompt_read": last.get("prompt_read"),
@@ -5968,7 +6244,7 @@ class Service:
             if emb:
                 Path(emb).unlink(missing_ok=True)
         if not parser_done:
-            for ev in cut(parser.finish(finish)):
+            for ev in cut(parser.finish(finish) if boundary_events is None else boundary_events):
                 yield "event", ev
         for ev in hold.release():                   # no retry (or its reply): the held text goes out as it is
             yield "event", ev
@@ -6240,12 +6516,16 @@ def openai_chunks(svc: Service, req: dict, ids, thinking, tools, max_new, cancel
                 yield from first()
                 yield with_lp(chunk({"content": ev.text}), "content")
             elif ev.kind == "tool_start":
+                if svc.chatml_tool_guard:
+                    continue
                 streamed[ev.call.id] = calls
                 calls += 1
                 yield from first()
                 yield chunk({"tool_calls": [{"index": streamed[ev.call.id], "id": ev.call.id, "type": "function",
                                              "function": {"name": ev.call.name, "arguments": ""}}]})
             elif ev.kind == "tool_args":
+                if svc.chatml_tool_guard:
+                    continue
                 yield from first()
                 yield chunk({"tool_calls": [{"index": streamed[ev.call.id], "function": {"arguments": ev.text}}]})
             elif ev.kind == "tool_call" and ev.call.id in streamed:
@@ -6424,6 +6704,20 @@ def body_limit() -> int:
     except ValueError:
         mib = 0
     return mib << 20 if mib > 0 else CHUNKED_BODY_MAX
+
+
+def gateway_correlation_id(value):
+    return value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value) else None
+
+
+def gateway_l2_trace(value):
+    if not isinstance(value, str) or not value or len(value) > 32768:
+        return None
+    try:
+        trace = json.loads(value)
+        return trace if isinstance(trace, dict) else None
+    except (TypeError, ValueError):
+        return None
 
 
 def make_handler(svc: Service):
@@ -7089,6 +7383,10 @@ def make_handler(svc: Service):
                                                        "code": "model_not_found"}})
                         else:
                             self._json(200, item)
+            elif path in ("/v1/cache/stats", "/v1/cache/list"):
+                if not self._authorized():
+                    return
+                l2_cache_get(self, svc, path)   # RAM PARKED inventory
             elif path == "/props":
                 if self._authorized():
                     self._props()
@@ -7108,8 +7406,11 @@ def make_handler(svc: Service):
                                   "n_prompt_tokens": int(s.get("prompt_tokens") or s.get("held_tokens") or 0)}
                                  for s in svc.engine.slots_view()]
                     else:
-                        slots = [{"id": 0, "n_ctx": svc.reported_ctx(), "is_processing": busy,
-                                  "n_prompt_tokens": in_use}]
+                        slots = [{"l2_writer_pending": getattr(svc.engine, "l2_writer_pending", 0),
+                                  "id": 0, "n_ctx": svc.reported_ctx(), "is_processing": busy,
+                                  "n_prompt_tokens": in_use,
+                                  "l2_commits": [{"path": k[0], "gen": k[1], **v}
+                                                 for k, v in getattr(svc.engine, "l2_commits", {}).items()]}]
                     self._json(200, slots if loaded else [])
             elif path == "/v1/status":
                 if self._authorized():
@@ -7128,7 +7429,11 @@ def make_handler(svc: Service):
                 return
             path = self.path.split("?")[0].rstrip("/")   # issue #55: Claude Code posts /v1/messages?beta=true
             path = V1_V1_ALIASES.get(path, path)         # an Anthropic client given ".../v1" as its base posts /v1/v1/messages
+            request_rid = gateway_correlation_id(self.headers.get("X-Strata-Request-Id"))
             if path.startswith("/v1/") and self._foreign_page():
+                return
+            if path == "/v1/cache/probe":
+                self._cache_probe()
                 return
             if path == "/settings":
                 self._settings()
@@ -7188,6 +7493,10 @@ def make_handler(svc: Service):
                 req = json.loads(self._body() or b"{}")
                 if not isinstance(req, dict):
                     raise ValueError("send a JSON object")
+                # L2 RAM PARKED lifecycle: pin/drop/preload (never moves KV out of the engine)
+                if path.startswith("/v1/cache/"):
+                    if l2_cache_post(self, svc, path, req, openai_to_messages, request_rid):
+                        return
                 if path.startswith("/v1/responses/"):        # retrieve/delete/cancel/compact: nothing is stored
                     self._json(404, responses_error_body("this server keeps no responses (stateless); send the "
                                                          "whole conversation to POST /v1/responses", code="not_found"))
@@ -7230,14 +7539,16 @@ def make_handler(svc: Service):
                         self._json(503, {"error": {"type": "server_error", "message": str(e)}})
                     return
                 if path in ("/v1/chat/completions", "/v1/messages", "/v1/responses"):
-                    self.record = svc.begin_request(path, req)
+                    svc.request_trace.rid = request_rid
+                    svc.request_trace.l2_trace = gateway_l2_trace(self.headers.get("X-Strata-L2-Trace"))
+                    self.record = svc.begin_request(path, req, rid=request_rid, l2_trace=svc.request_trace.l2_trace)
                 if path == "/v1/responses":
                     self._responses(req)
                 elif path.startswith("/slots/"):
                     query = parse_qs(self.path.partition("?")[2])
                     try:
                         code, body = svc.slot_action(path[len("/slots/"):], (query.get("action") or [""])[0],
-                                                     req.get("filename"))
+                                                     req.get("filename"), rid=request_rid or "")
                     except EngineDied as e:                  # EngineSilent included: the engine was ended
                         code, body = 500, {"error": {"code": 500, "message": str(e) + "; the next request starts "
                                                      "the engine again", "type": "server_error"}}
@@ -7324,7 +7635,29 @@ def make_handler(svc: Service):
                         record["wallclock_s"] = round(time.perf_counter() - record["_clock"], 3)
                         record["finished_at"] = time.time()
                         record["state"] = "error" if record.get("error") else record.get("outcome", "completed")
+                        # v2.4.4: the request's cache story for the api-monitor - the engine's
+                        # last figures (single-flight true; under parallel slots they are the freshest
+                        # leg's, an acceptable approximation for the monitor) and the restore that
+                        # served this request, when one ran just before it.
+                        eng = getattr(svc, "engine", None)
+                        last = getattr(eng, "last", None)
+                        if isinstance(last, dict):
+                            pt, ru = int(last.get("prompt_tokens") or 0), int(last.get("reused") or 0)
+                            if pt:
+                                record["prompt_reused"] = ru
+                                record["cache"] = ("warm" if ru >= pt else f"partial {round(100 * ru / pt)}%"
+                                                   if ru else "cold")
+                        lr = svc.restore_for_request(record.get("rid"), record["started_at"],
+                                                     record["finished_at"], consume=True, locked=True)
+                        if lr:
+                            record["restore_ms"] = lr.get("ms")
+                            record["restore_tokens"] = lr.get("tokens")
+                            record["restore_partial"] = lr.get("partial")
+                            record["restore_bytes"] = lr.get("bytes")
+                            record["restore_action"] = lr.get("action")
                     svc.request_trace.record = None
+                svc.request_trace.rid = None
+                svc.request_trace.l2_trace = None
 
         def _images(self, req):
             """POST /v1/images/generations (serve/images.py): one sd-cli job in the GPU's turn."""
@@ -7485,6 +7818,48 @@ def make_handler(svc: Service):
                 raise ValueError("a web page of another origin cannot have a file on this computer read as an "
                                  "image: send it as a data: URL (or add the page's origin to the config's "
                                  "trusted_origins)")
+
+        def _cache_probe(self):
+            """ L2 E5: how much of this request would the cache give back? {messages, tools?} ->
+            {prompt_tokens, reusable_tokens, live_lcp, pool_entries} without running it."""
+            body = json.loads(self._body() or b'{}')
+            svc = self.server.svc
+            try:
+                # [translated from Chinese: L2: (tool_calls /kw]
+                messages, tools, kwargs = openai_to_messages(body)
+                ids = svc.encode_prompt(messages, tools, kwargs, store=False)
+                counts = body.get("prefix_messages") if isinstance(body.get("prefix_messages"), list) else []
+                prefix_tokens, prefix_rejected = svc.verified_prompt_prefixes(messages, tools, kwargs, ids, counts)
+            except Exception as e:
+                self._json(400, {"error": {"message": f"probe render failed: {e}"}})
+                return
+            eng = svc.engine
+            if not hasattr(eng, "proc") or eng.proc is None:
+                self._json(503, {"error": {"message": "the engine is not running"}})
+                return
+            with svc.fifo:
+                try:
+                    eng.proc.stdin.write("PROBE " + ",".join(str(i) for i in ids) + "\n")
+                    eng.proc.stdin.flush()
+                except OSError as e:
+                    self._json(503, {"error": {"message": f"probe engine error: {e}"}})
+                    return
+                try:
+                    ans = eng.lines.get(timeout=30)
+                except queue.Empty:
+                    self._json(504, {"error": {"message": "probe timed out"}})
+                    return
+            if ans is None:
+                self._json(503, {"error": {"message": "the engine stopped"}})
+                return
+            parts = ans.split()
+            if len(parts) >= 5 and parts[0] == "PROBED":
+                rec = {"reusable_tokens": int(parts[1]), "pool_entries": int(parts[2]),
+                       "live_lcp": int(parts[3]), "prompt_tokens": len(ids),
+                       "prefix_tokens": prefix_tokens, "prefix_rejected": prefix_rejected}
+                self._json(200, l2_extend_fields(parts, rec))   # parked_best/serial
+            else:
+                self._json(502, {"error": {"message": f"unexpected probe answer: {ans[:80]}"}})
 
         def _settings(self):
             # They change what every client gets, so only the app's own page may set them
@@ -8197,6 +8572,13 @@ def apply_vision_defaults(cfg: dict) -> dict:
     A config that says "vram_elastic" itself, and AMD (no shrinking expert cache on HIP), keep the room in the reserve as before: the reserve
     setup writes for a GPU reader that stays on the card (700 MiB, or none) becomes VISION_RESERVE_MIB; a reserve the person or the app chose
     (any other number) is kept."""
+    if isinstance(cfg.get("vision"),dict) and cfg["vision"].get("expert_lease") is True:
+        if cfg["vision"].get("gpu") is not True or cfg.get("backend") not in (None,"cuda") or len(gpu_list(cfg))>1 or parallel_slots(cfg):
+            raise ValueError("vision expert lease requires a single CUDA GPU and the GPU picture reader")
+        cfg["vision"] = {**cfg["vision"], "elastic":True}
+        cfg["vram_elastic"] = True
+        cfg.setdefault("env",{})["STRATA_VISION_EXPERT_LEASE"] = "1"
+        return cfg
     if not vision_on_demand_by_default(cfg):
         return cfg
     cfg["vision"] = {**cfg["vision"], "elastic": True}
@@ -8714,6 +9096,9 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
     svc.anthropic_think_unasked = mode == "model"
     svc.tool_call_recovery = tool_call_recovery_setting(cfg)
     svc.undeclared_tool_calls = undeclared_tool_calls_setting(cfg)
+    svc.chatml_tool_guard = cfg.get("chatml_tool_guard", False)
+    if not isinstance(svc.chatml_tool_guard, bool):
+        raise SystemExit('[strata] config chatml_tool_guard must be true or false')
     retry = cfg.get("tool_markup_retry", True)         # (a): false (or STRATA_TOOL_MARKUP_RETRY=0) sends the markup as text
     if not isinstance(retry, bool):
         raise SystemExit(f"[strata] config \"tool_markup_retry\" must be true or false, not {retry!r}")
