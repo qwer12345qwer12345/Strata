@@ -934,9 +934,18 @@ void test_rotating_source(bool rotate, bool pin) {
             require(prior[q] && !std::memcmp(prior[q], truth[incoming[q]].data(), bytes), "wrong incoming bytes");
             require(cudaMemcpy(eviction[q], cache.device_slot(q), bytes, cudaMemcpyDeviceToHost) == cudaSuccess,
                     "D2H eviction failed");
-            require(src.stage_exchange(0, incoming[q], outgoing[q], q), "stage rejected");
-            require(!std::memcmp(src.blob(0, outgoing[q]), truth[outgoing[q]].data(), bytes), "staged override wrong");
-            require(cache.fill_slot_blocking(q, prior[q], err), err); // H2D completed before commit
+            if (round & 1) require(src.stage_exchange(0, incoming[q], outgoing[q], q), "stage rejected");
+        }
+        if (!(round & 1)) {
+            const int32_t layers[2] = {0,0}, ins[2] = {incoming[0],incoming[1]}, outs[2] = {outgoing[0],outgoing[1]};
+            const int32_t invalid[2] = {outgoing[0],5}; const int64_t qs[2] = {0,1};
+            require(!src.stage_exchanges(layers,ins,invalid,qs,2), "invalid batch accepted");
+            require(!src.exchanges_pending(), "invalid batch partially staged ownership");
+            require(src.stage_exchanges(layers,ins,outs,qs,2), "valid batch rejected");
+        }
+        for (int q=0;q<2;++q) {
+            require(!std::memcmp(src.blob(0,outgoing[q]),truth[outgoing[q]].data(),bytes), "staged override wrong");
+            require(cache.fill_slot_blocking(q,prior[q],err),err);
         }
         require(!src.stage_exchange(0, incoming[0], outgoing[0], 0), "duplicate stage accepted");
         require(!src.stage_exchange(0, incoming[0], 5, 0), "invalid expert accepted");

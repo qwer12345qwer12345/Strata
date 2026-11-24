@@ -1161,7 +1161,8 @@ void launch_chunks_batch(const float* q, const QsaAttnPools& pools, const int32_
 #if !defined(__HIPCC__)
     // TC: the environment's K8V4 tensor-core score phase, or kernel == 2 named by a harness (never the environment).
     // Declared before the dispatch chain, which continues across the guards with else-if.
-    const bool tc = kernel == 2 ? (kv_mode == 3) : (kernel < 0 && kv_mode == 3 && !lane_cell && !pre && decode_tc_on());
+    // The explicit K8V4 scorer takes precedence over the Daily chunk; the merge is selected separately.
+    const bool tc = kernel == 2 ? (kv_mode == 3) : (kernel < 0 && kv_mode == 3 && !lane_cell && decode_tc_on());
 #endif
 #if defined(STRATA_HIP_GFX906)
     static const bool query_swizzle = [] {
@@ -1291,9 +1292,14 @@ bool qsa_decode_attn_slots(const float* q, const QsaAttnSlotPools& pools, const 
         if (attn_kv_mode(pools.p[z]) != kv_mode) return false;
     }
     const bool lane_cell = lane_cell_attn();
+#if !defined(__HIPCC__)
+    const bool tc = kv_mode == 3 && !lane_cell && decode_tc_on();
+#else
+    [[maybe_unused]] constexpr bool tc = false;
+#endif
     // only where qsa_decode_attn_batch runs attn_chunk_kernel; its other variants keep the per-query calls
 #if defined(STRATA_ATTN_PRE75_BUILT)
-    if (!lane_cell && pre75_attn()) return false;
+    if (!tc && !lane_cell && pre75_attn()) return false;
 #endif
 #if defined(STRATA_HIP_GFX906)
     static const bool query_swizzle = [] {
@@ -1311,7 +1317,6 @@ bool qsa_decode_attn_slots(const float* q, const QsaAttnSlotPools& pools, const 
     cudaStream_t st = (cudaStream_t) stream;
 #define STRATA_ATTN_SLOTS(M, LC) attn_chunk_slots_kernel<M, LC><<<grid, THREADS, 0, st>>>(q, pools, ids, steps, (int) s.n_head_kv, (int) s.page_size, scale, part_acc, part_m, part_l, n_chunks, (int) cap, stride)
 #if !defined(__HIPCC__)
-    const bool tc = kv_mode == 3 && !lane_cell && decode_tc_on();
     if (tc)
         attn_chunk_slots_kernel<3, false, true><<<grid, THREADS, 0, st>>>(q, pools, ids, steps, (int) s.n_head_kv,
                                                                           (int) s.page_size, scale, part_acc, part_m,
@@ -1359,12 +1364,16 @@ void qsa_decode_attn_batch_rows(const float* q, const QsaAttnPoolsRows& rows, co
     const float scale = 1.0f / sqrtf((float) HD);
     const dim3 grid((unsigned) n_chunks, (unsigned) s.n_head_kv, (unsigned) n_q);
     cudaStream_t st = (cudaStream_t) stream;
-    // The plain kernel is what qsa_decode_attn_batch runs unless one of its variants is on (lane-cell scoring, the
-    // pre-sm_75 / gfx103x kernel, the gfx906 swizzle): there each row goes through that call, one launch per row.
-    static const bool lane_cell_rows = [] { const char* v = std::getenv("STRATA_ATTN_LANECELL"); return v && v[0] == '1'; }();
-    bool per_row = lane_cell_rows;
+    // Lane-cell scoring and pre75 use the single-pool entry. K8V4 TC has a batched implementation.
+    const bool lane_cell = lane_cell_attn();
+#if !defined(__HIPCC__)
+    const bool tc = kv_mode == 3 && !lane_cell && decode_tc_on();
+#else
+    [[maybe_unused]] constexpr bool tc = false;
+#endif
+    bool per_row = lane_cell;
 #if defined(STRATA_ATTN_PRE75_BUILT)
-    per_row = per_row || pre75_attn();
+    per_row = per_row || (!tc && pre75_attn());
 #endif
 #if defined(STRATA_HIP_GFX906)
     per_row = true;
@@ -1379,7 +1388,6 @@ void qsa_decode_attn_batch_rows(const float* q, const QsaAttnPoolsRows& rows, co
 #define STRATA_ATTN_ROWS(M) attn_chunk_rows_kernel<M><<<grid, THREADS, 0, st>>>(q, rows, ids, steps, (int) s.n_head_kv, \
         (int) s.page_size, scale, part_acc, part_m, part_l, n_chunks, (int) cap, stride)
 #if !defined(__HIPCC__)
-    const bool tc = kv_mode == 3 && decode_tc_on();
     if (tc) {
         attn_chunk_rows_kernel<3, true><<<grid, THREADS, 0, st>>>(q, rows, ids, steps, (int) s.n_head_kv,
                                                                   (int) s.page_size, scale, part_acc, part_m, part_l,

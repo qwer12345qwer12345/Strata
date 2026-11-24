@@ -14467,8 +14467,8 @@ int main(int argc, char** argv) {
         drive.d.pcie_num = std::max(0, std::min(256, (int) (o.pcie_frac * 256.0 + 0.5)));
         const bool all_experts_resident = !host_res.empty() &&
             std::all_of(host_res.begin(), host_res.end(), [](int32_t r) { return r >= 0; });
-        // Port repair from the reviewed 0.1.66 implementation: keep profile-hot residents out of ADAPT_FETCH's
-        // victim set. The mask remains alive for the whole serve loop.
+        // Protect profile-hot residents in both the PCIe share's admissions and the adaptive tier's swaps.
+        // The mask remains alive for the whole serve loop.
         const int64_t total_expert_pairs = g.n_layers * g.n_expert;
         int64_t live_gpu_slots = xcache.slots();
         for (const auto& stp : stages) live_gpu_slots += stp->cache.slots();
@@ -14886,7 +14886,8 @@ int main(int argc, char** argv) {
                 const int32_t* r = host_res.data() + l * g.n_expert;
                 for (int32_t e = 0; e < (int32_t) g.n_expert; ++e) {
                     if (r[e] < 0) { if (u[e] >= 2.0f && !(peer.valid() && peer.has(l, e)) && !(remote_opt && remote_opt->owns(l, e)) && !helper_holds(l, e) && !(fetched && srcp->pinned(l, e))) cand.emplace_back(u[e], e); }
-                    else vict.emplace_back(u[e], e);
+                    else if (pinned_pair.empty() || !pinned_pair[(size_t) l * g.n_expert + e])
+                        vict.emplace_back(u[e], e);
                 }
                 if (cand.empty() || vict.empty()) continue;
                 std::sort(cand.begin(), cand.end(), [](auto& a, auto& b) { return a.first > b.first; });
@@ -15168,7 +15169,8 @@ int main(int argc, char** argv) {
                 const int32_t* r = a_res.data() + l * g.n_expert;
                 for (int32_t e = 0; e < (int32_t) g.n_expert; ++e) {
                     if (r[e] < 0) { if (u[e] >= 2.0f && !helper_holds(l, e)) cand.emplace_back(u[e], e); }
-                    else vict.emplace_back(u[e], e);
+                    else if (pinned_pair.empty() || !pinned_pair[(size_t) l * g.n_expert + e])
+                        vict.emplace_back(u[e], e);
                 }
                 if (cand.empty() || vict.empty()) continue;
                 std::sort(cand.begin(), cand.end(), [](auto& a, auto& b) { return a.first > b.first; });

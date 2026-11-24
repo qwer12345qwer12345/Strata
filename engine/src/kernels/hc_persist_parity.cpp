@@ -62,6 +62,8 @@ int main(int argc, char** argv) {
     else setenv("STRATA_HC_PERSIST", "1", 1);
     k::fused_gr_check();
     k::fused_gr_persist_init();
+    cudaStream_t quant_stream;
+    ck(cudaStreamCreate(&quant_stream), "quant stream");
 
     std::mt19937 rng(7);
     std::normal_distribution<float> nd(0.f, 1.f);
@@ -209,7 +211,7 @@ int main(int argc, char** argv) {
             if (!used) return true;
             ck(cudaDeviceSynchronize(), persist ? "Q8 persistent read" : "Q8 default read");
             capture_q8(T, out, qimage);
-            k::native_quantize_q8_1(dmix, dqref, N, T, nullptr);
+            k::native_quantize_q8_1(dmix, dqref, N, T, quant_stream);
             ck(cudaDeviceSynchronize(), "native QFUSE reference");
             std::vector<uint8_t> ref(qimage.size());
             ck(cudaMemcpy(ref.data(), dqref, ref.size(), cudaMemcpyDeviceToHost), "QFUSE reference image");
@@ -278,7 +280,7 @@ int main(int argc, char** argv) {
                 } else {
                     ck(cudaDeviceSynchronize(), "wide explicit slices");
                     capture_q8(T, split, split_q);
-                    k::native_quantize_q8_1(dmix, dqref, N, T, nullptr);
+                    k::native_quantize_q8_1(dmix, dqref, N, T, quant_stream);
                     ck(cudaDeviceSynchronize(), "wide QFUSE reference");
                     std::vector<uint8_t> ref(wide_q.size());
                     ck(cudaMemcpy(ref.data(), dqref, ref.size(), cudaMemcpyDeviceToHost), "wide QFUSE reference image");
@@ -296,5 +298,6 @@ int main(int argc, char** argv) {
     if (off) std::printf("%s: STRATA_HC_PERSIST unset, the persistent read never ran\n", bad ? "FAIL" : "PASS");
     else if (ran == 0) std::printf("SKIP: the persistent read is not used on this card\n");
     else std::printf("%s: %d token counts checked\n", bad ? "FAIL" : "PASS", ran);
+    ck(cudaStreamDestroy(quant_stream), "destroy quant stream");
     return bad ? 1 : 0;
 }

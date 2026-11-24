@@ -204,6 +204,9 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
       # the production batch entry with the environment on must select the same TC result as the named chunk pass
       add_test(NAME qsa_decode_tc_parity_env COMMAND qsa_decode_tc_parity)
       set_tests_properties(qsa_decode_tc_parity_env PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "STRATA_ATTN_DECODE_TC=1")
+      add_test(NAME qsa_decode_tc_parity_daily COMMAND qsa_decode_tc_parity)
+      set_tests_properties(qsa_decode_tc_parity_daily PROPERTIES SKIP_RETURN_CODE 77
+                           ENVIRONMENT "STRATA_ATTN_DECODE_TC=1;STRATA_ATTN_DAILY=1")
     endif()
     # fork: the Daily's decode attention (STRATA_ATTN_DAILY=1: PR #540's chunk kernel on every card and the bounded
     # merge) against upstream's kernels, bitwise; the production entries checked with the variable off and on
@@ -357,6 +360,10 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
     target_link_libraries(file_expert_source_test PRIVATE strata_engine)
     add_test(NAME file_expert_source_test COMMAND file_expert_source_test)
     set_tests_properties(file_expert_source_test PROPERTIES TIMEOUT 60)
+    if(STRATA_ENABLE_CUDA)
+      add_test(NAME file_expert_source_rotation_gpu COMMAND file_expert_source_test --rotation-gpu)
+      set_tests_properties(file_expert_source_rotation_gpu PROPERTIES TIMEOUT 90)
+    endif()
     add_executable(vmm_test tests/core/vmm_test.cpp)
     target_link_libraries(vmm_test PRIVATE strata_engine)
     add_test(NAME vmm_test COMMAND vmm_test)
