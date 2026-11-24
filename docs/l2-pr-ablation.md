@@ -16,3 +16,5 @@ The November 24, 2026 run used one RTX 3080 12 GB, a 32 GB host, the same saved 
 - **#9:** A persistent read saves kernel launches at the cost of global barriers across an 80-block grid. For supported Q8 rows it also bypasses the separate, fast down projection and INT8 tensor core up projection selected by default on Ampere. The residency check only establishes eligibility. Turning persistence off improved total throughput in this run because more drafts were accepted and fewer windows were needed. The mean window did not get faster. A fixed-input, fixed-width HC comparison is needed to isolate kernel speed; fixed-prompt replay across more inputs is needed to characterize draft acceptance.
 
 The host's production selection keeps #8 at `STRATA_ADAPT_FETCH=2` and sets #6, #7 and #9 to `0`. The four code paths remain available; the next boot ablation flips each switch from its actual production value. The combined selection has not yet been timed on a headless boot.
+
+See the [RTX 3080 headless report](bench-results/2026-11-24-rtx3080-prod-0165/README.md) for the numeric extract, the older engine references and the vision lease observations.
