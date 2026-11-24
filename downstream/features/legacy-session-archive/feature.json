@@ -4,13 +4,13 @@
   "version": "0.2.4",
   "status": "active",
   "base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
-  "patched_tree": "39b2182e91202b9b4a223ed5f0ccb1067a10667c",
+  "patched_tree": "a16bc0874868b5aab29864112419859bf07d36b6",
   "requires": [],
   "patches": [
     {
       "id": "legacy-v2-v3-archive",
       "path": "patches/0001-legacy-v2-v3-archive.patch",
-      "sha256": "de949678ccc95ed0197beb1082c51abeaa6df60bc783a162dd1f70aadcb7a3ff"
+      "sha256": "f9bb28cd561596556d160b6b4565a872baec74b73671b50afd0ce14f118dcc6f"
     }
   ],
   "tests": "tests/test.json",
@@ -22,12 +22,13 @@
     "STRATA_L2_WRITER_BUDGET_MIB": "0",
     "STRATA_ADAPT_NOWAIT": "1",
     "STRATA_ADAPT_LAG": "2",
-    "STRATA_ROUTE_TAIL_SKIP": "7",
+    "STRATA_ROUTE_TAIL_SKIP": "0",
     "STRATA_ROUTE_TAIL_RENORM": "0",
     "STRATA_HC_Q8": "1",
     "STRATA_EMB_REUSE_ACCOUNT": "1",
     "STRATA_GDN_TC": "1",
-    "STRATA_GDN_TC_NP": "2"
+    "STRATA_GDN_TC_NP": "2",
+    "STRATA_ADAPT_FETCH": "2"
   },
   "ported_from_base": "c6f6427d9de9016fd92d13e29740f65625261df7"
 }

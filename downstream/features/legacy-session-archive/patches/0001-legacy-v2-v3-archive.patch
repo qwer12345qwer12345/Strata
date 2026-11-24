@@ -8923,7 +8923,7 @@ index 00000000..c70c9daf
 +if __name__=='__main__':main()
 diff --git a/terminal/l2/runtime_config.py b/terminal/l2/runtime_config.py
 new file mode 100644
-index 00000000..174b7205
+index 00000000..5d9798d4
 --- /dev/null
 +++ b/terminal/l2/runtime_config.py
 @@ -0,0 +1,81 @@
@@ -8933,7 +8933,7 @@ index 00000000..174b7205
 +import json
 +from pathlib import Path
 +
-+DAILY = dict(spec=4, shapes=2, lookup=16, tc=0, dense=1, skip=8, rows=2, nowait=1, tail=7,
++DAILY = dict(spec=4, shapes=2, lookup=16, tc=0, dense=1, skip=8, rows=2, nowait=1, tail=0,
 +             emb=1, gdn_np=2, upmix=1, gdn_tiles=1, gdn_fuse=1, prefill_cap=8192,
 +             cpu_nt=32, cpu_max=3072, lag=2, overlap=0, engine=1, decode_tc=1,
 +             tq_f16=1, fetch=2, hc_persist=1, qfuse=0, l3=0, pin=0.25, cpu_share=0,
@@ -8943,7 +8943,7 @@ index 00000000..174b7205
 +PREVIOUS = dict(spec=6, shapes=1, lookup=8, tc=2, dense=0, skip=0, rows=2, nowait=0, tail=0,
 +                emb=0, gdn_np=3, upmix=0, cpu_nt=0, cpu_max=0, decode_tc=0, tq_f16=0,
 +                fetch=0, hc_persist=0, qfuse=1, l3=0, pin=0, adapt_every=4, adapt_swaps=96, adapt_decay=0.7)
-+REFERENCE = dict(spec=4, shapes=2, lookup=16, tc=0, dense=1, skip=8, rows=2, nowait=1, tail=7,
++REFERENCE = dict(spec=4, shapes=2, lookup=16, tc=0, dense=1, skip=8, rows=2, nowait=1, tail=0,
 +                 emb=1, gdn_np=2, upmix=0, cpu_nt=0, cpu_max=0, decode_tc=0, tq_f16=0,
 +                 fetch=0, hc_persist=0, qfuse=1, l3=0, pin=0, adapt_every=4, adapt_swaps=96, adapt_decay=0.7)
 +
@@ -9292,10 +9292,10 @@ index 00000000..545e126b
 +   self.assertIn(b'504',data.split(b'\r\n')[0])
 diff --git a/terminal/l2/test_runtime_config.py b/terminal/l2/test_runtime_config.py
 new file mode 100644
-index 00000000..d0be496b
+index 00000000..13788387
 --- /dev/null
 +++ b/terminal/l2/test_runtime_config.py
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,59 @@
 +import contextlib
 +import copy
 +import hashlib
@@ -9320,7 +9320,7 @@ index 00000000..d0be496b
 +  selection={'base_exe':'previous-engine','root':str(engine),
 +   'engine_sha256':hashlib.sha256(b'engine').hexdigest(),'log':str(root/'engine.log'),
 +   'archive_dir':str(root/'archives'),'ple_gguf':str(ple),'ampere_rows':'2',
-+   'environment':{'STRATA_DF2_AMPERE_TUNING':'2','STRATA_DF2_GEMM_TC':'0','STRATA_ADAPT_NOWAIT':'1','STRATA_ROUTE_TAIL_SKIP':'7'},
++   'environment':{'STRATA_DF2_AMPERE_TUNING':'2','STRATA_DF2_GEMM_TC':'0','STRATA_ADAPT_NOWAIT':'1','STRATA_ROUTE_TAIL_SKIP':'0','STRATA_ADAPT_FETCH':'2'},
 +   'argument_overrides':{'--spec':'4','--lookup-max-t':'16'},'configuration_status':'NOT TESTED',
 +   'vision':{'gpu':True,'expert_lease':True},'vram_elastic':True,'repeat_failure_retry':True,
 +   'flag_overrides':{'--session-save-reclaim':True}}
@@ -9336,7 +9336,8 @@ index 00000000..d0be496b
 +   self.assertEqual(cfg['user_args'][cfg['user_args'].index('--spec')+1],'4')
 +   self.assertEqual(cfg['env']['STRATA_DF2_GEMM_TC'],'0')
 +   self.assertEqual(cfg['env']['STRATA_ADAPT_NOWAIT'],'1')
-+   self.assertEqual(cfg['env']['STRATA_ROUTE_TAIL_SKIP'],'7')
++   self.assertEqual(cfg['env']['STRATA_ROUTE_TAIL_SKIP'],'0')
++   self.assertEqual(cfg['env']['STRATA_ADAPT_FETCH'],'2')
 +   self.assertEqual(cfg['configuration_status'],'NOT TESTED')
 +   self.assertTrue(cfg['vision']['expert_lease']);self.assertTrue(cfg['vram_elastic'])
 +   self.assertTrue(cfg['repeat_failure_retry'])

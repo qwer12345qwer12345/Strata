@@ -47,7 +47,7 @@
 
 ## 我们的配置修正与现有选择
 
-NOWAIT1/lag2、tail skip7、Dense短窗TC、prior0.5均已选入。新DP4A表下关闭DFlash2短窗QKV TC是本机测得该形状更快，不能归为数值保守。DF2_CTX_BATCH保留默认，未为通过逐位ring检查而关闭。
+NOWAIT1/lag2、Dense短窗TC、prior0.5均已选入；尾部专家跳过经本机重复输出测试改为0，并保留ADAPT_FETCH=2。新DP4A表下关闭DFlash2短窗QKV TC是本机测得该形状更快，不能归为数值保守。DF2_CTX_BATCH保留默认，未为通过逐位ring检查而关闭。
 
 本轮发现并修正一个实际接线问题：旧profile没有`user_args`/`args_written`时，runtime selection只改`args`，官方drafting.apply会把选定spec4改回默认6。现在将选择器的明确覆盖项写入`user_args`，沿用官方参数优先级。新增回归覆盖旧profile；最终engine_args只生成命令、不启动模型，确认spec4、draft-conf0.8、lookup16。之前受限预算识图日志中确实为spec6；其图像生命周期结果仍有效，不视为spec4组合性能结果。
 

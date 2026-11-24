@@ -13,7 +13,7 @@
 | Dense短窗TC | AMPERE_SHAPES=0 | =1 | 只开启已测形状：Q4_K/Q5_K的T6..8、Q6_K的T8，K2560/N10240；有舍入/输出变化，组合未测 | dense |
 | lookup草稿延后 | LOOKUP_SKIP=0 | =8 | 长匹配时可避免lookup已获选后无用的神经草稿计算；验证仍照常执行；本项仅逻辑分析、未做性能实测 | lookup-skip |
 | 专家搬运不等待 | ADAPT_NOWAIT默认关闭 | =1，ADAPT_LAG=2 | 上游保留的opt-in；等待更少但CPU/GPU执行时序与舍入不固定；本机未测 | adapt-tail |
-| CPU尾部专家跳过 | ROUTE_TAIL_SKIP=0 | =7 | 只跳过GPU未命中且整窗口均排在尾部的专家；近似计算，本机收益/质量未测 | adapt-tail / tail-spec |
+| CPU尾部专家跳过 | ROUTE_TAIL_SKIP=7 | =0，ADAPT_FETCH=2 | 3080/Gyro-S受控长输出显示tail7+fetch2重复覆盖46.81%，tail0+fetch2为5.90%；tail7的速度优势被循环污染。尾skip=0优先保证可用输出，整体质量验收仍未通过 | adapt-tail / tail-spec |
 
 QKV需要随新表重新选型：已发布的修正后数据中，2/4/8列的新DP4A分别约12.26/13.28/16.29µs，旧QKV TC约15.82/16.04/18.43µs。新表采用后继续固定QKV TC已不是当前数据支持的优先选项。这里关闭的是DFlash2的≤8列GEMM TC开关；批量context、主模型Dense等其他TC路径不因此全部关闭。
 
@@ -154,7 +154,11 @@ sudo systemctl stop strata-headless-test.service
 
 计划命令无服务副作用。停止命令会请求正常中断并恢复日常Strata；若此时桌面已启用，则不强行切回无头。重复启动会被服务名和运行锁拒绝，不同时争用GPU。识图验收每次用独立合成图缓存目录，确保冷图真实借显存、第二次缓存图不借，恢复后文本须达到3072-token目标的75%。
 
-本轮再次核对生产最终命令和环境，全部DAILY参数一致；prior0.5、spec4/confidence0.8、lookup16、成对行、NOWAIT1/lag2、tail skip7、Embedding计费1、GDN NP2、BF16 PLE及新PR开关均已选择。完整组合仍属未完成模型性能/质量验收的理论选择；新Dense扫描还没有产生新的生产赢家，保留原形状表。
+本轮再次核对生产最终命令和环境，prior0.5、spec4/confidence0.8、lookup16、成对行、NOWAIT1/lag2、Embedding计费1、GDN NP2、BF16 PLE及新PR开关均已选择。尾部跳过按2026-11-24受控质量测试切为0，ADAPT_FETCH=2。完整组合仍属未完成模型性能/质量验收的理论选择；新Dense扫描还没有产生新的生产赢家，保留原形状表。
+
+## 2026-11-24：按重复输出测试关闭 tail skip
+
+PR #13 的八次新进程受控测试只变化 `STRATA_ROUTE_TAIL_SKIP` 与 `STRATA_ADAPT_FETCH`。在 fetch=2 下，tail=7 的长输出重复覆盖率为46.81%（最长重复1047 token），速度100.0–100.5 tok/s；tail=0 重复覆盖率降至5.90%（最长重复166 token），速度86.3–86.7 tok/s。tail=7的表观速度提升主要由周期64的长循环构成，不作为有效速度赢家。其KV-store质量任务仍失败，因此tail=0是日用可用性选择，不代表完整质量验收通过。日常生成配置明确设为tail=0、fetch=2。
 
 
 ## 重复生成失败重试
