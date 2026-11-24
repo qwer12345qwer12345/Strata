@@ -28,7 +28,12 @@ def main():
  Path(cfg['env']['STRATA_CONV_DISK_DIR']).mkdir(mode=0o700, parents=True, exist_ok=True)
  def stop(signum,frame):raise KeyboardInterrupt
  signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
- if cfg.get('configuration_status'):print('Strata '+cfg['configuration_status']+'；正常启动不运行测试。',flush=True)
+ if cfg.get('configuration_status'):print('Strata '+cfg['configuration_status'],flush=True)
+ ablation=cfg.pop('startup_pr_ablation',None)
+ if ablation and ablation.get('enabled'):
+  from l2.startup_ablation import run_at_boot
+  try:run_at_boot(root,cfg,output,ablation,ready.parent if ready else None)
+  except KeyboardInterrupt:return
  backend=dict(cfg,host='127.0.0.1',port=backend_port)
  parent=ready.parent if ready else Path(tempfile.gettempdir());parent.mkdir(mode=0o700,parents=True,exist_ok=True)
  with tempfile.NamedTemporaryFile('w',dir=parent,prefix='strata-l2-backend-',suffix='.json',delete=False) as f:json.dump(backend,f);runtime=Path(f.name)

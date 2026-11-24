@@ -64,7 +64,7 @@ def select(root, cfg, directory):
     result.setdefault('env', {}).update(STRATA_TQ_AMPERE_ROWS=rows,
                                       STRATA_PF_FUSED_TQ='1', STRATA_PF_GROUP_SCRATCH='0')
     result['env'].update(data.get('environment', {}))
-    for key in ('vision', 'vram_elastic', 'repeat_failure_retry'):
+    for key in ('vision', 'vram_elastic', 'repeat_failure_retry', 'startup_pr_ablation'):
         if key in data:result[key]=copy.deepcopy(data[key])
     result.update(exe=str(exe), cwd=str(root), log=data['log'], slot_save_path=data['archive_dir'],
                   configuration_status=data.get('configuration_status', STATUS))

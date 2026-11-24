@@ -38,7 +38,7 @@ def profile_seed(cfg):
         return None
 
 
-def run_case(upstream, name, prompt, limit, log, timeout):
+def run_case(upstream, name, prompt, limit, log, timeout, *, open_request=urllib.request.urlopen):
     offset = log.stat().st_size if log and log.exists() else 0
     body = {
         'messages': [{'role': 'user', 'content': prompt}],
@@ -54,7 +54,7 @@ def run_case(upstream, name, prompt, limit, log, timeout):
     finish = None
     done = False
     output_hash = hashlib.sha256()
-    with urllib.request.urlopen(req, timeout=timeout) as response:
+    with open_request(req, timeout=timeout) as response:
         if response.headers.get_content_type() != 'text/event-stream':
             raise RuntimeError(f'{name}: backend did not stream SSE')
         for line in response:
@@ -70,6 +70,8 @@ def run_case(upstream, name, prompt, limit, log, timeout):
             item = json.loads(payload)
             if item.get('error'):
                 raise RuntimeError(f'{name}: benchmark request returned an error')
+            if item.get('strata_generation_failure'):
+                raise RuntimeError(f'{name}: generation was stopped or the retry did not finish')
             if item.get('timings'):
                 timings = item['timings']
             for choice in item.get('choices') or []:
