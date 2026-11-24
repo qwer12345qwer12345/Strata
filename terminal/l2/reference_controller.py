@@ -43,9 +43,9 @@ def common(a,b):
 def find_entry(idx,fp,hs):
  entries=[r for r in idx.values() if isinstance(r,dict) and r.get('family')==fp and common(r.get('hashes',[]),hs)>0]
  return max(entries,key=lambda r:(common(r['hashes'],hs),r.get('updated',0)),default=None)
-def engine_request(method,path,body=None,timeout=180):
+def engine_request(method,path,body=None,timeout=180,headers=None):
  data=json.dumps(body).encode() if body is not None else None
- req=urllib.request.Request(ENGINE_URL+path,method=method,data=data,headers={'Content-Type':'application/json'})
+ req=urllib.request.Request(ENGINE_URL+path,method=method,data=data,headers={'Content-Type':'application/json',**(headers or {})})
  try:
   with urllib.request.urlopen(req,timeout=timeout) as r:return r.status,json.loads(r.read())
  except urllib.error.HTTPError as e:
@@ -107,8 +107,9 @@ class ControllerHandler(BaseHTTPRequestHandler):
  def reply(self,status,obj):
   data=json.dumps(obj).encode();self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
  def do_GET(self):
-  if self.path.split('?')[0] not in ('/health','/v1/models'):return self.reply(404,{'error':{'message':'Use /v1/chat/completions'}})
-  status,data=engine_request('GET',self.path);self.reply(status or 502,data)
+  if self.path.split('?')[0] not in ('/health','/v1/models','/v1/status'):return self.reply(404,{'error':{'message':'Use /v1/chat/completions'}})
+  headers={name:self.headers[name] for name in ('Authorization','X-API-Key') if name in self.headers}
+  status,data=engine_request('GET',self.path,timeout=5,headers=headers);self.reply(status or 502,data)
  def do_POST(self):
   if self.path.split('?')[0]!='/v1/chat/completions':return self.reply(404,{'error':{'message':'Use /v1/chat/completions'}})
   try:

@@ -50,10 +50,11 @@ def main():
    try:
     with urllib.request.urlopen(upstream+'/health',timeout=2) as r:
      if r.status==200 and backend_ready.exists():
+      health=json.load(r)
       try:backend_record=json.loads(backend_ready.read_text())
       except (OSError,ValueError):backend_record={}
       if backend_record.get('pid')==proc.pid and backend_record.get('api_state')=='ready':break
-   except OSError:pass
+   except (OSError,ValueError):pass
    time.sleep(0.25)
   else:raise RuntimeError('Upstream readiness timeout')
   if proc.poll() is not None:raise RuntimeError(f'Upstream exited: {proc.returncode}')
@@ -61,9 +62,17 @@ def main():
   controller.SESSION_DIR=cfg['slot_save_path'];controller.INDEX_FILE=str(Path(controller.SESSION_DIR)/'index.json')
   controller.CACHE_BUDGET=int(cfg.get('l2_disk_budget_mib',32768))*1024**2
   server=controller.ThreadingHTTPServer((controller.LISTEN_HOST,port),controller.ControllerHandler);server.daemon_threads=True
+  images=health.get('images') if isinstance(health,dict) else None
+  if type(images) is not bool:images=None
+  vision=cfg.get('vision') or {}
+  on_demand=images is True and (vision.get('expert_lease') is True or vision.get('elastic') is True)
+  if images is True:vision_status='已启用，首张图片时加载' if on_demand else '已启用'
+  elif images is False:vision_status='后端未启用' if vision else '未配置'
+  else:vision_status='后端未报告状态'
   if ready:
    record=dict(backend_record)
    record.update(backend_api_url=record.get('api_url'),backend_pid=record.get('pid'),pid=os.getpid(),bound_host=controller.LISTEN_HOST,bound_port=port,api_url=f'http://127.0.0.1:{port}')
+   record['vision']={'enabled':images,'on_demand':on_demand}
    if cfg.get('configuration_status'):record['configuration_status']=cfg['configuration_status']
    with tempfile.NamedTemporaryFile('w',dir=ready.parent,delete=False) as f:json.dump(record,f);tmp=Path(f.name)
    os.replace(tmp,ready)
@@ -71,6 +80,7 @@ def main():
    proc.wait();server.shutdown()
   threading.Thread(target=watch,daemon=True).start()
   print(json.dumps({'l2':'ready','host':controller.LISTEN_HOST,'port':port,'backend_port':backend_port,'prior':cfg.get('env',{}).get('STRATA_ROUTE_PRIOR'),'session_v2':cfg.get('env',{}).get('STRATA_SESSION_V2'),'session_v3':cfg.get('env',{}).get('STRATA_SESSION_V3'),'disk_budget_mib':controller.CACHE_BUDGET//1024**2,'writer_budget_mib':0}),flush=True)
+  print(f'Strata 正式 API 已就绪（端口 {port}）。视觉：{vision_status}。',flush=True)
   server.serve_forever()
   if proc.poll() not in (None,0):raise RuntimeError(f'Upstream exited: {proc.returncode}')
  except KeyboardInterrupt:pass

@@ -25,7 +25,8 @@ root = Path(__file__).parent
 class API(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_GET(self):
-        self.send_response(200); self.end_headers(); self.wfile.write(b'{"status":"ok"}')
+        self.send_response(200); self.end_headers()
+        self.wfile.write(json.dumps({'status': 'ok', 'images': bool(cfg.get('vision'))}).encode())
     def do_POST(self):
         assert self.path == '/v1/chat/completions'
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
@@ -60,7 +61,7 @@ def wait_until(check, process, seconds=10):
 
 
 class StartupBenchmark(unittest.TestCase):
-    def launch(self, root, fail, delayed_save=False):
+    def launch(self, root, fail, delayed_save=False, vision=False):
         here = Path(__file__).resolve().parent
         (root / 'l2').mkdir()
         for name in ('managed_server.py', 'reference_controller.py', 'startup_benchmark.py', 'runtime_config.py'):
@@ -83,7 +84,8 @@ class StartupBenchmark(unittest.TestCase):
         config = root / 'profile.json'
         config.write_text(json.dumps({'port': front, 'l2_backend_port': back, 'args': [], 'host': '127.0.0.1',
                                       'slot_save_path': str(root / 'archives'), 'drafting': 'dflash2',
-                                      'startup_benchmark': {'output_dir': str(root / 'results')}}))
+                                      'startup_benchmark': {'output_dir': str(root / 'results')},
+                                      **({'vision': {'expert_lease': True}} if vision else {})}))
         output = (root / 'console.log').open('w')
         self.addCleanup(output.close)
         p = subprocess.Popen([sys.executable, str(root / 'l2/managed_server.py'), '--profile', str(config),
@@ -117,6 +119,17 @@ class StartupBenchmark(unittest.TestCase):
             self.assertFalse((root/'bench-entered').exists())
             self.assertFalse((root/'results'/'latest.json').exists())
             self.assertFalse((root/'archives'/'index.json').exists())
+            self.stop(p)
+
+    def test_ready_record_reports_backend_image_support(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            port, p = self.launch(root, False, vision=True)
+            record = json.loads((root / 'ready.json').read_text())
+            with urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=2) as response:
+                self.assertTrue(json.load(response)['images'])
+            self.assertEqual(record['vision'], {'enabled': True, 'on_demand': True})
+            self.assertIn('视觉：已启用，首张图片时加载', (root / 'console.log').read_text())
             self.stop(p)
 
     def test_shutdown_drains_completed_stream_archive(self):

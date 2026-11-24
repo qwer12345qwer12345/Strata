@@ -1,4 +1,4 @@
-"""Compare the four production PR switches before binding the public API."""
+"""Flip each PR switch from its production value before binding the public API."""
 import copy
 import hashlib
 import json
@@ -42,7 +42,7 @@ def meminfo():
             re.findall(r'^(\w+):\s+(\d+) kB', Path('/proc/meminfo').read_text(), re.M)}
 
 
-def trial_config(cfg, folder, seed, switch):
+def trial_config(cfg, folder, seed, switch, trial_value):
     trial = copy.deepcopy(cfg)
     for k in ('slot_save_path', 'startup_benchmark', 'l2_backend_port', 'l2_disk_budget_mib', 'startup_pr_ablation'):
         trial.pop(k, None)
@@ -55,7 +55,7 @@ def trial_config(cfg, folder, seed, switch):
     trial.update(host='127.0.0.1', port=0, offline=True, api_key='', log=str(folder / 'engine.log'), engine_ready_s=85)
     trial['env'].update(STRATA_CONV_DISK_DIR=str(folder / 'parked'), STRATA_DRAFT_LOG='1', STRATA_DECODE_TIMING='1')
     if switch:
-        trial['env'][switch] = '0'
+        trial['env'][switch] = trial_value
     return trial
 
 
@@ -164,7 +164,11 @@ def serve_trial(root, trial, folder, end, result):
                 if match:
                     row.update(verify_rounds=int(match[1]), verify_width_mean=float(match[2]),
                                tokens_per_round=float(match[3]), ms_per_round=float(match[4]))
-                    cpu = re.search(r'CPU ([\d.]+)\]', detail[match.start():].splitlines()[0])
+                    # Keep the engine's existing breakdown. "GPU-reach wait" includes scheduling
+                    # and synchronization, so it must not be reported as the isolated kernel time.
+                    timing_line = detail[match.start():].splitlines()[0]
+                    row['decode_timing'] = timing_line
+                    cpu = re.search(r'CPU ([\d.]+)\]', timing_line)
                     if cpu:
                         row['cpu_expert_ms_per_round'] = float(cpu[1])
                 hit = re.search(r'decode expert cache hit rate: ([\d.]+)%', detail)
@@ -187,7 +191,7 @@ def run_at_boot(root, cfg, directory, settings, scratch_parent):
     """A diagnostic failure is recorded before the normal service starts."""
     if not headless_boot():
         return
-    report = {'suite': 'startup-pr-ablation-v1', 'status': 'incomplete', 'runs': []}
+    report = {'suite': 'startup-pr-ablation-v2', 'status': 'incomplete', 'runs': []}
     destination = directory / 'startup-pr-ablation-latest.json'
     try:
         deadline = time.monotonic() + int(settings.get('budget_s', 330))
@@ -204,32 +208,42 @@ def run_at_boot(root, cfg, directory, settings, scratch_parent):
             seed = scratch / 'profile.bin'
             seed.write_bytes(profile.read_bytes())
             report['expert_profile_sha256'] = hashlib.sha256(seed.read_bytes()).hexdigest()
-            for name, switch, expected in (('baseline', None, None), *SWITCHES):
+            for name, switch, enabled_value in (('baseline', None, None), *SWITCHES):
                 if time.monotonic() >= deadline:
                     break
                 result = {'arm': name, 'switch': switch, 'status': 'failed'}
                 report['runs'].append(result)
-                if switch and cfg['env'].get(switch) != expected:
-                    result.update(status='skipped', error='switch is already disabled in production')
-                    continue
-                print(f'Strata PR 消融 {name} 开始。', flush=True)
+                trial_value = None
+                label = '生产基线'
+                if switch:
+                    production_value = report['baseline_switches'][switch]
+                    if production_value not in ('0', enabled_value):
+                        result.update(status='skipped', error='production must explicitly select 0 or the tested enabled value')
+                        continue
+                    trial_value = enabled_value if production_value == '0' else '0'
+                    result.update(production_value=production_value, trial_value=trial_value)
+                    label = f'{name}（{switch}: {production_value} → {trial_value}）'
+                print(f'Strata PR 消融 {label} 开始。', flush=True)
                 folder = scratch / name
                 folder.mkdir()
                 try:
-                    serve_trial(root, trial_config(cfg, folder, seed, switch), folder,
+                    serve_trial(root, trial_config(cfg, folder, seed, switch, trial_value), folder,
                                 min(deadline, time.monotonic() + 85), result)
                     row = result['timed']
                     timing = row['timings']
                     if switch:
                         baseline = report['runs'][0]['timed']['timings']
-                        result['delta_when_disabled'] = {
+                        result['delta_vs_production'] = {
                             k: round(timing[k] - baseline[k], 3) for k in ('prompt_ms', 'predicted_per_second')
                         }
-                    print(f"Strata PR 消融 {name}：预填充 {timing['prompt_ms']:.0f} ms，"
-                          f"解码 {timing['predicted_per_second']:.1f} token/s。", flush=True)
+                    rounds = ''
+                    if 'ms_per_round' in row:
+                        rounds = f"（每窗口 {row['ms_per_round']:.2f} ms，产出 {row['tokens_per_round']:.2f} token）"
+                    print(f"Strata PR 消融 {label}：预填充 {timing['prompt_ms']:.0f} ms，"
+                          f"解码 {timing['predicted_per_second']:.1f} token/s{rounds}。", flush=True)
                 except Exception as exc:
                     result['error'] = str(exc)
-                    print(f'Strata PR 消融 {name}：{exc}', flush=True)
+                    print(f'Strata PR 消融 {label}：{exc}', flush=True)
                     if name == 'baseline' or result.get('limit_hit') == 'memory':
                         break
         if len(report['runs']) == 1 + len(SWITCHES) and all(r['status'] == 'measured' for r in report['runs']):

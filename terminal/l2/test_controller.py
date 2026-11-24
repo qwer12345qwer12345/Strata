@@ -8,9 +8,13 @@ class ControllerTests(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory();self.calls=[];self.release=threading.Event();owner=self
   class Backend(BaseHTTPRequestHandler):
    def log_message(self,*a):pass
-   def do_GET(self):self.reply({'ok':True})
-   def reply(self,obj):
-    b=json.dumps(obj).encode();self.send_response(200);self.send_header('Content-Length',str(len(b)));self.end_headers();self.wfile.write(b)
+   def do_GET(self):
+    if self.path=='/v1/status':
+     if self.headers.get('Authorization')!='Bearer fixture':return self.reply({'error':'missing key'},401)
+     return self.reply({'vision':{'enabled':True,'available':True}})
+    self.reply({'ok':True})
+   def reply(self,obj,status=200):
+    b=json.dumps(obj).encode();self.send_response(status);self.send_header('Content-Length',str(len(b)));self.end_headers();self.wfile.write(b)
    def do_POST(self):
     body=json.loads(self.rfile.read(int(self.headers.get('Content-Length','0'))));owner.calls.append((self.path,body))
     if self.path=='/v1/chat/completions' and body.get('messages',[{}])[-1].get('content')=='slow-prefill':owner.release.wait(3)
@@ -37,6 +41,12 @@ class ControllerTests(unittest.TestCase):
  def body(self,text):return {'messages':[{'role':'system','content':'same system'},{'role':'user','content':text}],'max_tokens':8}
  def request(self,b,timeout=10):return urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:{self.front.server_port}/v1/chat/completions',data=json.dumps(b).encode(),headers={'Content-Type':'application/json'}),timeout=timeout)
  def test_first_user_distinguishes_same_tool_conversations(self):self.assertNotEqual(c.family(self.body('A')),c.family(self.body('B')))
+ def test_vision_status_preserves_backend_authentication(self):
+  endpoint=f'http://127.0.0.1:{self.front.server_port}/v1/status'
+  with self.assertRaises(urllib.error.HTTPError) as blocked:urllib.request.urlopen(endpoint,timeout=1)
+  with blocked.exception as response:self.assertEqual(response.code,401)
+  request=urllib.request.Request(endpoint,headers={'Authorization':'Bearer fixture'})
+  with urllib.request.urlopen(request,timeout=1) as response:self.assertTrue(json.load(response)['vision']['enabled'])
  def test_stream_arrives_before_backend_finishes(self):
   b=self.body('stream');b['stream']=True;received=False
   try:
