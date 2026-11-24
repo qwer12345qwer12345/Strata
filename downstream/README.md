@@ -269,7 +269,7 @@ python downstream/scripts/test.py --feature example \
 
 关键参数交互与识图当前边界见 [GLOBAL_REVIEW_AND_VISION.md](GLOBAL_REVIEW_AND_VISION.md)。
 
-当前显式开启ADAPT_NOWAIT与官方tail skip7，依据和手动测试组见 [NOWAIT_AND_TAIL_SKIP.md](NOWAIT_AND_TAIL_SKIP.md)。
+当前显式开启ADAPT_NOWAIT，尾部专家跳过已按本机重复输出结果关闭（`STRATA_ROUTE_TAIL_SKIP=0`，`STRATA_ADAPT_FETCH=2`）；依据和手动测试组见 [NOWAIT_AND_TAIL_SKIP.md](NOWAIT_AND_TAIL_SKIP.md)。
 
 官方与下游数值/性能取舍的完整审计见 [NUMERICAL_PERFORMANCE_AUDIT.md](NUMERICAL_PERFORMANCE_AUDIT.md)，包含已有K8V4 IMMA与待扩展decode split的区别，以及spec参数接线修正。
 

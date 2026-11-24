@@ -1,6 +1,6 @@
 # ADAPT_NOWAIT 与官方 tail skip=7 核对
 
-当前基线 c6f6427 / engine0.1.65，GPU RTX3080 12GiB，Gyro-S，prior固定0.5。本次只做源码、现有日志与配置检查；没有跑模型、GPU性能测试或重新编译引擎。
+初始源码核对基于 c6f6427 / engine0.1.65，GPU RTX3080 12GiB，Gyro-S，prior固定0.5。下面的tail=7说明记录其原理与旧选择；2026-11-24本机受控输出质量测试后，当前日用配置已改为tail=0、ADAPT_FETCH=2。
 
 用户允许为性能收益接受数值/输出差异。此前以严格可重复性为默认目标关闭NOWAIT的本机决策不符合这一取舍，现已纠正。两项都用上游仍保留的开关选入，不把上游默认全局改回去，也不需要新内核。
 
@@ -10,12 +10,13 @@
 {
   "STRATA_ADAPT_NOWAIT": "1",
   "STRATA_ADAPT_LAG": "2",
-  "STRATA_ROUTE_TAIL_SKIP": "7",
-  "STRATA_ROUTE_TAIL_RENORM": "0"
+  "STRATA_ROUTE_TAIL_SKIP": "0",
+  "STRATA_ROUTE_TAIL_RENORM": "0",
+  "STRATA_ADAPT_FETCH": "2"
 }
 ```
 
-正常下次启动生效。配置状态继续为组合NOT TESTED，不为套用新参数中断现有使用，不恢复开机基准或自动队列。
+下次无头启动生效。完整组合的性能/质量仍未通过验收；不为配置切换中断当前使用，不恢复开机基准或自动队列。
 
 ## ADAPT_NOWAIT
 
@@ -27,7 +28,7 @@
 
 注意文档矛盾：固定版本的 `docs/DETAILS.md` SM86表格和settings register的部分note仍写NOWAIT默认1，而当前 `nv_defaults.cpp` 真正执行的SM86表未包含它。以代码分支为准；本机现在通过显式环境项1消除歧义。
 
-## ROUTE_TAIL_SKIP=7
+## ROUTE_TAIL_SKIP=7（原选项，现已关闭）
 
 它与 `STRATA_DF2_LOOKUP_SKIP=8` 是两个独立开关。前者省CPU/PCIe专家工作；后者延后可避免的神经草稿。
 
