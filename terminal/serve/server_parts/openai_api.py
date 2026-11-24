@@ -207,6 +207,9 @@ def openai_collect(chunks) -> dict:
         out["strata_rejected_tool_calls"] = last["strata_rejected_tool_calls"]
     if last.get("strata_unread_tool_markup"):
         out["strata_unread_tool_markup"] = last["strata_unread_tool_markup"]
+    for name in ("strata_generation_failure", "strata_generation_recovery"):
+        if name in last:
+            out[name] = last[name]
     return out
 
 

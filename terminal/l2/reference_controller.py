@@ -53,6 +53,8 @@ def engine_request(method,path,body=None,timeout=180):
   except (ValueError,OSError):return e.code,{}
  except (OSError,ValueError) as e:return 0,{'error':str(e)}
 def cache_body(body):return {k:body[k] for k in ('messages','tools','chat_template_kwargs') if k in body}
+def cacheable_response(data):
+ return isinstance(data,dict) and 'error' not in data and not data.get('strata_generation_failure')
 def handle_turn(body):
  hs=chain_hashes(body.get('messages'));row=find_entry(load_index(),family(body),hs)
  if not row:return None
@@ -147,13 +149,16 @@ class ControllerHandler(BaseHTTPRequestHandler):
         payload=line[5:].strip()
         if payload==b'[DONE]':
          self.wfile.write(b'\n');self.wfile.flush();complete=True;break
-        try:failed=failed or 'error' in json.loads(payload)
+        try:failed=failed or not cacheable_response(json.loads(payload))
         except (ValueError,TypeError):pass
       watch_stop.set()
       if complete and not failed:after_turn(body,True)
      else:
       data=r.read();watch_stop.set()
-      if r.status==200:after_turn(body,True)
+      if r.status==200:
+       try:cacheable=cacheable_response(json.loads(data))
+       except (ValueError,TypeError):cacheable=False
+       if cacheable:after_turn(body,True)
       self.send_response(r.status);self.send_header('Content-Type',r.headers.get('Content-Type','application/json'));self.send_header('Content-Length',str(len(data)));self.end_headers();sent=True;self.wfile.write(data)
    except urllib.error.HTTPError as e:
     if not sent:

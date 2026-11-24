@@ -24,7 +24,8 @@ class RuntimeConfiguration(unittest.TestCase):
    'archive_dir':str(root/'archives'),'ple_gguf':str(ple),'ampere_rows':'2',
    'environment':{'STRATA_DF2_AMPERE_TUNING':'2','STRATA_DF2_GEMM_TC':'0','STRATA_ADAPT_NOWAIT':'1','STRATA_ROUTE_TAIL_SKIP':'7'},
    'argument_overrides':{'--spec':'4','--lookup-max-t':'16'},'configuration_status':'NOT TESTED',
-   'vision':{'gpu':True,'expert_lease':True},'vram_elastic':True}
+   'vision':{'gpu':True,'expert_lease':True},'vram_elastic':True,'repeat_failure_retry':True,
+   'flag_overrides':{'--session-save-reclaim':True}}
   (state/'production-baseline.json').write_text(json.dumps(selection))
   file=root/'profile.json';file.write_text(json.dumps(profile))
   return profile,file,state
@@ -40,6 +41,9 @@ class RuntimeConfiguration(unittest.TestCase):
    self.assertEqual(cfg['env']['STRATA_ROUTE_TAIL_SKIP'],'7')
    self.assertEqual(cfg['configuration_status'],'NOT TESTED')
    self.assertTrue(cfg['vision']['expert_lease']);self.assertTrue(cfg['vram_elastic'])
+   self.assertTrue(cfg['repeat_failure_retry'])
+   for key in ('args', 'user_args'):
+    self.assertEqual(cfg[key].count('--session-save-reclaim'), 1)
    self.assertEqual(profile,before)
  def test_legacy_profile_pins_selection_for_official_drafting(self):
   from strata_control import user_args

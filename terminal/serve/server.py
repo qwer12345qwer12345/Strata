@@ -4116,6 +4116,7 @@ class Service:
         self.reasoning_budget_configured = False         # the config named reasoning_budget_tokens (0 included): no family default
         self.reasoning_budget_tokens = 0                 # #123: the config's default thinking budget (0: none)
         self.repeat_stop_tokens = REPEAT_STOP_TOKENS     # #606: one token this many times in a row ends a reply (0: off)
+        self.repeat_failure_retry = False               # retry an unpublished repetitive draft once
         self.anthropic_think_unasked = True               # #278: "anthropic_thinking": "on_request" -> False
         self.undeclared_tool_calls = "text"               # #4622: config "undeclared_tool_calls": "call" hands a call of an undeclared name to the client
         self.tool_call_recovery = True                    # default on (0.2.8): tool calls in forms next to the template's; config "tool_call_recovery": false turns it off
@@ -5604,7 +5605,11 @@ class Service:
         if ka is not None:
             ka.acquire()
         try:
-            yield from self._run(ids, thinking, tools, max_new, sampling, cancel, force, declared_only, deferred)
+            if self.repeat_failure_retry:
+                from serve.repeat_recovery import run
+                yield from run(self, ids, thinking, tools, max_new, sampling, cancel, force, declared_only, deferred)
+            else:
+                yield from self._run(ids, thinking, tools, max_new, sampling, cancel, force, declared_only, deferred)
         finally:
             if ka is not None:
                 ka.release()
@@ -6288,6 +6293,9 @@ class Service:
         done = {"finish": finish, "completion_tokens": n, "reused": (timings or {}).get("cache_n", 0),
                 "timings": timings, "reasoning_tokens": thinking_n,
                 "reasoning_recoveries": recovery_count}
+        if repeated and self.repeat_failure_retry:
+            done["repeated"] = True
+            done["_repeat_sampling"] = sampling
         if stops is not None and stops.hit is not None:
             done["stop_sequence"] = stops.hit
             if finish == "length":
@@ -6554,6 +6562,9 @@ def openai_chunks(svc: Service, req: dict, ids, thinking, tools, max_new, cancel
                 last["strata_rejected_tool_calls"] = x["rejected_tool_calls"]     # #3796: only when a call was refused as undeclared
             if x.get("unread_tool_markup"):
                 last["strata_unread_tool_markup"] = x["unread_tool_markup"]
+            for name in ("generation_failure", "generation_recovery"):
+                if name in x:
+                    last["strata_" + name] = x[name]
             yield last
     if not answered_done and not cancel.is_set():
         # Every admitted request ends with a "done" event that carries its finish reason. A run that simply stopped (a 200 with one chunk and no
@@ -9099,6 +9110,9 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
     svc.chatml_tool_guard = cfg.get("chatml_tool_guard", False)
     if not isinstance(svc.chatml_tool_guard, bool):
         raise SystemExit('[strata] config chatml_tool_guard must be true or false')
+    svc.repeat_failure_retry = cfg.get("repeat_failure_retry", False)
+    if not isinstance(svc.repeat_failure_retry, bool):
+        raise SystemExit('[strata] config repeat_failure_retry must be true or false')
     retry = cfg.get("tool_markup_retry", True)         # (a): false (or STRATA_TOOL_MARKUP_RETRY=0) sends the markup as text
     if not isinstance(retry, bool):
         raise SystemExit(f"[strata] config \"tool_markup_retry\" must be true or false, not {retry!r}")

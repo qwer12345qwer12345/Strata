@@ -18,8 +18,10 @@ class ControllerTests(unittest.TestCase):
      self.send_response(200);self.send_header('Content-Type','text/event-stream');self.send_header('Connection','close');self.end_headers()
      self.wfile.write(b'data: {"choices":[{"delta":{"content":"first"}}]}\n\n');self.wfile.flush()
      owner.release.wait(3)
+     if body['messages'][-1].get('content')=='repeat-failure':
+      self.wfile.write(b'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"strata_generation_failure":{"reason":"repetition"}}\n\n');self.wfile.flush()
      self.wfile.write(b'data: [DONE]\n\n');self.wfile.flush();self.close_connection=True
-    elif self.path=='/v1/chat/completions':self.reply({'choices':[{'message':{'role':'assistant','content':'ok'}}]})
+    elif self.path=='/v1/chat/completions':self.reply({'choices':[{'message':{'role':'assistant','content':'ok'}}],**({'strata_generation_failure':{'reason':'repetition'}} if body['messages'][-1].get('content')=='repeat-failure' else {})})
     elif self.path=='/v1/cache/probe':self.reply({'prompt_tokens':10000,'reusable_tokens':0})
     elif self.path=='/v1/cache/preload':self.reply({'serial':1,'tokens':9000})
     else:self.reply({'ok':True,'tokens':9000})
@@ -66,6 +68,15 @@ class ControllerTests(unittest.TestCase):
   for text in ['A','B','A']:
    with self.request(self.body(text)) as r:r.read()
   self.assertEqual(sum('action=saveinc' in p for p,b in self.calls),2)
+ def test_failed_generation_notice_does_not_overwrite_good_archive(self):
+  with self.request(self.body('root')) as r:r.read()
+  before=c.load_index();self.release.set()
+  for stream in (False,True):
+   bad=self.body('root');bad.update(stream=stream)
+   bad['messages'] += [{'role':'assistant','content':'previous good reply'},{'role':'user','content':'repeat-failure'}]
+   with self.request(bad) as r:r.read()
+   self.assertEqual(c.load_index(),before)
+  self.assertEqual(sum('action=saveinc' in p for p,b in self.calls),1)
  def test_return_to_ancestor_does_not_overwrite_descendant(self):
   root=self.body('root');child=self.body('root');child['messages'] += [{'role':'assistant','content':'one'},{'role':'user','content':'child'}]
   for body in [root,child,root]:

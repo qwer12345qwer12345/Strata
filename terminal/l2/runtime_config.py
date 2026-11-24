@@ -19,6 +19,17 @@ def set_options(args, overrides):
     return args
 
 
+def set_flags(args, overrides):
+    args = list(args)
+    for flag, enabled in overrides.items():
+        if not isinstance(enabled, bool):
+            raise ValueError('Boolean engine flag expected: ' + flag)
+        args = [item for item in args if item != flag]
+        if enabled:
+            args.append(flag)
+    return args
+
+
 def select(root, cfg, directory):
     path = directory / 'production-baseline.json'
     if not path.is_file():
@@ -45,13 +56,15 @@ def select(root, cfg, directory):
     # profiles may have neither user_args nor args_written, so changing args
     # alone lets drafting.apply replace our selected --spec with its default.
     result['user_args'] = set_options(result.get('user_args', []), overrides)
+    for key in ('args', 'user_args'):
+        result[key] = set_flags(result[key], data.get('flag_overrides', {}))
     rows = data.get('ampere_rows', '2')
     if rows not in ('0', '2'):
         raise ValueError('Ampere expert rows must be 0 or 2')
     result.setdefault('env', {}).update(STRATA_TQ_AMPERE_ROWS=rows,
                                       STRATA_PF_FUSED_TQ='1', STRATA_PF_GROUP_SCRATCH='0')
     result['env'].update(data.get('environment', {}))
-    for key in ('vision','vram_elastic'):
+    for key in ('vision', 'vram_elastic', 'repeat_failure_retry'):
         if key in data:result[key]=copy.deepcopy(data[key])
     result.update(exe=str(exe), cwd=str(root), log=data['log'], slot_save_path=data['archive_dir'],
                   configuration_status=data.get('configuration_status', STATUS))
