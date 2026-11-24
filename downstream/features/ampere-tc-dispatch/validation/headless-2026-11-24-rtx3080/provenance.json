@@ -1,0 +1,48 @@
+{
+  "run_id": "full-suite-20261124-041837-964068",
+  "command": "sudo ~/.local/bin/strata-headless-compare --all",
+  "reported_window_local": "2026-11-24 04:18:36–08:29:49 Asia/Shanghai (about 4 h 11 min)",
+  "environment": {
+    "os": "CachyOS Linux 7.3.3-1",
+    "gpu": "NVIDIA GeForce RTX 3080, 12 GiB, SM86",
+    "driver": "620.70.06",
+    "cuda_toolkit": "13.4",
+    "strata_terminal": "0.2.12 (build 0.1.58)",
+    "python": "3.12.15",
+    "engine_binary_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf"
+  },
+  "source_state": {
+    "runtime_base_commit": "6a6db7ff58c283cf28d2b913404b5fa31a767eaa",
+    "runtime_worktree": "66 modified/untracked paths; not reproducible from base commit alone",
+    "dense_layout_sweep_original_repository_blob": "10c01972ea692a51ad44769c106396afafe38f82",
+    "dense_layout_sweep_corrected_sha256": "64165749772178a6d2cca47c3689250bdd2343a793bd062ac5dad8ff95fd91ca"
+  },
+  "raw_result_sources": {
+    "full-suite-results.json": {
+      "sha256": "a48bbf07d295585a68d97d2327c855273ad5996934382bfc107a726194fad9b2",
+      "size_bytes": 3027773,
+      "sanitized_before_commit": true
+    },
+    "comparison-results.json": {
+      "sha256": "e739d6fd06d132569196cd39e8169564307e4de1c30e9a836e8229d33a68e86c",
+      "size_bytes": 2555956,
+      "sanitized_before_commit": true
+    },
+    "kernel-results.json": {
+      "sha256": "3e9181b054719c679a49071c0bd395f0ca15194172ffc8bd8ea8b35b205f7adb",
+      "size_bytes": 919,
+      "sanitized_before_commit": true
+    },
+    "vision-results.json": {
+      "sha256": "9e5e2333cdea8230de94a2599da365e2737645d21d828ac7f3af846db72247f7",
+      "size_bytes": 8232,
+      "sanitized_before_commit": true
+    },
+    "dense-layout.jsonl": {
+      "sha256": "96ff8269d6f8a7a1bbb164eb73f0a3d965c884ef42f1eb1a73011e181e6ad4e9",
+      "size_bytes": 202957,
+      "sanitized_before_commit": false
+    }
+  },
+  "redaction": "Absolute local paths and host/private network identifiers were redacted; metrics, settings, run records, errors, hashes and statuses were retained. Generated response text is not present in these reports; response fingerprints are SHA-256 values."
+}

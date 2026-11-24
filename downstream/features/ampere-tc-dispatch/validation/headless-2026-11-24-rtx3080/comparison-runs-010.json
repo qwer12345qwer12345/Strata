@@ -1,0 +1,5015 @@
+{
+  "format": "strata-headless-comparison-runs-v1",
+  "shard": 10,
+  "shards_total": 12,
+  "run_index_start": 136,
+  "run_index_end": 150,
+  "suite": "manual-theory-v4",
+  "status": "incomplete",
+  "engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+  "seed_sha256": "becdada4f3ac30aad7dcf3fbb7ec531d80239c86cbcb4c7266721508991fdccd",
+  "runs": [
+    {
+      "phase": "tq-prefill-0-16384",
+      "status": "failed",
+      "cases": [],
+      "memory": {
+        "min_available_mib": 643,
+        "max_new_swap_mib": 0
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:16384 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.3 GB/s host->device (best of 25.2 25.2 25.2 25.3) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 4017 of the prompt path's 4017 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 22.75 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 22.8 GiB RAM copy (4017 lend slots kept), file tier 0.0 GiB; 0.0 GiB available for the page cache; PCIe 25.3 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:30:15 strata serve: prompt chunk auto: 16384 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 1 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:30:15 strata serve: 514 MiB of VRAM free with everything loaded"
+      ],
+      "error": "startup comparison reached its time or memory limit",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 16384,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 0,
+        "fetch": 2,
+        "hc_persist": 1,
+        "qfuse": 0,
+        "l3": 0,
+        "pin": 0.25,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "tq-prefill",
+        "name": "tq-prefill-0-16384"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": false,
+      "trace": [],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [],
+        "adapt_wait_ms_per_window_samples": []
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "0",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "1",
+        "STRATA_QFUSE": "0",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0.25",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "tq-prefill-0-16384",
+      "status": "failed",
+      "cases": [],
+      "memory": {
+        "min_available_mib": 962,
+        "max_new_swap_mib": 0
+      },
+      "error": "startup comparison reached its time or memory limit",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 16384,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 0,
+        "fetch": 2,
+        "hc_persist": 1,
+        "qfuse": 0,
+        "l3": 0,
+        "pin": 0.25,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "tq-prefill",
+        "name": "tq-prefill-0-16384"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": false,
+      "trace": [],
+      "optimization_log": {
+        "tail_skip_reported": false,
+        "tail_skip_cumulative_samples": [],
+        "adapt_wait_ms_per_window_samples": []
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "0",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "1",
+        "STRATA_QFUSE": "0",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0.25",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "tq-prefill-1-16384",
+      "status": "failed",
+      "cases": [],
+      "memory": {
+        "min_available_mib": 651,
+        "max_new_swap_mib": 0
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:16384 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.2 GB/s host->device (best of 25.2 25.2 25.2 25.2) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 4017 of the prompt path's 4017 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 22.75 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 22.8 GiB RAM copy (4017 lend slots kept), file tier 0.0 GiB; 0.0 GiB available for the page cache; PCIe 25.2 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:31:30 strata serve: prompt chunk auto: 16384 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 8 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:31:30 strata serve: 514 MiB of VRAM free with everything loaded"
+      ],
+      "error": "startup comparison reached its time or memory limit",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 16384,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 1,
+        "fetch": 2,
+        "hc_persist": 1,
+        "qfuse": 0,
+        "l3": 0,
+        "pin": 0.25,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "tq-prefill",
+        "name": "tq-prefill-1-16384"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": false,
+      "trace": [],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [],
+        "adapt_wait_ms_per_window_samples": []
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "1",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "1",
+        "STRATA_QFUSE": "0",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0.25",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "tq-prefill-1-8192",
+      "status": "failed",
+      "cases": [
+        {
+          "case": "warmup",
+          "target_tokens": 64,
+          "first_content_ms": 299.268,
+          "wall_ms": 1218.299,
+          "finish": "length",
+          "stream": {
+            "content_events": 64,
+            "gap_p50_ms": 19.606,
+            "gap_p90_ms": 33.82,
+            "gap_p95_ms": 38.531,
+            "gap_p99_ms": 44.136,
+            "gap_max_ms": 44.136
+          },
+          "timings": {
+            "prompt_n": 23,
+            "prompt_ms": 261.2,
+            "predicted_n": 64,
+            "predicted_ms": 945.7,
+            "predicted_per_token_ms": 14.777,
+            "predicted_per_second": 67.7,
+            "prompt_per_token_ms": 11.357,
+            "prompt_per_second": 88.1,
+            "draft_n": 36,
+            "draft_n_accepted": 29,
+            "cache_n": 0
+          },
+          "output_sha256": "8de42007aa910c33bbcbda0a29e2b97e6858ba013ab07f59bbbea1b7e6462d17",
+          "verify_rounds": 35,
+          "verify_width_mean": 2.03,
+          "tokens_per_round": 1.83,
+          "ms_per_round": 27.02,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 5580.7
+        },
+        {
+          "case": "long_output",
+          "target_tokens": 3072,
+          "first_content_ms": 1079.325,
+          "wall_ms": 31924.936,
+          "finish": "length",
+          "stream": {
+            "content_events": 2755,
+            "gap_p50_ms": 0.025,
+            "gap_p90_ms": 35.421,
+            "gap_p95_ms": 36.411,
+            "gap_p99_ms": 37.955,
+            "gap_max_ms": 92.439
+          },
+          "timings": {
+            "prompt_n": 89,
+            "prompt_ms": 1060.1,
+            "predicted_n": 3072,
+            "predicted_ms": 30861.1,
+            "predicted_per_token_ms": 10.046,
+            "predicted_per_second": 99.5,
+            "prompt_per_token_ms": 11.911,
+            "prompt_per_second": 84.0,
+            "draft_n": 2253,
+            "draft_n_accepted": 2084,
+            "cache_n": 0
+          },
+          "output_sha256": "8a736886fcb95231476af66fafdcf0e682e52c666d47079fde2b7dcffe770a63",
+          "verify_rounds": 988,
+          "verify_width_mean": 3.28,
+          "tokens_per_round": 3.11,
+          "ms_per_round": 31.24,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        },
+        {
+          "case": "long_context",
+          "target_tokens": 1536,
+          "first_content_ms": 11075.677,
+          "wall_ms": 28821.611,
+          "finish": "length",
+          "stream": {
+            "content_events": 1462,
+            "gap_p50_ms": 0.06,
+            "gap_p90_ms": 35.874,
+            "gap_p95_ms": 37.21,
+            "gap_p99_ms": 38.996,
+            "gap_max_ms": 102.083
+          },
+          "timings": {
+            "prompt_n": 28750,
+            "prompt_ms": 11046.3,
+            "predicted_n": 1536,
+            "predicted_ms": 17761.8,
+            "predicted_per_token_ms": 11.564,
+            "predicted_per_second": 86.5,
+            "prompt_per_token_ms": 0.384,
+            "prompt_per_second": 2602.7,
+            "draft_n": 956,
+            "draft_n_accepted": 893,
+            "cache_n": 0
+          },
+          "output_sha256": "0bdd8156618c50202d5bd531adc18074482e393569e406db781a6765f32702e9",
+          "verify_rounds": 643,
+          "verify_width_mean": 2.49,
+          "tokens_per_round": 2.39,
+          "ms_per_round": 27.62,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        }
+      ],
+      "memory": {
+        "min_available_mib": 2152,
+        "max_new_swap_mib": 6
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:8192 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.2 GB/s host->device (best of 25.2 25.2 25.2 25.2) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 2252 of the prompt path's 2252 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 21.03 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 21.0 GiB RAM copy (2252 lend slots kept), file tier 0.0 GiB; 1.6 GiB available for the page cache; PCIe 25.2 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:31:51 strata serve: prompt chunk auto: 8192 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 1 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:31:51 strata serve: 558 MiB of VRAM free with everything loaded"
+      ],
+      "error": "logged Ampere CUDA path differs from the requested mode",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 8192,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 1,
+        "fetch": 2,
+        "hc_persist": 1,
+        "qfuse": 0,
+        "l3": 0,
+        "pin": 0.25,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "tq-prefill",
+        "name": "tq-prefill-1-8192"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": true,
+      "trace": [
+        {
+          "neural": {
+            "rounds": 34,
+            "offered": 36,
+            "accepted": 29,
+            "round_latency_ms": {
+              "samples": 34,
+              "p50": 26.679,
+              "p95": 40.638,
+              "p99": 44.512
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "4": 5,
+            "1": 13,
+            "3": 5,
+            "2": 11
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 5,
+              "p50": 38.928,
+              "p95": 44.512,
+              "p99": 44.512
+            },
+            "1": {
+              "samples": 13,
+              "p50": 20.16,
+              "p95": 21.745,
+              "p99": 21.745
+            },
+            "3": {
+              "samples": 5,
+              "p50": 31.324,
+              "p95": 39.18,
+              "p99": 39.18
+            },
+            "2": {
+              "samples": 11,
+              "p50": 27.128,
+              "p95": 33.763,
+              "p99": 33.763
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 971,
+            "offered": 2147,
+            "accepted": 2043,
+            "round_latency_ms": {
+              "samples": 971,
+              "p50": 33.738,
+              "p95": 37.085,
+              "p99": 38.37
+            }
+          },
+          "lookup": {
+            "rounds": 16,
+            "offered": 106,
+            "accepted": 41,
+            "round_latency_ms": {
+              "samples": 16,
+              "p50": 34.699,
+              "p95": 94.128,
+              "p99": 94.128
+            }
+          },
+          "widths": {
+            "3": 113,
+            "4": 610,
+            "2": 122,
+            "1": 137,
+            "16": 5
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 113,
+              "p50": 29.805,
+              "p95": 31.79,
+              "p99": 32.149
+            },
+            "4": {
+              "samples": 610,
+              "p50": 34.888,
+              "p95": 37.602,
+              "p99": 38.676
+            },
+            "2": {
+              "samples": 122,
+              "p50": 24.349,
+              "p95": 25.812,
+              "p99": 26.266
+            },
+            "1": {
+              "samples": 137,
+              "p50": 18.38,
+              "p95": 19.645,
+              "p99": 20.167
+            },
+            "16": {
+              "samples": 5,
+              "p50": 92.916,
+              "p95": 94.128,
+              "p99": 94.128
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 637,
+            "offered": 932,
+            "accepted": 886,
+            "round_latency_ms": {
+              "samples": 637,
+              "p50": 25.923,
+              "p95": 37.97,
+              "p99": 39.272
+            }
+          },
+          "lookup": {
+            "rounds": 5,
+            "offered": 24,
+            "accepted": 7,
+            "round_latency_ms": {
+              "samples": 5,
+              "p50": 30.387,
+              "p95": 103.001,
+              "p99": 103.001
+            }
+          },
+          "widths": {
+            "2": 124,
+            "1": 220,
+            "3": 74,
+            "4": 223,
+            "16": 1
+          },
+          "round_latency_ms_by_width": {
+            "2": {
+              "samples": 124,
+              "p50": 25.185,
+              "p95": 26.73,
+              "p99": 27.298
+            },
+            "1": {
+              "samples": 220,
+              "p50": 18.767,
+              "p95": 19.541,
+              "p99": 19.837
+            },
+            "3": {
+              "samples": 74,
+              "p50": 30.657,
+              "p95": 32.496,
+              "p99": 33.097
+            },
+            "4": {
+              "samples": 223,
+              "p50": 36.409,
+              "p95": 38.91,
+              "p99": 39.931
+            },
+            "16": {
+              "samples": 1,
+              "p50": 103.001,
+              "p95": 103.001,
+              "p99": 103.001
+            }
+          }
+        }
+      ],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [
+          {
+            "experts": 7000,
+            "entries": 7553
+          },
+          {
+            "experts": 249696,
+            "entries": 269562
+          },
+          {
+            "experts": 380612,
+            "entries": 408626
+          }
+        ],
+        "adapt_wait_ms_per_window_samples": [
+          0.03,
+          0.0,
+          0.0
+        ]
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "1",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "1",
+        "STRATA_QFUSE": "0",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0.25",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "tq-prefill-0-8192",
+      "status": "failed",
+      "cases": [
+        {
+          "case": "warmup",
+          "target_tokens": 64,
+          "first_content_ms": 264.477,
+          "wall_ms": 1157.081,
+          "finish": "length",
+          "stream": {
+            "content_events": 64,
+            "gap_p50_ms": 18.435,
+            "gap_p90_ms": 33.635,
+            "gap_p95_ms": 38.065,
+            "gap_p99_ms": 44.053,
+            "gap_max_ms": 44.053
+          },
+          "timings": {
+            "prompt_n": 23,
+            "prompt_ms": 233.4,
+            "predicted_n": 64,
+            "predicted_ms": 918.8,
+            "predicted_per_token_ms": 14.356,
+            "predicted_per_second": 69.7,
+            "prompt_per_token_ms": 10.148,
+            "prompt_per_second": 98.5,
+            "draft_n": 36,
+            "draft_n_accepted": 29,
+            "cache_n": 0
+          },
+          "output_sha256": "8de42007aa910c33bbcbda0a29e2b97e6858ba013ab07f59bbbea1b7e6462d17",
+          "verify_rounds": 35,
+          "verify_width_mean": 2.03,
+          "tokens_per_round": 1.83,
+          "ms_per_round": 26.25,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 5580.7
+        },
+        {
+          "case": "long_output",
+          "target_tokens": 3072,
+          "first_content_ms": 1045.042,
+          "wall_ms": 32027.407,
+          "finish": "length",
+          "stream": {
+            "content_events": 2790,
+            "gap_p50_ms": 0.025,
+            "gap_p90_ms": 35.212,
+            "gap_p95_ms": 36.171,
+            "gap_p99_ms": 37.792,
+            "gap_max_ms": 94.714
+          },
+          "timings": {
+            "prompt_n": 89,
+            "prompt_ms": 1025.9,
+            "predicted_n": 3072,
+            "predicted_ms": 30997.8,
+            "predicted_per_token_ms": 10.09,
+            "predicted_per_second": 99.1,
+            "prompt_per_token_ms": 11.527,
+            "prompt_per_second": 86.8,
+            "draft_n": 2284,
+            "draft_n_accepted": 2079,
+            "cache_n": 0
+          },
+          "output_sha256": "456af9fbd578eb410cfa8e58418e6db21958520014af71b6d7772f3b88b1d5e7",
+          "verify_rounds": 993,
+          "verify_width_mean": 3.3,
+          "tokens_per_round": 3.09,
+          "ms_per_round": 31.22,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        },
+        {
+          "case": "long_context",
+          "target_tokens": 1536,
+          "first_content_ms": 10963.231,
+          "wall_ms": 26759.182,
+          "finish": "length",
+          "stream": {
+            "content_events": 1455,
+            "gap_p50_ms": 0.025,
+            "gap_p90_ms": 36.733,
+            "gap_p95_ms": 37.492,
+            "gap_p99_ms": 38.32,
+            "gap_max_ms": 99.497
+          },
+          "timings": {
+            "prompt_n": 28750,
+            "prompt_ms": 10933.6,
+            "predicted_n": 1536,
+            "predicted_ms": 15811.8,
+            "predicted_per_token_ms": 10.294,
+            "predicted_per_second": 97.1,
+            "prompt_per_token_ms": 0.38,
+            "prompt_per_second": 2629.5,
+            "draft_n": 1076,
+            "draft_n_accepted": 1034,
+            "cache_n": 0
+          },
+          "output_sha256": "e6051a30af84e9367ca6e0869e0def9907f4d418cf739384743b47841338f662",
+          "verify_rounds": 502,
+          "verify_width_mean": 3.14,
+          "tokens_per_round": 3.06,
+          "ms_per_round": 31.5,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        }
+      ],
+      "memory": {
+        "min_available_mib": 2172,
+        "max_new_swap_mib": 2
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:8192 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.3 GB/s host->device (best of 25.2 25.3 25.3 25.2) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 2252 of the prompt path's 2252 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 21.03 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 21.0 GiB RAM copy (2252 lend slots kept), file tier 0.0 GiB; 1.6 GiB available for the page cache; PCIe 25.3 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:33:14 strata serve: prompt chunk auto: 8192 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 1 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:33:14 strata serve: 558 MiB of VRAM free with everything loaded"
+      ],
+      "error": "logged Ampere CUDA path differs from the requested mode",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 8192,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 0,
+        "fetch": 2,
+        "hc_persist": 1,
+        "qfuse": 0,
+        "l3": 0,
+        "pin": 0.25,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "tq-prefill",
+        "name": "tq-prefill-0-8192"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": false,
+      "trace": [
+        {
+          "neural": {
+            "rounds": 34,
+            "offered": 36,
+            "accepted": 29,
+            "round_latency_ms": {
+              "samples": 34,
+              "p50": 25.3,
+              "p95": 39.595,
+              "p99": 44.471
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "4": 5,
+            "1": 13,
+            "3": 5,
+            "2": 11
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 5,
+              "p50": 38.139,
+              "p95": 44.471,
+              "p99": 44.471
+            },
+            "1": {
+              "samples": 13,
+              "p50": 19.17,
+              "p95": 21.212,
+              "p99": 21.212
+            },
+            "3": {
+              "samples": 5,
+              "p50": 30.728,
+              "p95": 38.825,
+              "p99": 38.825
+            },
+            "2": {
+              "samples": 11,
+              "p50": 26.345,
+              "p95": 33.753,
+              "p99": 33.753
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 970,
+            "offered": 2162,
+            "accepted": 2026,
+            "round_latency_ms": {
+              "samples": 970,
+              "p50": 33.703,
+              "p95": 37.056,
+              "p99": 38.363
+            }
+          },
+          "lookup": {
+            "rounds": 22,
+            "offered": 122,
+            "accepted": 53,
+            "round_latency_ms": {
+              "samples": 22,
+              "p50": 34.516,
+              "p95": 93.897,
+              "p99": 96.256
+            }
+          },
+          "widths": {
+            "3": 105,
+            "1": 135,
+            "2": 121,
+            "4": 626,
+            "16": 5
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 105,
+              "p50": 29.556,
+              "p95": 31.711,
+              "p99": 32.562
+            },
+            "1": {
+              "samples": 135,
+              "p50": 18.266,
+              "p95": 19.624,
+              "p99": 20.197
+            },
+            "2": {
+              "samples": 121,
+              "p50": 24.504,
+              "p95": 26.167,
+              "p99": 26.838
+            },
+            "4": {
+              "samples": 626,
+              "p50": 34.871,
+              "p95": 37.413,
+              "p99": 38.594
+            },
+            "16": {
+              "samples": 5,
+              "p50": 93.148,
+              "p95": 96.256,
+              "p99": 96.256
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 500,
+            "offered": 1061,
+            "accepted": 1032,
+            "round_latency_ms": {
+              "samples": 500,
+              "p50": 35.167,
+              "p95": 38.042,
+              "p99": 38.973
+            }
+          },
+          "lookup": {
+            "rounds": 1,
+            "offered": 15,
+            "accepted": 2,
+            "round_latency_ms": {
+              "samples": 1,
+              "p50": 100.618,
+              "p95": 100.618,
+              "p99": 100.618
+            }
+          },
+          "widths": {
+            "1": 93,
+            "2": 61,
+            "3": 38,
+            "4": 308,
+            "16": 1
+          },
+          "round_latency_ms_by_width": {
+            "1": {
+              "samples": 93,
+              "p50": 18.69,
+              "p95": 19.337,
+              "p99": 19.862
+            },
+            "2": {
+              "samples": 61,
+              "p50": 25.22,
+              "p95": 26.814,
+              "p99": 27.142
+            },
+            "3": {
+              "samples": 38,
+              "p50": 30.625,
+              "p95": 32.249,
+              "p99": 32.915
+            },
+            "4": {
+              "samples": 308,
+              "p50": 36.584,
+              "p95": 38.227,
+              "p99": 39.089
+            },
+            "16": {
+              "samples": 1,
+              "p50": 100.618,
+              "p95": 100.618,
+              "p99": 100.618
+            }
+          }
+        }
+      ],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [
+          {
+            "experts": 7000,
+            "entries": 7553
+          },
+          {
+            "experts": 249526,
+            "entries": 269424
+          },
+          {
+            "experts": 375202,
+            "entries": 403180
+          }
+        ],
+        "adapt_wait_ms_per_window_samples": [
+          0.03,
+          0.0,
+          0.0
+        ]
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "0",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "1",
+        "STRATA_QFUSE": "0",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0.25",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "hc-qfuse-0-0",
+      "status": "failed",
+      "cases": [
+        {
+          "case": "warmup",
+          "target_tokens": 64,
+          "first_content_ms": 260.059,
+          "wall_ms": 1130.687,
+          "finish": "length",
+          "stream": {
+            "content_events": 64,
+            "gap_p50_ms": 17.543,
+            "gap_p90_ms": 28.519,
+            "gap_p95_ms": 32.362,
+            "gap_p99_ms": 41.472,
+            "gap_max_ms": 41.472
+          },
+          "timings": {
+            "prompt_n": 23,
+            "prompt_ms": 222.0,
+            "predicted_n": 64,
+            "predicted_ms": 896.0,
+            "predicted_per_token_ms": 14.0,
+            "predicted_per_second": 71.4,
+            "prompt_per_token_ms": 9.652,
+            "prompt_per_second": 103.6,
+            "draft_n": 29,
+            "draft_n_accepted": 24,
+            "cache_n": 0
+          },
+          "output_sha256": "d0c02cda246e78508417940d4155cd58e8182bb78103803ddc05da369a71afe5",
+          "verify_rounds": 40,
+          "verify_width_mean": 1.73,
+          "tokens_per_round": 1.6,
+          "ms_per_round": 22.4,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 5580.7
+        },
+        {
+          "case": "long_output",
+          "target_tokens": 3072,
+          "first_content_ms": 1027.936,
+          "wall_ms": 29513.745,
+          "finish": "length",
+          "stream": {
+            "content_events": 2722,
+            "gap_p50_ms": 0.026,
+            "gap_p90_ms": 32.362,
+            "gap_p95_ms": 33.465,
+            "gap_p99_ms": 35.159,
+            "gap_max_ms": 96.273
+          },
+          "timings": {
+            "prompt_n": 89,
+            "prompt_ms": 1005.7,
+            "predicted_n": 3072,
+            "predicted_ms": 28500.3,
+            "predicted_per_token_ms": 9.277,
+            "predicted_per_second": 107.8,
+            "prompt_per_token_ms": 11.3,
+            "prompt_per_second": 88.5,
+            "draft_n": 2229,
+            "draft_n_accepted": 2071,
+            "cache_n": 0
+          },
+          "output_sha256": "1dffe0192364a2621d0401f5794b65f1b7d31dfe0c06a3a39f47899ed22aa1f9",
+          "verify_rounds": 1001,
+          "verify_width_mean": 3.23,
+          "tokens_per_round": 3.07,
+          "ms_per_round": 28.47,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        },
+        {
+          "case": "long_context",
+          "target_tokens": 1536,
+          "first_content_ms": 11088.221,
+          "wall_ms": 28580.079,
+          "finish": "length",
+          "stream": {
+            "content_events": 1452,
+            "gap_p50_ms": 0.089,
+            "gap_p90_ms": 32.87,
+            "gap_p95_ms": 34.325,
+            "gap_p99_ms": 35.969,
+            "gap_max_ms": 56.979
+          },
+          "timings": {
+            "prompt_n": 28750,
+            "prompt_ms": 11056.8,
+            "predicted_n": 1536,
+            "predicted_ms": 17507.3,
+            "predicted_per_token_ms": 11.398,
+            "predicted_per_second": 87.7,
+            "prompt_per_token_ms": 0.385,
+            "prompt_per_second": 2600.2,
+            "draft_n": 939,
+            "draft_n_accepted": 837,
+            "cache_n": 0
+          },
+          "output_sha256": "c1327f51aa99d681d105b4933aa8c6fb9567c10875276b08a5cda6ca0571de6f",
+          "verify_rounds": 699,
+          "verify_width_mean": 2.34,
+          "tokens_per_round": 2.2,
+          "ms_per_round": 25.05,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        }
+      ],
+      "memory": {
+        "min_available_mib": 2498,
+        "max_new_swap_mib": 508
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:8192 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.2 GB/s host->device (best of 25.2 25.2 25.2 25.2) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 2252 of the prompt path's 2252 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 21.03 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 21.0 GiB RAM copy (2252 lend slots kept), file tier 0.0 GiB; 1.6 GiB available for the page cache; PCIe 25.2 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:34:35 strata serve: prompt chunk auto: 8192 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 1 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:34:35 strata serve: 560 MiB of VRAM free with everything loaded"
+      ],
+      "error": "logged Ampere CUDA path differs from the requested mode",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 8192,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 1,
+        "fetch": 2,
+        "hc_persist": 0,
+        "qfuse": 0,
+        "l3": 0,
+        "pin": 0.25,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "hc-qfuse",
+        "name": "hc-qfuse-0-0"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": true,
+      "trace": [
+        {
+          "neural": {
+            "rounds": 39,
+            "offered": 29,
+            "accepted": 24,
+            "round_latency_ms": {
+              "samples": 39,
+              "p50": 18.576,
+              "p95": 35.626,
+              "p99": 41.981
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "4": 3,
+            "1": 22,
+            "2": 8,
+            "3": 6
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 3,
+              "p50": 34.524,
+              "p95": 41.981,
+              "p99": 41.981
+            },
+            "1": {
+              "samples": 22,
+              "p50": 17.708,
+              "p95": 18.737,
+              "p99": 18.903
+            },
+            "2": {
+              "samples": 8,
+              "p50": 23.505,
+              "p95": 31.324,
+              "p99": 31.324
+            },
+            "3": {
+              "samples": 6,
+              "p50": 28.627,
+              "p95": 35.626,
+              "p99": 35.626
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 983,
+            "offered": 2137,
+            "accepted": 2037,
+            "round_latency_ms": {
+              "samples": 983,
+              "p50": 30.784,
+              "p95": 33.971,
+              "p99": 35.268
+            }
+          },
+          "lookup": {
+            "rounds": 17,
+            "offered": 92,
+            "accepted": 34,
+            "round_latency_ms": {
+              "samples": 17,
+              "p50": 31.627,
+              "p95": 98.19,
+              "p99": 98.19
+            }
+          },
+          "widths": {
+            "3": 109,
+            "4": 613,
+            "2": 112,
+            "1": 162,
+            "16": 4
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 109,
+              "p50": 27.599,
+              "p95": 33.971,
+              "p99": 39.055
+            },
+            "4": {
+              "samples": 613,
+              "p50": 31.999,
+              "p95": 34.274,
+              "p99": 35.268
+            },
+            "2": {
+              "samples": 112,
+              "p50": 22.487,
+              "p95": 23.843,
+              "p99": 28.578
+            },
+            "1": {
+              "samples": 162,
+              "p50": 17.054,
+              "p95": 18.079,
+              "p99": 22.412
+            },
+            "16": {
+              "samples": 4,
+              "p50": 89.55,
+              "p95": 98.19,
+              "p99": 98.19
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 694,
+            "offered": 932,
+            "accepted": 833,
+            "round_latency_ms": {
+              "samples": 694,
+              "p50": 23.442,
+              "p95": 35.249,
+              "p99": 36.296
+            }
+          },
+          "lookup": {
+            "rounds": 4,
+            "offered": 7,
+            "accepted": 4,
+            "round_latency_ms": {
+              "samples": 4,
+              "p50": 26.441,
+              "p95": 27.692,
+              "p99": 27.692
+            }
+          },
+          "widths": {
+            "1": 245,
+            "2": 173,
+            "3": 74,
+            "4": 206
+          },
+          "round_latency_ms_by_width": {
+            "1": {
+              "samples": 245,
+              "p50": 17.636,
+              "p95": 18.709,
+              "p99": 32.848
+            },
+            "2": {
+              "samples": 173,
+              "p50": 23.223,
+              "p95": 24.537,
+              "p99": 32.008
+            },
+            "3": {
+              "samples": 74,
+              "p50": 28.587,
+              "p95": 30.224,
+              "p99": 30.644
+            },
+            "4": {
+              "samples": 206,
+              "p50": 33.571,
+              "p95": 36.027,
+              "p99": 37.044
+            }
+          }
+        }
+      ],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [
+          {
+            "experts": 7270,
+            "entries": 7727
+          },
+          {
+            "experts": 247360,
+            "entries": 267360
+          },
+          {
+            "experts": 379923,
+            "entries": 408588
+          }
+        ],
+        "adapt_wait_ms_per_window_samples": [
+          0.02,
+          0.0,
+          0.0
+        ]
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "1",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "0",
+        "STRATA_QFUSE": "0",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0.25",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "hc-qfuse-1-0",
+      "status": "failed",
+      "cases": [
+        {
+          "case": "warmup",
+          "target_tokens": 64,
+          "first_content_ms": 259.152,
+          "wall_ms": 1127.405,
+          "finish": "length",
+          "stream": {
+            "content_events": 64,
+            "gap_p50_ms": 18.048,
+            "gap_p90_ms": 33.63,
+            "gap_p95_ms": 37.352,
+            "gap_p99_ms": 43.942,
+            "gap_max_ms": 43.942
+          },
+          "timings": {
+            "prompt_n": 23,
+            "prompt_ms": 223.1,
+            "predicted_n": 64,
+            "predicted_ms": 895.5,
+            "predicted_per_token_ms": 13.992,
+            "predicted_per_second": 71.5,
+            "prompt_per_token_ms": 9.7,
+            "prompt_per_second": 103.1,
+            "draft_n": 36,
+            "draft_n_accepted": 29,
+            "cache_n": 0
+          },
+          "output_sha256": "8de42007aa910c33bbcbda0a29e2b97e6858ba013ab07f59bbbea1b7e6462d17",
+          "verify_rounds": 35,
+          "verify_width_mean": 2.03,
+          "tokens_per_round": 1.83,
+          "ms_per_round": 25.59,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 5580.7
+        },
+        {
+          "case": "long_output",
+          "target_tokens": 3072,
+          "first_content_ms": 1045.108,
+          "wall_ms": 31547.145,
+          "finish": "length",
+          "stream": {
+            "content_events": 2755,
+            "gap_p50_ms": 0.028,
+            "gap_p90_ms": 35.192,
+            "gap_p95_ms": 36.063,
+            "gap_p99_ms": 37.645,
+            "gap_max_ms": 92.55
+          },
+          "timings": {
+            "prompt_n": 89,
+            "prompt_ms": 1025.7,
+            "predicted_n": 3072,
+            "predicted_ms": 30517.4,
+            "predicted_per_token_ms": 9.934,
+            "predicted_per_second": 100.7,
+            "prompt_per_token_ms": 11.525,
+            "prompt_per_second": 86.8,
+            "draft_n": 2253,
+            "draft_n_accepted": 2084,
+            "cache_n": 0
+          },
+          "output_sha256": "8a736886fcb95231476af66fafdcf0e682e52c666d47079fde2b7dcffe770a63",
+          "verify_rounds": 988,
+          "verify_width_mean": 3.28,
+          "tokens_per_round": 3.11,
+          "ms_per_round": 30.89,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        },
+        {
+          "case": "long_context",
+          "target_tokens": 1536,
+          "first_content_ms": 11149.539,
+          "wall_ms": 28840.34,
+          "finish": "length",
+          "stream": {
+            "content_events": 1462,
+            "gap_p50_ms": 0.027,
+            "gap_p90_ms": 35.992,
+            "gap_p95_ms": 37.157,
+            "gap_p99_ms": 38.694,
+            "gap_max_ms": 102.29
+          },
+          "timings": {
+            "prompt_n": 28750,
+            "prompt_ms": 11120.2,
+            "predicted_n": 1536,
+            "predicted_ms": 17706.9,
+            "predicted_per_token_ms": 11.528,
+            "predicted_per_second": 86.7,
+            "prompt_per_token_ms": 0.387,
+            "prompt_per_second": 2585.4,
+            "draft_n": 956,
+            "draft_n_accepted": 893,
+            "cache_n": 0
+          },
+          "output_sha256": "0bdd8156618c50202d5bd531adc18074482e393569e406db781a6765f32702e9",
+          "verify_rounds": 643,
+          "verify_width_mean": 2.49,
+          "tokens_per_round": 2.39,
+          "ms_per_round": 27.54,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        }
+      ],
+      "memory": {
+        "min_available_mib": 2142,
+        "max_new_swap_mib": 3
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:8192 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.3 GB/s host->device (best of 25.3 25.2 25.2 25.2) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 2252 of the prompt path's 2252 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 21.03 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 21.0 GiB RAM copy (2252 lend slots kept), file tier 0.0 GiB; 1.6 GiB available for the page cache; PCIe 25.3 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:35:56 strata serve: prompt chunk auto: 8192 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 8 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:35:56 strata serve: 558 MiB of VRAM free with everything loaded"
+      ],
+      "error": "logged Ampere CUDA path differs from the requested mode",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 8192,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 1,
+        "fetch": 2,
+        "hc_persist": 1,
+        "qfuse": 0,
+        "l3": 0,
+        "pin": 0.25,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "hc-qfuse",
+        "name": "hc-qfuse-1-0"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": true,
+      "trace": [
+        {
+          "neural": {
+            "rounds": 34,
+            "offered": 36,
+            "accepted": 29,
+            "round_latency_ms": {
+              "samples": 34,
+              "p50": 24.822,
+              "p95": 38.895,
+              "p99": 44.308
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "4": 5,
+            "1": 13,
+            "3": 5,
+            "2": 11
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 5,
+              "p50": 37.388,
+              "p95": 44.308,
+              "p99": 44.308
+            },
+            "1": {
+              "samples": 13,
+              "p50": 18.383,
+              "p95": 19.705,
+              "p99": 19.705
+            },
+            "3": {
+              "samples": 5,
+              "p50": 29.03,
+              "p95": 38.895,
+              "p99": 38.895
+            },
+            "2": {
+              "samples": 11,
+              "p50": 25.194,
+              "p95": 33.633,
+              "p99": 33.633
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 971,
+            "offered": 2147,
+            "accepted": 2043,
+            "round_latency_ms": {
+              "samples": 971,
+              "p50": 33.468,
+              "p95": 36.705,
+              "p99": 37.826
+            }
+          },
+          "lookup": {
+            "rounds": 16,
+            "offered": 106,
+            "accepted": 41,
+            "round_latency_ms": {
+              "samples": 16,
+              "p50": 34.654,
+              "p95": 93.886,
+              "p99": 93.886
+            }
+          },
+          "widths": {
+            "3": 113,
+            "4": 610,
+            "2": 122,
+            "1": 137,
+            "16": 5
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 113,
+              "p50": 29.384,
+              "p95": 31.01,
+              "p99": 31.54
+            },
+            "4": {
+              "samples": 610,
+              "p50": 34.623,
+              "p95": 37.041,
+              "p99": 38.05
+            },
+            "2": {
+              "samples": 122,
+              "p50": 23.925,
+              "p95": 25.083,
+              "p99": 25.412
+            },
+            "1": {
+              "samples": 137,
+              "p50": 17.987,
+              "p95": 18.66,
+              "p99": 18.828
+            },
+            "16": {
+              "samples": 5,
+              "p50": 92.357,
+              "p95": 93.886,
+              "p99": 93.886
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 637,
+            "offered": 932,
+            "accepted": 886,
+            "round_latency_ms": {
+              "samples": 637,
+              "p50": 25.699,
+              "p95": 37.928,
+              "p99": 39.075
+            }
+          },
+          "lookup": {
+            "rounds": 5,
+            "offered": 24,
+            "accepted": 7,
+            "round_latency_ms": {
+              "samples": 5,
+              "p50": 30.39,
+              "p95": 103.031,
+              "p99": 103.031
+            }
+          },
+          "widths": {
+            "2": 124,
+            "1": 220,
+            "3": 74,
+            "4": 223,
+            "16": 1
+          },
+          "round_latency_ms_by_width": {
+            "2": {
+              "samples": 124,
+              "p50": 25.12,
+              "p95": 26.478,
+              "p99": 26.732
+            },
+            "1": {
+              "samples": 220,
+              "p50": 18.69,
+              "p95": 19.403,
+              "p99": 19.578
+            },
+            "3": {
+              "samples": 74,
+              "p50": 30.574,
+              "p95": 32.448,
+              "p99": 32.969
+            },
+            "4": {
+              "samples": 223,
+              "p50": 36.342,
+              "p95": 38.775,
+              "p99": 39.775
+            },
+            "16": {
+              "samples": 1,
+              "p50": 103.031,
+              "p95": 103.031,
+              "p99": 103.031
+            }
+          }
+        }
+      ],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [
+          {
+            "experts": 7000,
+            "entries": 7553
+          },
+          {
+            "experts": 249696,
+            "entries": 269562
+          },
+          {
+            "experts": 380612,
+            "entries": 408626
+          }
+        ],
+        "adapt_wait_ms_per_window_samples": [
+          0.03,
+          0.0,
+          0.0
+        ]
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "1",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "1",
+        "STRATA_QFUSE": "0",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0.25",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "hc-qfuse-1-1",
+      "status": "failed",
+      "cases": [
+        {
+          "case": "warmup",
+          "target_tokens": 64,
+          "first_content_ms": 260.855,
+          "wall_ms": 1136.127,
+          "finish": "length",
+          "stream": {
+            "content_events": 64,
+            "gap_p50_ms": 18.069,
+            "gap_p90_ms": 33.483,
+            "gap_p95_ms": 37.902,
+            "gap_p99_ms": 43.95,
+            "gap_max_ms": 43.95
+          },
+          "timings": {
+            "prompt_n": 23,
+            "prompt_ms": 224.9,
+            "predicted_n": 64,
+            "predicted_ms": 904.8,
+            "predicted_per_token_ms": 14.137,
+            "predicted_per_second": 70.7,
+            "prompt_per_token_ms": 9.778,
+            "prompt_per_second": 102.3,
+            "draft_n": 36,
+            "draft_n_accepted": 29,
+            "cache_n": 0
+          },
+          "output_sha256": "8de42007aa910c33bbcbda0a29e2b97e6858ba013ab07f59bbbea1b7e6462d17",
+          "verify_rounds": 35,
+          "verify_width_mean": 2.03,
+          "tokens_per_round": 1.83,
+          "ms_per_round": 25.85,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 5580.7
+        },
+        {
+          "case": "long_output",
+          "target_tokens": 3072,
+          "first_content_ms": 1038.668,
+          "wall_ms": 31613.883,
+          "finish": "length",
+          "stream": {
+            "content_events": 2755,
+            "gap_p50_ms": 0.024,
+            "gap_p90_ms": 35.241,
+            "gap_p95_ms": 36.203,
+            "gap_p99_ms": 37.609,
+            "gap_max_ms": 94.081
+          },
+          "timings": {
+            "prompt_n": 89,
+            "prompt_ms": 1019.8,
+            "predicted_n": 3072,
+            "predicted_ms": 30590.3,
+            "predicted_per_token_ms": 9.958,
+            "predicted_per_second": 100.4,
+            "prompt_per_token_ms": 11.458,
+            "prompt_per_second": 87.3,
+            "draft_n": 2253,
+            "draft_n_accepted": 2084,
+            "cache_n": 0
+          },
+          "output_sha256": "8a736886fcb95231476af66fafdcf0e682e52c666d47079fde2b7dcffe770a63",
+          "verify_rounds": 988,
+          "verify_width_mean": 3.28,
+          "tokens_per_round": 3.11,
+          "ms_per_round": 30.96,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        },
+        {
+          "case": "long_context",
+          "target_tokens": 1536,
+          "first_content_ms": 11170.571,
+          "wall_ms": 28885.58,
+          "finish": "length",
+          "stream": {
+            "content_events": 1462,
+            "gap_p50_ms": 0.056,
+            "gap_p90_ms": 35.934,
+            "gap_p95_ms": 37.182,
+            "gap_p99_ms": 38.937,
+            "gap_max_ms": 102.145
+          },
+          "timings": {
+            "prompt_n": 28750,
+            "prompt_ms": 11141.2,
+            "predicted_n": 1536,
+            "predicted_ms": 17730.7,
+            "predicted_per_token_ms": 11.543,
+            "predicted_per_second": 86.6,
+            "prompt_per_token_ms": 0.388,
+            "prompt_per_second": 2580.5,
+            "draft_n": 956,
+            "draft_n_accepted": 893,
+            "cache_n": 0
+          },
+          "output_sha256": "0bdd8156618c50202d5bd531adc18074482e393569e406db781a6765f32702e9",
+          "verify_rounds": 643,
+          "verify_width_mean": 2.49,
+          "tokens_per_round": 2.39,
+          "ms_per_round": 27.57,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        }
+      ],
+      "memory": {
+        "min_available_mib": 2156,
+        "max_new_swap_mib": 0
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:8192 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.3 GB/s host->device (best of 25.3 25.2 25.3 25.2) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 2252 of the prompt path's 2252 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 21.03 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 21.0 GiB RAM copy (2252 lend slots kept), file tier 0.0 GiB; 1.6 GiB available for the page cache; PCIe 25.3 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:37:18 strata serve: prompt chunk auto: 8192 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 1 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:37:18 strata serve: 558 MiB of VRAM free with everything loaded"
+      ],
+      "error": "logged Ampere CUDA path differs from the requested mode",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 8192,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 1,
+        "fetch": 2,
+        "hc_persist": 1,
+        "qfuse": 1,
+        "l3": 0,
+        "pin": 0.25,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "hc-qfuse",
+        "name": "hc-qfuse-1-1"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": true,
+      "trace": [
+        {
+          "neural": {
+            "rounds": 34,
+            "offered": 36,
+            "accepted": 29,
+            "round_latency_ms": {
+              "samples": 34,
+              "p50": 24.931,
+              "p95": 38.709,
+              "p99": 44.234
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "4": 5,
+            "1": 13,
+            "3": 5,
+            "2": 11
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 5,
+              "p50": 37.969,
+              "p95": 44.234,
+              "p99": 44.234
+            },
+            "1": {
+              "samples": 13,
+              "p50": 18.69,
+              "p95": 19.738,
+              "p99": 19.738
+            },
+            "3": {
+              "samples": 5,
+              "p50": 29.33,
+              "p95": 38.522,
+              "p99": 38.522
+            },
+            "2": {
+              "samples": 11,
+              "p50": 25.489,
+              "p95": 33.458,
+              "p99": 33.458
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 971,
+            "offered": 2147,
+            "accepted": 2043,
+            "round_latency_ms": {
+              "samples": 971,
+              "p50": 33.578,
+              "p95": 36.713,
+              "p99": 37.831
+            }
+          },
+          "lookup": {
+            "rounds": 16,
+            "offered": 106,
+            "accepted": 41,
+            "round_latency_ms": {
+              "samples": 16,
+              "p50": 34.45,
+              "p95": 94.045,
+              "p99": 94.045
+            }
+          },
+          "widths": {
+            "3": 113,
+            "4": 610,
+            "2": 122,
+            "1": 137,
+            "16": 5
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 113,
+              "p50": 29.421,
+              "p95": 31.051,
+              "p99": 31.581
+            },
+            "4": {
+              "samples": 610,
+              "p50": 34.666,
+              "p95": 37.182,
+              "p99": 38.173
+            },
+            "2": {
+              "samples": 122,
+              "p50": 23.981,
+              "p95": 25.149,
+              "p99": 25.531
+            },
+            "1": {
+              "samples": 137,
+              "p50": 18.097,
+              "p95": 18.87,
+              "p99": 19.005
+            },
+            "16": {
+              "samples": 5,
+              "p50": 92.431,
+              "p95": 94.045,
+              "p99": 94.045
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 637,
+            "offered": 932,
+            "accepted": 886,
+            "round_latency_ms": {
+              "samples": 637,
+              "p50": 25.81,
+              "p95": 38.068,
+              "p99": 39.163
+            }
+          },
+          "lookup": {
+            "rounds": 5,
+            "offered": 24,
+            "accepted": 7,
+            "round_latency_ms": {
+              "samples": 5,
+              "p50": 30.384,
+              "p95": 102.959,
+              "p99": 102.959
+            }
+          },
+          "widths": {
+            "2": 124,
+            "1": 220,
+            "3": 74,
+            "4": 223,
+            "16": 1
+          },
+          "round_latency_ms_by_width": {
+            "2": {
+              "samples": 124,
+              "p50": 25.101,
+              "p95": 26.495,
+              "p99": 26.976
+            },
+            "1": {
+              "samples": 220,
+              "p50": 18.718,
+              "p95": 19.389,
+              "p99": 19.678
+            },
+            "3": {
+              "samples": 74,
+              "p50": 30.671,
+              "p95": 32.463,
+              "p99": 33.181
+            },
+            "4": {
+              "samples": 223,
+              "p50": 36.352,
+              "p95": 38.903,
+              "p99": 39.791
+            },
+            "16": {
+              "samples": 1,
+              "p50": 102.959,
+              "p95": 102.959,
+              "p99": 102.959
+            }
+          }
+        }
+      ],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [
+          {
+            "experts": 7000,
+            "entries": 7553
+          },
+          {
+            "experts": 249696,
+            "entries": 269562
+          },
+          {
+            "experts": 380612,
+            "entries": 408626
+          }
+        ],
+        "adapt_wait_ms_per_window_samples": [
+          0.03,
+          0.0,
+          0.0
+        ]
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "1",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "1",
+        "STRATA_QFUSE": "1",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0.25",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "hc-qfuse-0-1",
+      "status": "failed",
+      "cases": [
+        {
+          "case": "warmup",
+          "target_tokens": 64,
+          "first_content_ms": 266.586,
+          "wall_ms": 1173.912,
+          "finish": "length",
+          "stream": {
+            "content_events": 64,
+            "gap_p50_ms": 18.169,
+            "gap_p90_ms": 30.108,
+            "gap_p95_ms": 33.483,
+            "gap_p99_ms": 43.248,
+            "gap_max_ms": 43.248
+          },
+          "timings": {
+            "prompt_n": 23,
+            "prompt_ms": 233.6,
+            "predicted_n": 64,
+            "predicted_ms": 933.3,
+            "predicted_per_token_ms": 14.583,
+            "predicted_per_second": 68.6,
+            "prompt_per_token_ms": 10.157,
+            "prompt_per_second": 98.5,
+            "draft_n": 29,
+            "draft_n_accepted": 24,
+            "cache_n": 0
+          },
+          "output_sha256": "d0c02cda246e78508417940d4155cd58e8182bb78103803ddc05da369a71afe5",
+          "verify_rounds": 40,
+          "verify_width_mean": 1.73,
+          "tokens_per_round": 1.6,
+          "ms_per_round": 23.33,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 5580.7
+        },
+        {
+          "case": "long_output",
+          "target_tokens": 3072,
+          "first_content_ms": 1051.418,
+          "wall_ms": 29798.174,
+          "finish": "length",
+          "stream": {
+            "content_events": 2727,
+            "gap_p50_ms": 0.032,
+            "gap_p90_ms": 32.289,
+            "gap_p95_ms": 33.417,
+            "gap_p99_ms": 34.922,
+            "gap_max_ms": 93.899
+          },
+          "timings": {
+            "prompt_n": 89,
+            "prompt_ms": 1033.5,
+            "predicted_n": 3072,
+            "predicted_ms": 28761.0,
+            "predicted_per_token_ms": 9.362,
+            "predicted_per_second": 106.8,
+            "prompt_per_token_ms": 11.612,
+            "prompt_per_second": 86.1,
+            "draft_n": 2210,
+            "draft_n_accepted": 2050,
+            "cache_n": 0
+          },
+          "output_sha256": "fffd66c2fc13527603b06d324fca61f3fb7631bef53c0ccee661b8b7cbcbb22b",
+          "verify_rounds": 1022,
+          "verify_width_mean": 3.16,
+          "tokens_per_round": 3.01,
+          "ms_per_round": 28.14,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        },
+        {
+          "case": "long_context",
+          "target_tokens": 1536,
+          "first_content_ms": 11198.898,
+          "wall_ms": 27009.236,
+          "finish": "length",
+          "stream": {
+            "content_events": 1449,
+            "gap_p50_ms": 0.028,
+            "gap_p90_ms": 33.466,
+            "gap_p95_ms": 34.566,
+            "gap_p99_ms": 35.933,
+            "gap_max_ms": 42.214
+          },
+          "timings": {
+            "prompt_n": 28750,
+            "prompt_ms": 11155.9,
+            "predicted_n": 1536,
+            "predicted_ms": 15832.9,
+            "predicted_per_token_ms": 10.308,
+            "predicted_per_second": 97.0,
+            "prompt_per_token_ms": 0.388,
+            "prompt_per_second": 2577.1,
+            "draft_n": 1002,
+            "draft_n_accepted": 945,
+            "cache_n": 0
+          },
+          "output_sha256": "7db3a73d707b37edc72ffa339cabc375713906261973599323287d458ca8e399",
+          "verify_rounds": 591,
+          "verify_width_mean": 2.7,
+          "tokens_per_round": 2.6,
+          "ms_per_round": 26.79,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        }
+      ],
+      "memory": {
+        "min_available_mib": 2124,
+        "max_new_swap_mib": 4
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:8192 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.2 GB/s host->device (best of 25.2 25.2 25.2 25.2) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 2252 of the prompt path's 2252 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 21.03 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 21.0 GiB RAM copy (2252 lend slots kept), file tier 0.0 GiB; 1.5 GiB available for the page cache; PCIe 25.2 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:38:40 strata serve: prompt chunk auto: 8192 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 1 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:38:40 strata serve: 560 MiB of VRAM free with everything loaded"
+      ],
+      "error": "logged Ampere CUDA path differs from the requested mode",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 8192,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 1,
+        "fetch": 2,
+        "hc_persist": 0,
+        "qfuse": 1,
+        "l3": 0,
+        "pin": 0.25,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "hc-qfuse",
+        "name": "hc-qfuse-0-1"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": false,
+      "trace": [
+        {
+          "neural": {
+            "rounds": 39,
+            "offered": 29,
+            "accepted": 24,
+            "round_latency_ms": {
+              "samples": 39,
+              "p50": 20.409,
+              "p95": 36.156,
+              "p99": 42.903
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "4": 3,
+            "1": 22,
+            "2": 8,
+            "3": 6
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 3,
+              "p50": 36.156,
+              "p95": 42.903,
+              "p99": 42.903
+            },
+            "1": {
+              "samples": 22,
+              "p50": 18.638,
+              "p95": 20.464,
+              "p99": 20.695
+            },
+            "2": {
+              "samples": 8,
+              "p50": 24.255,
+              "p95": 30.931,
+              "p99": 30.931
+            },
+            "3": {
+              "samples": 6,
+              "p50": 29.674,
+              "p95": 35.214,
+              "p99": 35.214
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 1004,
+            "offered": 2113,
+            "accepted": 2009,
+            "round_latency_ms": {
+              "samples": 1004,
+              "p50": 30.445,
+              "p95": 34.177,
+              "p99": 35.078
+            }
+          },
+          "lookup": {
+            "rounds": 17,
+            "offered": 97,
+            "accepted": 41,
+            "round_latency_ms": {
+              "samples": 17,
+              "p50": 32.162,
+              "p95": 94.67,
+              "p99": 94.67
+            }
+          },
+          "widths": {
+            "3": 113,
+            "4": 594,
+            "2": 142,
+            "1": 168,
+            "16": 4
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 113,
+              "p50": 27.524,
+              "p95": 29.21,
+              "p99": 30.303
+            },
+            "4": {
+              "samples": 594,
+              "p50": 31.891,
+              "p95": 34.661,
+              "p99": 35.252
+            },
+            "2": {
+              "samples": 142,
+              "p50": 22.742,
+              "p95": 23.778,
+              "p99": 24.331
+            },
+            "1": {
+              "samples": 168,
+              "p50": 17.349,
+              "p95": 18.457,
+              "p99": 18.773
+            },
+            "16": {
+              "samples": 4,
+              "p50": 89.606,
+              "p95": 94.67,
+              "p99": 94.67
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 585,
+            "offered": 991,
+            "accepted": 940,
+            "round_latency_ms": {
+              "samples": 585,
+              "p50": 27.98,
+              "p95": 35.262,
+              "p99": 36.226
+            }
+          },
+          "lookup": {
+            "rounds": 5,
+            "offered": 11,
+            "accepted": 5,
+            "round_latency_ms": {
+              "samples": 5,
+              "p50": 28.301,
+              "p95": 33.299,
+              "p99": 33.299
+            }
+          },
+          "widths": {
+            "2": 110,
+            "1": 163,
+            "3": 59,
+            "4": 258
+          },
+          "round_latency_ms_by_width": {
+            "2": {
+              "samples": 110,
+              "p50": 23.289,
+              "p95": 24.553,
+              "p99": 24.937
+            },
+            "1": {
+              "samples": 163,
+              "p50": 17.645,
+              "p95": 18.354,
+              "p99": 18.668
+            },
+            "3": {
+              "samples": 59,
+              "p50": 28.424,
+              "p95": 30.49,
+              "p99": 31.095
+            },
+            "4": {
+              "samples": 258,
+              "p50": 33.59,
+              "p95": 35.914,
+              "p99": 36.591
+            }
+          }
+        }
+      ],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [
+          {
+            "experts": 7270,
+            "entries": 7727
+          },
+          {
+            "experts": 248530,
+            "entries": 268512
+          },
+          {
+            "experts": 377915,
+            "entries": 406019
+          }
+        ],
+        "adapt_wait_ms_per_window_samples": [
+          0.02,
+          0.0,
+          0.0
+        ]
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "1",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "0",
+        "STRATA_QFUSE": "1",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0.25",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "hc-qfuse-0-1",
+      "status": "failed",
+      "cases": [
+        {
+          "case": "warmup",
+          "target_tokens": 64,
+          "first_content_ms": 418.728,
+          "wall_ms": 1593.035,
+          "finish": "length",
+          "stream": {
+            "content_events": 64,
+            "gap_p50_ms": 17.504,
+            "gap_p90_ms": 47.259,
+            "gap_p95_ms": 52.748,
+            "gap_p99_ms": 79.877,
+            "gap_max_ms": 79.877
+          },
+          "timings": {
+            "prompt_n": 23,
+            "prompt_ms": 356.5,
+            "predicted_n": 64,
+            "predicted_ms": 1214.9,
+            "predicted_per_token_ms": 18.983,
+            "predicted_per_second": 52.7,
+            "prompt_per_token_ms": 15.5,
+            "prompt_per_second": 64.5,
+            "draft_n": 29,
+            "draft_n_accepted": 24,
+            "cache_n": 0
+          },
+          "output_sha256": "d0c02cda246e78508417940d4155cd58e8182bb78103803ddc05da369a71afe5",
+          "verify_rounds": 40,
+          "verify_width_mean": 1.73,
+          "tokens_per_round": 1.6,
+          "ms_per_round": 30.37,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 5580.7
+        },
+        {
+          "case": "long_output",
+          "target_tokens": 3072,
+          "first_content_ms": 1048.495,
+          "wall_ms": 29769.063,
+          "finish": "length",
+          "stream": {
+            "content_events": 2727,
+            "gap_p50_ms": 0.021,
+            "gap_p90_ms": 32.27,
+            "gap_p95_ms": 33.216,
+            "gap_p99_ms": 34.816,
+            "gap_max_ms": 93.857
+          },
+          "timings": {
+            "prompt_n": 89,
+            "prompt_ms": 1030.6,
+            "predicted_n": 3072,
+            "predicted_ms": 28734.7,
+            "predicted_per_token_ms": 9.354,
+            "predicted_per_second": 106.9,
+            "prompt_per_token_ms": 11.58,
+            "prompt_per_second": 86.4,
+            "draft_n": 2210,
+            "draft_n_accepted": 2050,
+            "cache_n": 0
+          },
+          "output_sha256": "fffd66c2fc13527603b06d324fca61f3fb7631bef53c0ccee661b8b7cbcbb22b",
+          "verify_rounds": 1022,
+          "verify_width_mean": 3.16,
+          "tokens_per_round": 3.01,
+          "ms_per_round": 28.12,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        },
+        {
+          "case": "long_context",
+          "target_tokens": 1536,
+          "first_content_ms": 11134.113,
+          "wall_ms": 26665.309,
+          "finish": "length",
+          "stream": {
+            "content_events": 1441,
+            "gap_p50_ms": 0.025,
+            "gap_p90_ms": 33.58,
+            "gap_p95_ms": 34.618,
+            "gap_p99_ms": 36.012,
+            "gap_max_ms": 42.97
+          },
+          "timings": {
+            "prompt_n": 28750,
+            "prompt_ms": 11106.0,
+            "predicted_n": 1536,
+            "predicted_ms": 15546.0,
+            "predicted_per_token_ms": 10.121,
+            "predicted_per_second": 98.8,
+            "prompt_per_token_ms": 0.386,
+            "prompt_per_second": 2588.7,
+            "draft_n": 1016,
+            "draft_n_accepted": 966,
+            "cache_n": 0
+          },
+          "output_sha256": "b9d56164d355c9f2ad2d3d25c527e247df43cdaa636f2d91784dd767b5579264",
+          "verify_rounds": 570,
+          "verify_width_mean": 2.78,
+          "tokens_per_round": 2.69,
+          "ms_per_round": 27.27,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        }
+      ],
+      "memory": {
+        "min_available_mib": 2158,
+        "max_new_swap_mib": 2
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:8192 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.3 GB/s host->device (best of 25.2 25.3 25.2 25.2) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 2252 of the prompt path's 2252 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 21.03 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 21.0 GiB RAM copy (2252 lend slots kept), file tier 0.0 GiB; 1.5 GiB available for the page cache; PCIe 25.3 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:40:15 strata serve: prompt chunk auto: 8192 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 1 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:40:15 strata serve: 560 MiB of VRAM free with everything loaded"
+      ],
+      "error": "logged Ampere CUDA path differs from the requested mode",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 8192,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 1,
+        "fetch": 2,
+        "hc_persist": 0,
+        "qfuse": 1,
+        "l3": 0,
+        "pin": 0.25,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "hc-qfuse",
+        "name": "hc-qfuse-0-1"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": false,
+      "trace": [
+        {
+          "neural": {
+            "rounds": 39,
+            "offered": 29,
+            "accepted": 24,
+            "round_latency_ms": {
+              "samples": 39,
+              "p50": 23.496,
+              "p95": 58.063,
+              "p99": 79.897
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "4": 3,
+            "1": 22,
+            "2": 8,
+            "3": 6
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 3,
+              "p50": 58.063,
+              "p95": 79.897,
+              "p99": 79.897
+            },
+            "1": {
+              "samples": 22,
+              "p50": 17.848,
+              "p95": 47.283,
+              "p99": 53.356
+            },
+            "2": {
+              "samples": 8,
+              "p50": 23.378,
+              "p95": 47.467,
+              "p99": 47.467
+            },
+            "3": {
+              "samples": 6,
+              "p50": 41.639,
+              "p95": 57.386,
+              "p99": 57.386
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 1004,
+            "offered": 2113,
+            "accepted": 2009,
+            "round_latency_ms": {
+              "samples": 1004,
+              "p50": 30.403,
+              "p95": 34.09,
+              "p99": 35.022
+            }
+          },
+          "lookup": {
+            "rounds": 17,
+            "offered": 97,
+            "accepted": 41,
+            "round_latency_ms": {
+              "samples": 17,
+              "p50": 32.38,
+              "p95": 94.37,
+              "p99": 94.37
+            }
+          },
+          "widths": {
+            "3": 113,
+            "4": 594,
+            "2": 142,
+            "1": 168,
+            "16": 4
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 113,
+              "p50": 27.43,
+              "p95": 29.456,
+              "p99": 29.63
+            },
+            "4": {
+              "samples": 594,
+              "p50": 31.907,
+              "p95": 34.539,
+              "p99": 35.292
+            },
+            "2": {
+              "samples": 142,
+              "p50": 22.69,
+              "p95": 23.964,
+              "p99": 24.578
+            },
+            "1": {
+              "samples": 168,
+              "p50": 17.312,
+              "p95": 18.499,
+              "p99": 18.959
+            },
+            "16": {
+              "samples": 4,
+              "p50": 89.018,
+              "p95": 94.37,
+              "p99": 94.37
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 564,
+            "offered": 1003,
+            "accepted": 960,
+            "round_latency_ms": {
+              "samples": 564,
+              "p50": 28.88,
+              "p95": 35.418,
+              "p99": 36.375
+            }
+          },
+          "lookup": {
+            "rounds": 5,
+            "offered": 13,
+            "accepted": 6,
+            "round_latency_ms": {
+              "samples": 5,
+              "p50": 33.221,
+              "p95": 33.55,
+              "p99": 33.55
+            }
+          },
+          "widths": {
+            "2": 92,
+            "1": 150,
+            "3": 57,
+            "4": 270
+          },
+          "round_latency_ms_by_width": {
+            "2": {
+              "samples": 92,
+              "p50": 23.547,
+              "p95": 24.79,
+              "p99": 25.173
+            },
+            "1": {
+              "samples": 150,
+              "p50": 17.709,
+              "p95": 18.565,
+              "p99": 18.867
+            },
+            "3": {
+              "samples": 57,
+              "p50": 28.127,
+              "p95": 30.672,
+              "p99": 31.049
+            },
+            "4": {
+              "samples": 270,
+              "p50": 33.58,
+              "p95": 35.808,
+              "p99": 36.666
+            }
+          }
+        }
+      ],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [
+          {
+            "experts": 7270,
+            "entries": 7727
+          },
+          {
+            "experts": 248530,
+            "entries": 268512
+          },
+          {
+            "experts": 377216,
+            "entries": 404996
+          }
+        ],
+        "adapt_wait_ms_per_window_samples": [
+          0.01,
+          0.0,
+          0.0
+        ]
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "1",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "0",
+        "STRATA_QFUSE": "1",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0.25",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "hc-qfuse-1-1",
+      "status": "failed",
+      "cases": [
+        {
+          "case": "warmup",
+          "target_tokens": 64,
+          "first_content_ms": 256.896,
+          "wall_ms": 1131.522,
+          "finish": "length",
+          "stream": {
+            "content_events": 64,
+            "gap_p50_ms": 18.081,
+            "gap_p90_ms": 33.254,
+            "gap_p95_ms": 37.5,
+            "gap_p99_ms": 44.955,
+            "gap_max_ms": 44.955
+          },
+          "timings": {
+            "prompt_n": 23,
+            "prompt_ms": 222.6,
+            "predicted_n": 64,
+            "predicted_ms": 900.6,
+            "predicted_per_token_ms": 14.072,
+            "predicted_per_second": 71.1,
+            "prompt_per_token_ms": 9.678,
+            "prompt_per_second": 103.3,
+            "draft_n": 36,
+            "draft_n_accepted": 29,
+            "cache_n": 0
+          },
+          "output_sha256": "8de42007aa910c33bbcbda0a29e2b97e6858ba013ab07f59bbbea1b7e6462d17",
+          "verify_rounds": 35,
+          "verify_width_mean": 2.03,
+          "tokens_per_round": 1.83,
+          "ms_per_round": 25.73,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 5580.7
+        },
+        {
+          "case": "long_output",
+          "target_tokens": 3072,
+          "first_content_ms": 1025.301,
+          "wall_ms": 31624.099,
+          "finish": "length",
+          "stream": {
+            "content_events": 2755,
+            "gap_p50_ms": 0.026,
+            "gap_p90_ms": 35.18,
+            "gap_p95_ms": 36.227,
+            "gap_p99_ms": 37.658,
+            "gap_max_ms": 92.922
+          },
+          "timings": {
+            "prompt_n": 89,
+            "prompt_ms": 1006.2,
+            "predicted_n": 3072,
+            "predicted_ms": 30614.2,
+            "predicted_per_token_ms": 9.966,
+            "predicted_per_second": 100.3,
+            "prompt_per_token_ms": 11.306,
+            "prompt_per_second": 88.5,
+            "draft_n": 2253,
+            "draft_n_accepted": 2084,
+            "cache_n": 0
+          },
+          "output_sha256": "8a736886fcb95231476af66fafdcf0e682e52c666d47079fde2b7dcffe770a63",
+          "verify_rounds": 988,
+          "verify_width_mean": 3.28,
+          "tokens_per_round": 3.11,
+          "ms_per_round": 30.99,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        },
+        {
+          "case": "long_context",
+          "target_tokens": 1536,
+          "first_content_ms": 11134.71,
+          "wall_ms": 28861.355,
+          "finish": "length",
+          "stream": {
+            "content_events": 1462,
+            "gap_p50_ms": 0.061,
+            "gap_p90_ms": 35.969,
+            "gap_p95_ms": 37.228,
+            "gap_p99_ms": 38.966,
+            "gap_max_ms": 101.963
+          },
+          "timings": {
+            "prompt_n": 28750,
+            "prompt_ms": 11105.6,
+            "predicted_n": 1536,
+            "predicted_ms": 17742.4,
+            "predicted_per_token_ms": 11.551,
+            "predicted_per_second": 86.6,
+            "prompt_per_token_ms": 0.386,
+            "prompt_per_second": 2588.8,
+            "draft_n": 956,
+            "draft_n_accepted": 893,
+            "cache_n": 0
+          },
+          "output_sha256": "0bdd8156618c50202d5bd531adc18074482e393569e406db781a6765f32702e9",
+          "verify_rounds": 643,
+          "verify_width_mean": 2.49,
+          "tokens_per_round": 2.39,
+          "ms_per_round": 27.59,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        }
+      ],
+      "memory": {
+        "min_available_mib": 2153,
+        "max_new_swap_mib": 16
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:8192 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.3 GB/s host->device (best of 25.2 25.2 25.2 25.3) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 2252 of the prompt path's 2252 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 21.03 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 21.0 GiB RAM copy (2252 lend slots kept), file tier 0.0 GiB; 1.7 GiB available for the page cache; PCIe 25.3 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:41:36 strata serve: prompt chunk auto: 8192 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 1 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:41:37 strata serve: 558 MiB of VRAM free with everything loaded"
+      ],
+      "error": "logged Ampere CUDA path differs from the requested mode",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 8192,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 1,
+        "fetch": 2,
+        "hc_persist": 1,
+        "qfuse": 1,
+        "l3": 0,
+        "pin": 0.25,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "hc-qfuse",
+        "name": "hc-qfuse-1-1"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": true,
+      "trace": [
+        {
+          "neural": {
+            "rounds": 34,
+            "offered": 36,
+            "accepted": 29,
+            "round_latency_ms": {
+              "samples": 34,
+              "p50": 24.978,
+              "p95": 38.565,
+              "p99": 44.985
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "4": 5,
+            "1": 13,
+            "3": 5,
+            "2": 11
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 5,
+              "p50": 37.555,
+              "p95": 44.985,
+              "p99": 44.985
+            },
+            "1": {
+              "samples": 13,
+              "p50": 18.525,
+              "p95": 19.784,
+              "p99": 19.784
+            },
+            "3": {
+              "samples": 5,
+              "p50": 29.088,
+              "p95": 38.565,
+              "p99": 38.565
+            },
+            "2": {
+              "samples": 11,
+              "p50": 25.634,
+              "p95": 33.25,
+              "p99": 33.25
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 971,
+            "offered": 2147,
+            "accepted": 2043,
+            "round_latency_ms": {
+              "samples": 971,
+              "p50": 33.598,
+              "p95": 36.829,
+              "p99": 38.092
+            }
+          },
+          "lookup": {
+            "rounds": 16,
+            "offered": 106,
+            "accepted": 41,
+            "round_latency_ms": {
+              "samples": 16,
+              "p50": 34.751,
+              "p95": 94.087,
+              "p99": 94.087
+            }
+          },
+          "widths": {
+            "3": 113,
+            "4": 610,
+            "2": 122,
+            "1": 137,
+            "16": 5
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 113,
+              "p50": 29.404,
+              "p95": 31.171,
+              "p99": 31.725
+            },
+            "4": {
+              "samples": 610,
+              "p50": 34.722,
+              "p95": 37.191,
+              "p99": 38.22
+            },
+            "2": {
+              "samples": 122,
+              "p50": 23.961,
+              "p95": 25.161,
+              "p99": 25.471
+            },
+            "1": {
+              "samples": 137,
+              "p50": 18.092,
+              "p95": 18.86,
+              "p99": 19.044
+            },
+            "16": {
+              "samples": 5,
+              "p50": 92.372,
+              "p95": 94.087,
+              "p99": 94.087
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 637,
+            "offered": 932,
+            "accepted": 886,
+            "round_latency_ms": {
+              "samples": 637,
+              "p50": 25.791,
+              "p95": 37.971,
+              "p99": 39.185
+            }
+          },
+          "lookup": {
+            "rounds": 5,
+            "offered": 24,
+            "accepted": 7,
+            "round_latency_ms": {
+              "samples": 5,
+              "p50": 30.396,
+              "p95": 103.176,
+              "p99": 103.176
+            }
+          },
+          "widths": {
+            "2": 124,
+            "1": 220,
+            "3": 74,
+            "4": 223,
+            "16": 1
+          },
+          "round_latency_ms_by_width": {
+            "2": {
+              "samples": 124,
+              "p50": 25.116,
+              "p95": 26.526,
+              "p99": 26.818
+            },
+            "1": {
+              "samples": 220,
+              "p50": 18.731,
+              "p95": 19.472,
+              "p99": 19.672
+            },
+            "3": {
+              "samples": 74,
+              "p50": 30.605,
+              "p95": 32.237,
+              "p99": 33.119
+            },
+            "4": {
+              "samples": 223,
+              "p50": 36.4,
+              "p95": 38.956,
+              "p99": 39.846
+            },
+            "16": {
+              "samples": 1,
+              "p50": 103.176,
+              "p95": 103.176,
+              "p99": 103.176
+            }
+          }
+        }
+      ],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [
+          {
+            "experts": 7000,
+            "entries": 7553
+          },
+          {
+            "experts": 249696,
+            "entries": 269562
+          },
+          {
+            "experts": 380612,
+            "entries": 408626
+          }
+        ],
+        "adapt_wait_ms_per_window_samples": [
+          0.02,
+          0.0,
+          0.0
+        ]
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "1",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "1",
+        "STRATA_QFUSE": "1",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0.25",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "hc-qfuse-1-0",
+      "status": "failed",
+      "cases": [
+        {
+          "case": "warmup",
+          "target_tokens": 64,
+          "first_content_ms": 258.971,
+          "wall_ms": 1165.636,
+          "finish": "length",
+          "stream": {
+            "content_events": 64,
+            "gap_p50_ms": 18.002,
+            "gap_p90_ms": 33.037,
+            "gap_p95_ms": 41.235,
+            "gap_p99_ms": 50.387,
+            "gap_max_ms": 50.387
+          },
+          "timings": {
+            "prompt_n": 23,
+            "prompt_ms": 224.7,
+            "predicted_n": 64,
+            "predicted_ms": 937.4,
+            "predicted_per_token_ms": 14.647,
+            "predicted_per_second": 68.3,
+            "prompt_per_token_ms": 9.77,
+            "prompt_per_second": 102.4,
+            "draft_n": 36,
+            "draft_n_accepted": 29,
+            "cache_n": 0
+          },
+          "output_sha256": "8de42007aa910c33bbcbda0a29e2b97e6858ba013ab07f59bbbea1b7e6462d17",
+          "verify_rounds": 35,
+          "verify_width_mean": 2.03,
+          "tokens_per_round": 1.83,
+          "ms_per_round": 26.78,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 5580.7
+        },
+        {
+          "case": "long_output",
+          "target_tokens": 3072,
+          "first_content_ms": 1029.362,
+          "wall_ms": 31498.525,
+          "finish": "length",
+          "stream": {
+            "content_events": 2755,
+            "gap_p50_ms": 0.024,
+            "gap_p90_ms": 35.012,
+            "gap_p95_ms": 36.025,
+            "gap_p99_ms": 37.618,
+            "gap_max_ms": 92.91
+          },
+          "timings": {
+            "prompt_n": 89,
+            "prompt_ms": 1006.8,
+            "predicted_n": 3072,
+            "predicted_ms": 30484.6,
+            "predicted_per_token_ms": 9.923,
+            "predicted_per_second": 100.8,
+            "prompt_per_token_ms": 11.312,
+            "prompt_per_second": 88.4,
+            "draft_n": 2253,
+            "draft_n_accepted": 2084,
+            "cache_n": 0
+          },
+          "output_sha256": "8a736886fcb95231476af66fafdcf0e682e52c666d47079fde2b7dcffe770a63",
+          "verify_rounds": 988,
+          "verify_width_mean": 3.28,
+          "tokens_per_round": 3.11,
+          "ms_per_round": 30.85,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        },
+        {
+          "case": "long_context",
+          "target_tokens": 1536,
+          "first_content_ms": 11111.04,
+          "wall_ms": 28762.39,
+          "finish": "length",
+          "stream": {
+            "content_events": 1462,
+            "gap_p50_ms": 0.064,
+            "gap_p90_ms": 35.854,
+            "gap_p95_ms": 37.087,
+            "gap_p99_ms": 38.586,
+            "gap_max_ms": 102.176
+          },
+          "timings": {
+            "prompt_n": 28750,
+            "prompt_ms": 11081.7,
+            "predicted_n": 1536,
+            "predicted_ms": 17667.4,
+            "predicted_per_token_ms": 11.502,
+            "predicted_per_second": 86.9,
+            "prompt_per_token_ms": 0.385,
+            "prompt_per_second": 2594.4,
+            "draft_n": 956,
+            "draft_n_accepted": 893,
+            "cache_n": 0
+          },
+          "output_sha256": "0bdd8156618c50202d5bd531adc18074482e393569e406db781a6765f32702e9",
+          "verify_rounds": 643,
+          "verify_width_mean": 2.49,
+          "tokens_per_round": 2.39,
+          "ms_per_round": 27.48,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        }
+      ],
+      "memory": {
+        "min_available_mib": 2151,
+        "max_new_swap_mib": 3
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:8192 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.2 GB/s host->device (best of 25.2 25.2 25.2 25.2) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 2252 of the prompt path's 2252 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 21.03 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 21.0 GiB RAM copy (2252 lend slots kept), file tier 0.0 GiB; 1.6 GiB available for the page cache; PCIe 25.2 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:43:05 strata serve: prompt chunk auto: 8192 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 1 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:43:05 strata serve: 558 MiB of VRAM free with everything loaded"
+      ],
+      "error": "logged Ampere CUDA path differs from the requested mode",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 8192,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 1,
+        "fetch": 2,
+        "hc_persist": 1,
+        "qfuse": 0,
+        "l3": 0,
+        "pin": 0.25,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "hc-qfuse",
+        "name": "hc-qfuse-1-0"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": true,
+      "trace": [
+        {
+          "neural": {
+            "rounds": 34,
+            "offered": 36,
+            "accepted": 29,
+            "round_latency_ms": {
+              "samples": 34,
+              "p50": 24.921,
+              "p95": 45.323,
+              "p99": 51.004
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "4": 5,
+            "1": 13,
+            "3": 5,
+            "2": 11
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 5,
+              "p50": 37.233,
+              "p95": 51.004,
+              "p99": 51.004
+            },
+            "1": {
+              "samples": 13,
+              "p50": 18.444,
+              "p95": 26.96,
+              "p99": 26.96
+            },
+            "3": {
+              "samples": 5,
+              "p50": 29.084,
+              "p95": 45.323,
+              "p99": 45.323
+            },
+            "2": {
+              "samples": 11,
+              "p50": 25.199,
+              "p95": 41.222,
+              "p99": 41.222
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 971,
+            "offered": 2147,
+            "accepted": 2043,
+            "round_latency_ms": {
+              "samples": 971,
+              "p50": 33.464,
+              "p95": 36.697,
+              "p99": 37.876
+            }
+          },
+          "lookup": {
+            "rounds": 16,
+            "offered": 106,
+            "accepted": 41,
+            "round_latency_ms": {
+              "samples": 16,
+              "p50": 34.648,
+              "p95": 94.038,
+              "p99": 94.038
+            }
+          },
+          "widths": {
+            "3": 113,
+            "4": 610,
+            "2": 122,
+            "1": 137,
+            "16": 5
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 113,
+              "p50": 29.381,
+              "p95": 30.819,
+              "p99": 31.128
+            },
+            "4": {
+              "samples": 610,
+              "p50": 34.567,
+              "p95": 36.986,
+              "p99": 38.23
+            },
+            "2": {
+              "samples": 122,
+              "p50": 23.898,
+              "p95": 25.093,
+              "p99": 25.392
+            },
+            "1": {
+              "samples": 137,
+              "p50": 17.909,
+              "p95": 18.736,
+              "p99": 18.934
+            },
+            "16": {
+              "samples": 5,
+              "p50": 92.444,
+              "p95": 94.038,
+              "p99": 94.038
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 637,
+            "offered": 932,
+            "accepted": 886,
+            "round_latency_ms": {
+              "samples": 637,
+              "p50": 25.56,
+              "p95": 38.038,
+              "p99": 39.166
+            }
+          },
+          "lookup": {
+            "rounds": 5,
+            "offered": 24,
+            "accepted": 7,
+            "round_latency_ms": {
+              "samples": 5,
+              "p50": 30.362,
+              "p95": 102.912,
+              "p99": 102.912
+            }
+          },
+          "widths": {
+            "2": 124,
+            "1": 220,
+            "3": 74,
+            "4": 223,
+            "16": 1
+          },
+          "round_latency_ms_by_width": {
+            "2": {
+              "samples": 124,
+              "p50": 24.99,
+              "p95": 26.303,
+              "p99": 26.604
+            },
+            "1": {
+              "samples": 220,
+              "p50": 18.593,
+              "p95": 19.152,
+              "p99": 19.441
+            },
+            "3": {
+              "samples": 74,
+              "p50": 30.528,
+              "p95": 32.228,
+              "p99": 33.269
+            },
+            "4": {
+              "samples": 223,
+              "p50": 36.296,
+              "p95": 38.746,
+              "p99": 39.612
+            },
+            "16": {
+              "samples": 1,
+              "p50": 102.912,
+              "p95": 102.912,
+              "p99": 102.912
+            }
+          }
+        }
+      ],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [
+          {
+            "experts": 7000,
+            "entries": 7553
+          },
+          {
+            "experts": 249696,
+            "entries": 269562
+          },
+          {
+            "experts": 380612,
+            "entries": 408626
+          }
+        ],
+        "adapt_wait_ms_per_window_samples": [
+          0.03,
+          0.0,
+          0.0
+        ]
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "1",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "1",
+        "STRATA_QFUSE": "0",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0.25",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "hc-qfuse-0-0",
+      "status": "failed",
+      "cases": [
+        {
+          "case": "warmup",
+          "target_tokens": 64,
+          "first_content_ms": 260.657,
+          "wall_ms": 1123.184,
+          "finish": "length",
+          "stream": {
+            "content_events": 64,
+            "gap_p50_ms": 17.199,
+            "gap_p90_ms": 28.285,
+            "gap_p95_ms": 32.164,
+            "gap_p99_ms": 42.554,
+            "gap_max_ms": 42.554
+          },
+          "timings": {
+            "prompt_n": 23,
+            "prompt_ms": 230.0,
+            "predicted_n": 64,
+            "predicted_ms": 888.6,
+            "predicted_per_token_ms": 13.884,
+            "predicted_per_second": 72.0,
+            "prompt_per_token_ms": 10.0,
+            "prompt_per_second": 100.0,
+            "draft_n": 29,
+            "draft_n_accepted": 24,
+            "cache_n": 0
+          },
+          "output_sha256": "d0c02cda246e78508417940d4155cd58e8182bb78103803ddc05da369a71afe5",
+          "verify_rounds": 40,
+          "verify_width_mean": 1.73,
+          "tokens_per_round": 1.6,
+          "ms_per_round": 22.21,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 5580.7
+        },
+        {
+          "case": "long_output",
+          "target_tokens": 3072,
+          "first_content_ms": 1020.957,
+          "wall_ms": 29599.113,
+          "finish": "length",
+          "stream": {
+            "content_events": 2727,
+            "gap_p50_ms": 0.027,
+            "gap_p90_ms": 32.185,
+            "gap_p95_ms": 33.298,
+            "gap_p99_ms": 34.853,
+            "gap_max_ms": 94.028
+          },
+          "timings": {
+            "prompt_n": 89,
+            "prompt_ms": 1002.9,
+            "predicted_n": 3072,
+            "predicted_ms": 28592.6,
+            "predicted_per_token_ms": 9.307,
+            "predicted_per_second": 107.4,
+            "prompt_per_token_ms": 11.269,
+            "prompt_per_second": 88.7,
+            "draft_n": 2210,
+            "draft_n_accepted": 2050,
+            "cache_n": 0
+          },
+          "output_sha256": "fffd66c2fc13527603b06d324fca61f3fb7631bef53c0ccee661b8b7cbcbb22b",
+          "verify_rounds": 1022,
+          "verify_width_mean": 3.16,
+          "tokens_per_round": 3.01,
+          "ms_per_round": 27.98,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        },
+        {
+          "case": "long_context",
+          "target_tokens": 1536,
+          "first_content_ms": 11133.839,
+          "wall_ms": 26660.292,
+          "finish": "length",
+          "stream": {
+            "content_events": 1441,
+            "gap_p50_ms": 0.026,
+            "gap_p90_ms": 33.589,
+            "gap_p95_ms": 34.517,
+            "gap_p99_ms": 35.862,
+            "gap_max_ms": 42.159
+          },
+          "timings": {
+            "prompt_n": 28750,
+            "prompt_ms": 11105.4,
+            "predicted_n": 1536,
+            "predicted_ms": 15541.8,
+            "predicted_per_token_ms": 10.118,
+            "predicted_per_second": 98.8,
+            "prompt_per_token_ms": 0.386,
+            "prompt_per_second": 2588.8,
+            "draft_n": 1016,
+            "draft_n_accepted": 966,
+            "cache_n": 0
+          },
+          "output_sha256": "b9d56164d355c9f2ad2d3d25c527e247df43cdaa636f2d91784dd767b5579264",
+          "verify_rounds": 570,
+          "verify_width_mean": 2.78,
+          "tokens_per_round": 2.69,
+          "ms_per_round": 27.27,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        }
+      ],
+      "memory": {
+        "min_available_mib": 2154,
+        "max_new_swap_mib": 0
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:8192 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.3 GB/s host->device (best of 25.3 25.2 25.2 25.3) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 2252 of the prompt path's 2252 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 21.03 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 21.0 GiB RAM copy (2252 lend slots kept), file tier 0.0 GiB; 1.5 GiB available for the page cache; PCIe 25.3 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:44:27 strata serve: prompt chunk auto: 8192 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 1 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:44:27 strata serve: 560 MiB of VRAM free with everything loaded"
+      ],
+      "error": "logged Ampere CUDA path differs from the requested mode",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 8192,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 1,
+        "fetch": 2,
+        "hc_persist": 0,
+        "qfuse": 0,
+        "l3": 0,
+        "pin": 0.25,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "hc-qfuse",
+        "name": "hc-qfuse-0-0"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": false,
+      "trace": [
+        {
+          "neural": {
+            "rounds": 39,
+            "offered": 29,
+            "accepted": 24,
+            "round_latency_ms": {
+              "samples": 39,
+              "p50": 18.251,
+              "p95": 35.578,
+              "p99": 42.877
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "4": 3,
+            "1": 22,
+            "2": 8,
+            "3": 6
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 3,
+              "p50": 34.142,
+              "p95": 42.877,
+              "p99": 42.877
+            },
+            "1": {
+              "samples": 22,
+              "p50": 17.332,
+              "p95": 18.436,
+              "p99": 18.461
+            },
+            "2": {
+              "samples": 8,
+              "p50": 23.358,
+              "p95": 31.275,
+              "p99": 31.275
+            },
+            "3": {
+              "samples": 6,
+              "p50": 28.35,
+              "p95": 35.578,
+              "p99": 35.578
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 1004,
+            "offered": 2113,
+            "accepted": 2009,
+            "round_latency_ms": {
+              "samples": 1004,
+              "p50": 30.431,
+              "p95": 33.947,
+              "p99": 35.08
+            }
+          },
+          "lookup": {
+            "rounds": 17,
+            "offered": 97,
+            "accepted": 41,
+            "round_latency_ms": {
+              "samples": 17,
+              "p50": 32.047,
+              "p95": 94.717,
+              "p99": 94.717
+            }
+          },
+          "widths": {
+            "3": 113,
+            "4": 594,
+            "2": 142,
+            "1": 168,
+            "16": 4
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 113,
+              "p50": 27.117,
+              "p95": 28.801,
+              "p99": 29.301
+            },
+            "4": {
+              "samples": 594,
+              "p50": 31.799,
+              "p95": 34.553,
+              "p99": 35.227
+            },
+            "2": {
+              "samples": 142,
+              "p50": 22.437,
+              "p95": 23.595,
+              "p99": 24.12
+            },
+            "1": {
+              "samples": 168,
+              "p50": 17.04,
+              "p95": 17.768,
+              "p99": 18.192
+            },
+            "16": {
+              "samples": 4,
+              "p50": 89.395,
+              "p95": 94.717,
+              "p99": 94.717
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 564,
+            "offered": 1003,
+            "accepted": 960,
+            "round_latency_ms": {
+              "samples": 564,
+              "p50": 28.751,
+              "p95": 35.385,
+              "p99": 36.25
+            }
+          },
+          "lookup": {
+            "rounds": 5,
+            "offered": 13,
+            "accepted": 6,
+            "round_latency_ms": {
+              "samples": 5,
+              "p50": 33.237,
+              "p95": 33.591,
+              "p99": 33.591
+            }
+          },
+          "widths": {
+            "2": 92,
+            "1": 150,
+            "3": 57,
+            "4": 270
+          },
+          "round_latency_ms_by_width": {
+            "2": {
+              "samples": 92,
+              "p50": 23.447,
+              "p95": 24.763,
+              "p99": 25.193
+            },
+            "1": {
+              "samples": 150,
+              "p50": 17.695,
+              "p95": 18.413,
+              "p99": 18.593
+            },
+            "3": {
+              "samples": 57,
+              "p50": 28.196,
+              "p95": 30.897,
+              "p99": 31.03
+            },
+            "4": {
+              "samples": 270,
+              "p50": 33.675,
+              "p95": 35.904,
+              "p99": 36.42
+            }
+          }
+        }
+      ],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [
+          {
+            "experts": 7270,
+            "entries": 7727
+          },
+          {
+            "experts": 248530,
+            "entries": 268512
+          },
+          {
+            "experts": 377216,
+            "entries": 404996
+          }
+        ],
+        "adapt_wait_ms_per_window_samples": [
+          0.02,
+          0.0,
+          0.0
+        ]
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "1",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "0",
+        "STRATA_QFUSE": "0",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0.25",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "fetch-pin-0-0",
+      "status": "failed",
+      "cases": [
+        {
+          "case": "warmup",
+          "target_tokens": 64,
+          "first_content_ms": 258.217,
+          "wall_ms": 1154.797,
+          "finish": "length",
+          "stream": {
+            "content_events": 64,
+            "gap_p50_ms": 17.681,
+            "gap_p90_ms": 29.084,
+            "gap_p95_ms": 36.996,
+            "gap_p99_ms": 47.009,
+            "gap_max_ms": 47.009
+          },
+          "timings": {
+            "prompt_n": 23,
+            "prompt_ms": 227.9,
+            "predicted_n": 64,
+            "predicted_ms": 922.6,
+            "predicted_per_token_ms": 14.416,
+            "predicted_per_second": 69.4,
+            "prompt_per_token_ms": 9.909,
+            "prompt_per_second": 100.9,
+            "draft_n": 30,
+            "draft_n_accepted": 25,
+            "cache_n": 0
+          },
+          "output_sha256": "5656b3d8083ca8128673d4a2a775a5345e4faaea1791cbab07c37af30c66d0d2",
+          "verify_rounds": 39,
+          "verify_width_mean": 1.77,
+          "tokens_per_round": 1.64,
+          "ms_per_round": 23.66,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 5580.7
+        },
+        {
+          "case": "long_output",
+          "target_tokens": 3072,
+          "first_content_ms": 1032.068,
+          "wall_ms": 32849.313,
+          "finish": "length",
+          "stream": {
+            "content_events": 2588,
+            "gap_p50_ms": 0.076,
+            "gap_p90_ms": 35.398,
+            "gap_p95_ms": 36.282,
+            "gap_p99_ms": 37.268,
+            "gap_max_ms": 93.316
+          },
+          "timings": {
+            "prompt_n": 89,
+            "prompt_ms": 1012.7,
+            "predicted_n": 3072,
+            "predicted_ms": 31832.7,
+            "predicted_per_token_ms": 10.362,
+            "predicted_per_second": 96.5,
+            "prompt_per_token_ms": 11.379,
+            "prompt_per_second": 87.9,
+            "draft_n": 2151,
+            "draft_n_accepted": 1986,
+            "cache_n": 0
+          },
+          "output_sha256": "fdcf0d8fd716b3ef8a6df12f5dc9718ade382d155fd1243956ad5b915cbd3cec",
+          "verify_rounds": 1086,
+          "verify_width_mean": 2.98,
+          "tokens_per_round": 2.83,
+          "ms_per_round": 29.31,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        },
+        {
+          "case": "long_context",
+          "target_tokens": 1536,
+          "first_content_ms": 11119.861,
+          "wall_ms": 27032.199,
+          "finish": "length",
+          "stream": {
+            "content_events": 1440,
+            "gap_p50_ms": 0.026,
+            "gap_p90_ms": 36.591,
+            "gap_p95_ms": 37.237,
+            "gap_p99_ms": 38.022,
+            "gap_max_ms": 97.811
+          },
+          "timings": {
+            "prompt_n": 28750,
+            "prompt_ms": 11090.3,
+            "predicted_n": 1536,
+            "predicted_ms": 15928.4,
+            "predicted_per_token_ms": 10.37,
+            "predicted_per_second": 96.4,
+            "prompt_per_token_ms": 0.386,
+            "prompt_per_second": 2592.4,
+            "draft_n": 1068,
+            "draft_n_accepted": 1022,
+            "cache_n": 0
+          },
+          "output_sha256": "f99b6a9cf9ca39da0d6b7c3ce3439fd62fdf2435c86875760449e26aa0ba6083",
+          "verify_rounds": 514,
+          "verify_width_mean": 3.08,
+          "tokens_per_round": 2.99,
+          "ms_per_round": 30.99,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        }
+      ],
+      "memory": {
+        "min_available_mib": 2140,
+        "max_new_swap_mib": 14
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:8192 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.3 GB/s host->device (best of 25.2 25.2 25.2 25.3) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 2252 of the prompt path's 2252 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 21.03 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 21.0 GiB RAM copy (2252 lend slots kept), file tier 0.0 GiB; 1.5 GiB available for the page cache; PCIe 25.3 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:45:50 strata serve: prompt chunk auto: 8192 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 1 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:45:50 strata serve: 558 MiB of VRAM free with everything loaded"
+      ],
+      "error": "logged Ampere CUDA path differs from the requested mode",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 8192,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 1,
+        "fetch": 0,
+        "hc_persist": 1,
+        "qfuse": 0,
+        "l3": 0,
+        "pin": 0,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "fetch-pin",
+        "name": "fetch-pin-0-0"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": false,
+      "trace": [
+        {
+          "neural": {
+            "rounds": 38,
+            "offered": 30,
+            "accepted": 25,
+            "round_latency_ms": {
+              "samples": 38,
+              "p50": 19.523,
+              "p95": 39.498,
+              "p99": 46.822
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "4": 3,
+            "1": 19,
+            "2": 11,
+            "3": 5
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 3,
+              "p50": 37.295,
+              "p95": 46.822,
+              "p99": 46.822
+            },
+            "1": {
+              "samples": 19,
+              "p50": 17.803,
+              "p95": 19.523,
+              "p99": 19.523
+            },
+            "2": {
+              "samples": 11,
+              "p50": 24.151,
+              "p95": 39.498,
+              "p99": 39.498
+            },
+            "3": {
+              "samples": 5,
+              "p50": 29.688,
+              "p95": 37.338,
+              "p99": 37.338
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 1058,
+            "offered": 2076,
+            "accepted": 1955,
+            "round_latency_ms": {
+              "samples": 1058,
+              "p50": 31.507,
+              "p95": 36.905,
+              "p99": 37.51
+            }
+          },
+          "lookup": {
+            "rounds": 27,
+            "offered": 75,
+            "accepted": 31,
+            "round_latency_ms": {
+              "samples": 27,
+              "p50": 28.795,
+              "p95": 92.205,
+              "p99": 94.402
+            }
+          },
+          "widths": {
+            "3": 162,
+            "1": 183,
+            "2": 209,
+            "4": 528,
+            "16": 2,
+            "5": 1
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 162,
+              "p50": 29.768,
+              "p95": 31.216,
+              "p99": 31.588
+            },
+            "1": {
+              "samples": 183,
+              "p50": 16.885,
+              "p95": 18.148,
+              "p99": 18.41
+            },
+            "2": {
+              "samples": 209,
+              "p50": 23.412,
+              "p95": 24.636,
+              "p99": 25.263
+            },
+            "4": {
+              "samples": 528,
+              "p50": 35.436,
+              "p95": 37.187,
+              "p99": 37.82
+            },
+            "16": {
+              "samples": 2,
+              "p50": 92.205,
+              "p95": 94.402,
+              "p99": 94.402
+            },
+            "5": {
+              "samples": 1,
+              "p50": 42.743,
+              "p95": 42.743,
+              "p99": 42.743
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 511,
+            "offered": 1051,
+            "accepted": 1015,
+            "round_latency_ms": {
+              "samples": 511,
+              "p50": 34.766,
+              "p95": 37.73,
+              "p99": 38.408
+            }
+          },
+          "lookup": {
+            "rounds": 2,
+            "offered": 17,
+            "accepted": 7,
+            "round_latency_ms": {
+              "samples": 2,
+              "p50": 32.213,
+              "p95": 99.799,
+              "p99": 99.799
+            }
+          },
+          "widths": {
+            "2": 55,
+            "1": 110,
+            "3": 43,
+            "4": 304,
+            "16": 1
+          },
+          "round_latency_ms_by_width": {
+            "2": {
+              "samples": 55,
+              "p50": 25.039,
+              "p95": 26.529,
+              "p99": 26.746
+            },
+            "1": {
+              "samples": 110,
+              "p50": 18.567,
+              "p95": 19.338,
+              "p99": 19.396
+            },
+            "3": {
+              "samples": 43,
+              "p50": 30.589,
+              "p95": 32.216,
+              "p99": 33.353
+            },
+            "4": {
+              "samples": 304,
+              "p50": 36.21,
+              "p95": 37.846,
+              "p99": 38.446
+            },
+            "16": {
+              "samples": 1,
+              "p50": 99.799,
+              "p95": 99.799,
+              "p99": 99.799
+            }
+          }
+        }
+      ],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [
+          {
+            "experts": 7138,
+            "entries": 7590
+          },
+          {
+            "experts": 263143,
+            "entries": 281034
+          },
+          {
+            "experts": 389629,
+            "entries": 415512
+          }
+        ],
+        "adapt_wait_ms_per_window_samples": [
+          0.3,
+          0.03,
+          0.04
+        ]
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "1",
+        "STRATA_ADAPT_FETCH": "0",
+        "STRATA_HC_PERSIST": "1",
+        "STRATA_QFUSE": "0",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    },
+    {
+      "phase": "fetch-pin-2-0",
+      "status": "failed",
+      "cases": [
+        {
+          "case": "warmup",
+          "target_tokens": 64,
+          "first_content_ms": 261.952,
+          "wall_ms": 1170.348,
+          "finish": "length",
+          "stream": {
+            "content_events": 64,
+            "gap_p50_ms": 17.343,
+            "gap_p90_ms": 28.885,
+            "gap_p95_ms": 33.625,
+            "gap_p99_ms": 44.11,
+            "gap_max_ms": 44.11
+          },
+          "timings": {
+            "prompt_n": 23,
+            "prompt_ms": 227.8,
+            "predicted_n": 64,
+            "predicted_ms": 934.6,
+            "predicted_per_token_ms": 14.603,
+            "predicted_per_second": 68.5,
+            "prompt_per_token_ms": 9.904,
+            "prompt_per_second": 101.0,
+            "draft_n": 26,
+            "draft_n_accepted": 22,
+            "cache_n": 0
+          },
+          "output_sha256": "951274c023be4e47800698aebf544a4a1463d14b6b656593587e9bf47cf9bde0",
+          "verify_rounds": 42,
+          "verify_width_mean": 1.62,
+          "tokens_per_round": 1.52,
+          "ms_per_round": 22.25,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 5580.7
+        },
+        {
+          "case": "long_output",
+          "target_tokens": 3072,
+          "first_content_ms": 1023.626,
+          "wall_ms": 30202.793,
+          "finish": "length",
+          "stream": {
+            "content_events": 2754,
+            "gap_p50_ms": 0.025,
+            "gap_p90_ms": 34.673,
+            "gap_p95_ms": 35.728,
+            "gap_p99_ms": 36.943,
+            "gap_max_ms": 95.182
+          },
+          "timings": {
+            "prompt_n": 89,
+            "prompt_ms": 1004.5,
+            "predicted_n": 3072,
+            "predicted_ms": 29194.7,
+            "predicted_per_token_ms": 9.503,
+            "predicted_per_second": 105.2,
+            "prompt_per_token_ms": 11.287,
+            "prompt_per_second": 88.6,
+            "draft_n": 2253,
+            "draft_n_accepted": 2128,
+            "cache_n": 0
+          },
+          "output_sha256": "c50dc080537d418a2e16633a45ee1a8c6761e2bc2027c535a08c36b4715892fb",
+          "verify_rounds": 944,
+          "verify_width_mean": 3.39,
+          "tokens_per_round": 3.25,
+          "ms_per_round": 30.93,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        },
+        {
+          "case": "long_context",
+          "target_tokens": 1536,
+          "first_content_ms": 11167.213,
+          "wall_ms": 28976.429,
+          "finish": "length",
+          "stream": {
+            "content_events": 1470,
+            "gap_p50_ms": 0.078,
+            "gap_p90_ms": 35.13,
+            "gap_p95_ms": 36.78,
+            "gap_p99_ms": 38.434,
+            "gap_max_ms": 45.352
+          },
+          "timings": {
+            "prompt_n": 28750,
+            "prompt_ms": 11138.1,
+            "predicted_n": 1536,
+            "predicted_ms": 17825.1,
+            "predicted_per_token_ms": 11.605,
+            "predicted_per_second": 86.2,
+            "prompt_per_token_ms": 0.387,
+            "prompt_per_second": 2581.2,
+            "draft_n": 926,
+            "draft_n_accepted": 858,
+            "cache_n": 0
+          },
+          "output_sha256": "7c9a2596c5810ea23f75872e98d49bf974e275f1f852f430fd29a15b88484539",
+          "verify_rounds": 678,
+          "verify_width_mean": 2.37,
+          "tokens_per_round": 2.27,
+          "ms_per_round": 26.29,
+          "expert_file_reads": 0,
+          "expert_mb_accounted": 0.0
+        }
+      ],
+      "memory": {
+        "min_available_mib": 2141,
+        "max_new_swap_mib": 2
+      },
+      "effective_engine_command": "<redacted-path> --serve --pack <redacted-path> --native <redacted-path> --expert-cache auto --max-context 262144 --kv k8v4 --mmap-experts --pool-workers 15 --kv-resident 20480 --prompt-cache 2 --vram-reserve-mib 448 --resident-experts --adapt-min-gain 4 --conversation-cache-min-free-mib 1536 --vram-segment-mib 128 --ple-gguf <redacted-path> --session-save-reclaim --expert-profile <redacted-path> --conversation-cache-mib 0 --conversation-cache-slots 0 --spec 4 --lookup-max-t 16 --lookup-sizes 2,3,4,5,6,7,8,10,12,16 --prefill auto:8192 --adapt-every 2 --adapt-swaps 192 --adapt-decay 0.92 --draft dflash2 --draft-model <redacted-path> --draft-fallback none --mtp-draft-vocab <redacted-path> --draft-conf 0.8 --vision --vram-elastic",
+      "resources": [
+        "strata generate: PCIe probe: 25.3 GB/s host->device (best of 25.2 25.3 25.2 25.3) -> pcie_frac 0.55 (default 0.55)",
+        "strata generate: KV streaming: 20480 of 262144 cells per QSA layer in VRAM, the K/V in 2.39 GiB of pinned RAM",
+        "strata generate: file tier (Linux defaults, experts.bin: its pages are read from the mapping as they are): page-cached experts computed from the mapping (STRATA_COLD_OVERLAP=0), io prefetch with whole-blob preads on 8 I/O threads, the decode's read-ahead only while the page cache has room for it and it pays (STRATA_IO_PF_GATE=1); off: STRATA_COLD_OVERLAP=0, STRATA_IO_PREFETCH=0, STRATA_IO_PF_GATE=0",
+        "strata generate: expert cache auto: 6.26 GiB free, 448 MiB reserved (+380 MiB for the draft head, +256 MiB for what is allocated after the cache) -> 5316 slots",
+        "strata generate: routing-aware prefetch on (the next layer's router, file tier)",
+        "prefill: prompt pieces of 64 tokens or more read on the fused kernels, as long prompts do. STRATA_PREFILL_STREAM_MIN=N sets the number by hand.",
+        "strata: prompt kernels: chunks of 64 tokens or more run 48 of 48 layers on the fused kernels; shorter chunks run 48 on the FP16 path.",
+        "FileExpertSource: 2252 of the prompt path's 2252 lendable slots keep their experts in RAM too",
+        "strata generate: resident RAM mode: 21.03 GiB of experts in RAM (page-locked), 5316 in the GPU cache; adaptive swaps exchange them with the GPU cache (no file reads)",
+        "strata: prefill plan inputs: 24.0 GiB experts, 5.2 GiB in the GPU caches, 21.0 GiB RAM copy (2252 lend slots kept), file tier 0.0 GiB; 1.5 GiB available for the page cache; PCIe 25.3 GB/s; drive 1.50 GB/s (assumed); a 32768-token prompt",
+        "07:47:11 strata serve: prompt chunk auto: 8192 tokens, a 96-slot ring",
+        "strata serve: DFlash2 drafter on (<redacted-path>, graphs captured in 1 ms); windows up to 16 tokens; no MTP layer is loaded (--draft-fallback none)",
+        "07:47:11 strata serve: 558 MiB of VRAM free with everything loaded"
+      ],
+      "error": "logged Ampere CUDA path differs from the requested mode",
+      "settings": {
+        "spec": 4,
+        "shapes": 2,
+        "lookup": 16,
+        "tc": 0,
+        "dense": 1,
+        "skip": 8,
+        "rows": 2,
+        "nowait": 1,
+        "tail": 7,
+        "emb": 1,
+        "gdn_np": 2,
+        "upmix": 1,
+        "gdn_tiles": 1,
+        "gdn_fuse": 1,
+        "prefill_cap": 8192,
+        "cpu_nt": 32,
+        "cpu_max": 3072,
+        "lag": 2,
+        "overlap": 0,
+        "engine": 1,
+        "decode_tc": 1,
+        "tq_f16": 1,
+        "fetch": 2,
+        "hc_persist": 1,
+        "qfuse": 0,
+        "l3": 0,
+        "pin": 0,
+        "cpu_share": 0,
+        "adapt_every": 2,
+        "adapt_swaps": 192,
+        "adapt_decay": 0.92,
+        "dense_min": 9,
+        "group": "fetch-pin",
+        "name": "fetch-pin-2-0"
+      },
+      "trial_engine_sha256": "1bd22aee89eb99f7635089c0b04d6265507b13f3c92acd7c01e1d39726a371bf",
+      "wide_bridge_exercised": true,
+      "trace": [
+        {
+          "neural": {
+            "rounds": 41,
+            "offered": 26,
+            "accepted": 22,
+            "round_latency_ms": {
+              "samples": 41,
+              "p50": 18.224,
+              "p95": 37.003,
+              "p99": 44.436
+            }
+          },
+          "lookup": {
+            "rounds": 0,
+            "offered": 0,
+            "accepted": 0,
+            "round_latency_ms": {
+              "samples": 0
+            }
+          },
+          "widths": {
+            "4": 3,
+            "1": 25,
+            "2": 9,
+            "3": 4
+          },
+          "round_latency_ms_by_width": {
+            "4": {
+              "samples": 3,
+              "p50": 37.003,
+              "p95": 44.436,
+              "p99": 44.436
+            },
+            "1": {
+              "samples": 25,
+              "p50": 17.673,
+              "p95": 18.855,
+              "p99": 19.138
+            },
+            "2": {
+              "samples": 9,
+              "p50": 23.741,
+              "p95": 32.814,
+              "p99": 32.814
+            },
+            "3": {
+              "samples": 4,
+              "p50": 29.128,
+              "p95": 38.218,
+              "p99": 38.218
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 929,
+            "offered": 2179,
+            "accepted": 2094,
+            "round_latency_ms": {
+              "samples": 929,
+              "p50": 33.143,
+              "p95": 36.271,
+              "p99": 37.16
+            }
+          },
+          "lookup": {
+            "rounds": 14,
+            "offered": 74,
+            "accepted": 34,
+            "round_latency_ms": {
+              "samples": 14,
+              "p50": 33.837,
+              "p95": 97.742,
+              "p99": 97.742
+            }
+          },
+          "widths": {
+            "3": 95,
+            "4": 640,
+            "2": 98,
+            "1": 107,
+            "16": 3
+          },
+          "round_latency_ms_by_width": {
+            "3": {
+              "samples": 95,
+              "p50": 28.606,
+              "p95": 30.681,
+              "p99": 31.273
+            },
+            "4": {
+              "samples": 640,
+              "p50": 34.13,
+              "p95": 36.432,
+              "p99": 37.427
+            },
+            "2": {
+              "samples": 98,
+              "p50": 23.223,
+              "p95": 24.484,
+              "p99": 24.973
+            },
+            "1": {
+              "samples": 107,
+              "p50": 17.674,
+              "p95": 18.383,
+              "p99": 18.547
+            },
+            "16": {
+              "samples": 3,
+              "p50": 92.341,
+              "p95": 97.742,
+              "p99": 97.742
+            }
+          }
+        },
+        {
+          "neural": {
+            "rounds": 673,
+            "offered": 916,
+            "accepted": 854,
+            "round_latency_ms": {
+              "samples": 673,
+              "p50": 24.36,
+              "p95": 37.625,
+              "p99": 38.665
+            }
+          },
+          "lookup": {
+            "rounds": 4,
+            "offered": 10,
+            "accepted": 4,
+            "round_latency_ms": {
+              "samples": 4,
+              "p50": 28.734,
+              "p95": 35.128,
+              "p99": 35.128
+            }
+          },
+          "widths": {
+            "2": 133,
+            "1": 256,
+            "3": 71,
+            "4": 217
+          },
+          "round_latency_ms_by_width": {
+            "2": {
+              "samples": 133,
+              "p50": 24.122,
+              "p95": 25.794,
+              "p99": 26.173
+            },
+            "1": {
+              "samples": 256,
+              "p50": 18.243,
+              "p95": 19.082,
+              "p99": 19.397
+            },
+            "3": {
+              "samples": 71,
+              "p50": 29.901,
+              "p95": 32.205,
+              "p99": 32.646
+            },
+            "4": {
+              "samples": 217,
+              "p50": 35.771,
+              "p95": 38.435,
+              "p99": 39.259
+            }
+          }
+        }
+      ],
+      "optimization_log": {
+        "tail_skip_reported": true,
+        "tail_skip_cumulative_samples": [
+          {
+            "experts": 7161,
+            "entries": 7620
+          },
+          {
+            "experts": 246606,
+            "entries": 265565
+          },
+          {
+            "experts": 377606,
+            "entries": 404293
+          }
+        ],
+        "adapt_wait_ms_per_window_samples": [
+          0.04,
+          0.01,
+          0.0
+        ]
+      },
+      "effective_optimization_environment": {
+        "STRATA_ADAPT_NOWAIT": "1",
+        "STRATA_ADAPT_LAG": "2",
+        "STRATA_ADAPT_OVERLAP": "0",
+        "STRATA_ADAPT_OVERLAP_RESIDENT": "0",
+        "STRATA_ROUTE_TAIL_SKIP": "7",
+        "STRATA_ROUTE_TAIL_RENORM": "0",
+        "STRATA_EMB_REUSE_ACCOUNT": "1",
+        "STRATA_GDN_TC": "1",
+        "STRATA_GDN_TC_NP": "2",
+        "STRATA_GDN_TC_TILES": "1",
+        "STRATA_GDN_TC_FUSE": "1",
+        "STRATA_HC_UPMIX": "1",
+        "STRATA_PREFILL_CPU_SHARE_NT": "32",
+        "STRATA_PREFILL_CPU_SHARE_MAX": "3072",
+        "STRATA_ATTN_DECODE_TC": "1",
+        "STRATA_PF_FUSED_TQ_F16": "1",
+        "STRATA_ADAPT_FETCH": "2",
+        "STRATA_HC_PERSIST": "1",
+        "STRATA_QFUSE": "0",
+        "STRATA_L3_PF": "0",
+        "STRATA_CACHE_PIN_FRAC": "0",
+        "STRATA_DENSE_I8_TC_MIN_T": "9"
+      }
+    }
+  ]
+}

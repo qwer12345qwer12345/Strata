@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
         }
         float *x = nullptr, *ref = nullptr, *got = nullptr; void* xq = nullptr; void* xil = nullptr;
         const size_t xbytes = size_t(16) * c.k * sizeof(float), ybytes = size_t(16) * c.n * sizeof(float);
-        ck(cudaMalloc(&x, xbytes), "activation allocation"); ck(cudaMalloc(&xq, K::native_q8_1_bytes(c.k, 16)), "Q8_1 allocation");
+        ck(cudaMalloc(&x, xbytes), "activation allocation"); ck(cudaMalloc(&xq, size_t(16) * K::native_q8_1_bytes(c.k, 1)), "Q8_1 allocation");
         ck(cudaMalloc(&ref, ybytes), "reference allocation"); ck(cudaMalloc(&got, ybytes), "result allocation");
         std::vector<float> hx(size_t(16) * c.k);
         for (auto& v : hx) v = float(int(rng() % 20001) - 10000) * 0.0001f;

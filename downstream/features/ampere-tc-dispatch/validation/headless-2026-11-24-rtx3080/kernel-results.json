@@ -1,0 +1,44 @@
+{
+  "status": "passed",
+  "plan": {
+    "suite": "kernel-check-v1",
+    "automatic_tests": false,
+    "checks": [
+      "tool repeat retry and disk archive eligibility regression",
+      "K8V4 decode TC named/default dispatch",
+      "Q8 HC persistent and QFUSE",
+      "TQ INT8 and F16 prefill",
+      "resident complement batch exchange",
+      "vision expert lease",
+      "Dense resident-weight layout latency sweep"
+    ],
+    "compilation": false,
+    "model_requests": false
+  },
+  "steps": [
+    {
+      "check": "repeat-recovery-regression",
+      "returncode": 0
+    },
+    {
+      "check": "synthetic-correctness",
+      "returncode": 0,
+      "tests": 6,
+      "skipped": []
+    },
+    {
+      "check": "tq-f16",
+      "mode": 0,
+      "returncode": 0
+    },
+    {
+      "check": "tq-f16",
+      "mode": 1,
+      "returncode": 0
+    },
+    {
+      "check": "dense-layout",
+      "returncode": 0
+    }
+  ]
+}

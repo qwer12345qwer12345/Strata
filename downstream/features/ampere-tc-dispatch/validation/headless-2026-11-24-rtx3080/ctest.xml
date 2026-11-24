@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="6"
+	failures="0"
+	disabled="0"
+	skipped="0"
+	hostname=""
+	time="2"
+	timestamp="2026-11-24T04:19:07"
+	>
+	<testcase name="qsa_decode_tc_parity" classname="qsa_decode_tc_parity" time="0.311479" status="run">
+		<properties/>
+		<system-out>case short-1: nonzero default=5760 TC=5760; default-vs-math 0.000e+00, TC-vs-math 0.000e+00, TC-vs-default 0.000e+00, ref_scale 3.152e-01
+case short-1: TC-vs-math 0.000e+00 (limit 3.152e-07) ok
+case short-1: TC-vs-default 0.000e+00 (limit 3.152e-05) ok
+case w2: nonzero default=6096 TC=6096; default-vs-math 3.276e-08, TC-vs-math 3.281e-08, TC-vs-default 4.470e-08, ref_scale 3.001e-01
+case w2: TC-vs-math 3.281e-08 (limit 3.001e-07) ok
+case w2: TC-vs-default 4.470e-08 (limit 3.001e-05) ok
+case w8: nonzero default=6144 TC=6144; default-vs-math 3.794e-08, TC-vs-math 3.324e-08, TC-vs-default 2.980e-08, ref_scale 1.906e-01
+case w8: TC-vs-math 3.324e-08 (limit 1.906e-07) ok
+case w8: TC-vs-default 2.980e-08 (limit 1.906e-05) ok
+case w9: nonzero default=6144 TC=6144; default-vs-math 2.752e-08, TC-vs-math 2.752e-08, TC-vs-default 2.980e-08, ref_scale 1.729e-01
+case w9: TC-vs-math 2.752e-08 (limit 1.729e-07) ok
+case w9: TC-vs-default 2.980e-08 (limit 1.729e-05) ok
+case full-64: nonzero default=6144 TC=6144; default-vs-ma...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="qsa_decode_tc_parity_env" classname="qsa_decode_tc_parity_env" time="0.217034" status="run">
+		<properties/>
+		<system-out>case short-1: nonzero default=5760 TC=5760; default-vs-math 0.000e+00, TC-vs-math 0.000e+00, TC-vs-default 0.000e+00, ref_scale 3.152e-01
+case short-1: TC-vs-math 0.000e+00 (limit 3.152e-07) ok
+case short-1: TC-vs-default 0.000e+00 (limit 3.152e-05) ok
+case w2: nonzero default=6096 TC=6096; default-vs-math 3.276e-08, TC-vs-math 3.281e-08, TC-vs-default 4.470e-08, ref_scale 3.001e-01
+case w2: TC-vs-math 3.281e-08 (limit 3.001e-07) ok
+case w2: TC-vs-default 4.470e-08 (limit 3.001e-05) ok
+case w8: nonzero default=6144 TC=6144; default-vs-math 3.794e-08, TC-vs-math 3.324e-08, TC-vs-default 2.980e-08, ref_scale 1.906e-01
+case w8: TC-vs-math 3.324e-08 (limit 1.906e-07) ok
+case w8: TC-vs-default 2.980e-08 (limit 1.906e-05) ok
+case w9: nonzero default=6144 TC=6144; default-vs-math 2.752e-08, TC-vs-math 2.752e-08, TC-vs-default 2.980e-08, ref_scale 1.729e-01
+case w9: TC-vs-math 2.752e-08 (limit 1.729e-07) ok
+case w9: TC-vs-default 2.980e-08 (limit 1.729e-05) ok
+case full-64: nonzero default=6144 TC=6144; default-vs-ma...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="file_expert_source_rotation_gpu" classname="file_expert_source_rotation_gpu" time="0.454592" status="run">
+		<properties/>
+		<system-out>[strata] memory: 20.0 GiB of the ZFS ARC is counted as available RAM (ZFS gives it back when programs need it; #5519)
+FileExpertSource: RAM budget 0.00 GiB: 2 of the 0.00 GiB of experts the GPU cache does not hold, by profile rank; the rest are read from the files
+FileExpertSource: allocating 0.00 GiB page-locked cache complement
+FileExpertSource: copied cache complement through layer 1/1 (0.00 GiB, 0 s)
+FileExpertSource: mapped pinned cache complement ready: resident 0.00 GiB, pinned 0.00 GiB in 0 s; page-locked and mapped
+FileExpertSource: RAM budget 0.00 GiB: 2 of the 0.00 GiB of experts the GPU cache does not hold, by profile rank; the rest are read from the files
+FileExpertSource: allocating 0.00 GiB page-locked cache complement
+FileExpertSource: copied cache complement through layer 1/1 (0.00 GiB, 0 s)
+FileExpertSource: mapped pinned cache complement ready: resident 0.00 GiB, pinned 0.00 GiB in 0 s; page-locked and mapped
+FileExpertSource: exchange buffer rotation enabled: 2 buffers in 1 block sizes (la...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="vision_expert_lease_gpu_test" classname="vision_expert_lease_gpu_test" time="0.391505" status="run">
+		<properties/>
+		<system-out>sized=0 PASS: original bytes/slots/addresses restored, partial unmap rollback, read retry, staging=1MiB, read=109051904 bytes
+sized=1 PASS: original bytes/slots/addresses restored, partial unmap rollback, read retry, staging=1MiB, read=67108864 bytes
+vision_expert_lease_gpu_test: PASS
+</system-out>
+	</testcase>
+	<testcase name="hc_persist_parity" classname="hc_persist_parity" time="0.384527" status="run">
+		<properties/>
+		<system-out>strata hc: CUDA0: the hyper-connection read runs as staged (the norm per token and stream, the down projection's activations staged ahead by cp.async); checked bit for bit against the plain read on this card (STRATA_HC_SPLIT=1 or 0 for the earlier ones)
+strata hc: CUDA0: BF16 persistent read checked against the default path (80 blocks on 70 multiprocessors, up to 8 tokens; 0 token counts timed out; max relative difference 1.8e-07)
+strata hc: CUDA0: Q8_0 persistent read residency checked (up to 8 tokens; 0 token counts timed out)
+T=1: max relative difference 3.12e-07 against the default read, finite, two runs bitwise equal  ok
+T=2: max relative difference 2.91e-07 against the default read, finite, two runs bitwise equal  ok
+T=3: max relative difference 2.59e-07 against the default read, finite, two runs bitwise equal  ok
+T=4: max relative difference 2.46e-07 against the default read, finite, two runs bitwise equal  ok
+T=5: max relative difference 2.46e-07 against the default read, finite, two runs bitwise equa...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="hc_persist_default_off" classname="hc_persist_default_off" time="0.288402" status="run">
+		<properties/>
+		<system-out>strata hc: CUDA0: the hyper-connection read runs as staged (the norm per token and stream, the down projection's activations staged ahead by cp.async); checked bit for bit against the plain read on this card (STRATA_HC_SPLIT=1 or 0 for the earlier ones)
+PASS: STRATA_HC_PERSIST unset, the persistent read never ran
+</system-out>
+	</testcase>
+</testsuite>
