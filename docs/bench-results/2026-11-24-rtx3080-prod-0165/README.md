@@ -6,7 +6,23 @@ This report separates a measured production-engine ablation from older reference
 
 See the [five-arm table and implementation notes](../../l2-pr-ablation.md). The test used a common frozen expert profile, K8V4, BF16 PLE, DFlash2 spec 4, prior 0.5 and tail skip 0. Each arm received the same 1,472-token prompt and produced 320 tokens. All five used 5,540 expert slots, the full RAM complement and zero resident-mode expert blob reads. No new swap was observed.
 
-Keeping adaptive fetch at 2 reduced mean decode window time from 51.18 to 27.48 ms with roughly the same tokens per window. When persistent HC was turned off, throughput rose from 76.6 to 87.1 tok/s because fewer windows were needed. Mean window time rose from 27.48 to 28.92 ms, so the throughput result does not measure HC kernel latency. The production branch keeps #8 enabled and sets #6, #7 and #9 to zero. That combined configuration has not yet been timed after the change.
+Keeping adaptive fetch at 2 reduced mean decode window time from 51.18 to 27.48 ms with roughly the same tokens per window. When persistent HC was turned off, throughput rose from 76.6 to 87.1 tok/s because fewer windows were needed. Mean window time rose from 27.48 to 28.92 ms, so the throughput result does not measure HC kernel latency. The production branch keeps #8 enabled and sets #6, #7 and #9 to zero. The follow-up boot below measured that combined configuration.
+
+## Follow-up boot with the production switches
+
+The [follow-up measurements](follow-up.json) used the same five arms, this time flipping each switch from the selected production value. All arms had 5,540 GPU expert slots and zero resident-mode expert blob reads. The benchmark uses one cold timed prompt and does not measure conversation-cache reuse.
+
+| Trial | Prefill ms | Decode tok/s | ms/window | Tokens/window | VRAM expert hit rate, excluding PCIe |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Production: only #8 enabled | 1300 | 82.8 | 26.47 | 2.19 | 48.4% |
+| #6 enabled | 1256 | 82.2 | 26.83 | 2.21 | 49.3% |
+| #7 enabled | 1269 | 84.6 | 27.40 | 2.32 | 49.1% |
+| #8 disabled | 1273 | 80.2 | 26.42 | 2.12 | 45.6% |
+| #9 enabled | 1329 | 76.1 | 28.59 | 2.18 | 50.6% |
+
+This time #9 increased window time by 8% with essentially unchanged output per window and CPU expert time. GPU-reach wait rose from 9.11 to 11.10 ms per window. This supports keeping #9 off but is still not an isolated kernel timing. The fetch-off trial did not reproduce the original large slowdown: decode fell about 3%, hit rate fell 2.8 percentage points, and mean window time was nearly unchanged. Keep mode 2, without treating the initial large effect as the expected gain. The follow-up gives no clear reason to enable #6 or #7 by default.
+
+In the following live session, six consecutive hot turns reused a weighted 99.5% of their prompt tokens and took 0.30–1.12 s to prefill. Two later turns shared a shorter prefix with the live state and reused 14.7% and 21.2%; prefill took 23.67 s and 14.19 s. The server recorded nine failed v3 saves out of nine attempts (507, insufficient space), and its SSD spill tier did not start. The filesystem was under the 4 GiB reserve before reserving space for a new generation. That explains why disk could not backstop a live prefix miss or a restart; the token logs alone do not identify what changed in the client history. Production expert hits were 43.8–54.2% excluding PCIe, with zero resident-mode expert blob reads during decode. The aggregate contains no request text or identifiers.
 
 ## 0.1.65 versus 0.1.66 reference observations
 
