@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import signal
@@ -90,8 +91,47 @@ def stop_trial(proc):
             os.close(handle)
 
 
+def attach_window_latency(trace, cases, result):
+    """Summarize wall time by draft source and exact width once engine stdio is flushed."""
+    requests = []
+    with trace.open('rb') as f:
+        for line in f:
+            if line.startswith(b'# request '):
+                requests.append((int(line.split()[3]), {}))
+            elif requests and line.startswith(b'R '):
+                fields = line.split(b'|', 1)[0].split()
+                if len(fields) < 6:
+                    continue
+                _, _, width, accepted, lookup, ms, *_ = fields
+                key = ('suffix' if lookup == b'1' else 'neural', int(width))
+                requests[-1][1].setdefault(key, []).append((float(ms), int(accepted)))
+
+    # Match requests in order, and use a prompt-length check to avoid attributing a
+    # trace from an unexpected retry to another case.
+    if len(requests) != len(cases):
+        return
+    for name, (prompt_n, sample) in zip(cases, requests):
+        row = result[name]
+        if row['timings'].get('prompt_n') != prompt_n:
+            continue
+        summary = {}
+        for (source, width), entries in sorted(sample.items()):
+            times = sorted(ms for ms, _ in entries)
+            n = len(times)
+            summary.setdefault(source, {})[str(width)] = {
+                'rounds': n,
+                'accepted_drafts': sum(accepted for _, accepted in entries),
+                **{f'p{p}_ms': times[math.ceil(n * p / 100) - 1] for p in (50, 95, 99)},
+            }
+        row['window_latency_ms_by_source_width'] = summary
+
+
 def serve_trial(root, trial, folder, end, result, *, workloads=None):
     profile = folder / 'profile.json'
+    trace = folder / 'spec.trace'
+    finished_cases = []
+    if workloads:
+        trial['env']['STRATA_SPEC_TRACE'] = str(trace)
     profile.write_text(json.dumps(trial))
     ready = folder / 'ready.json'
     log = Path(trial['log'])
@@ -170,9 +210,13 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
                     # and synchronization, so it must not be reported as the isolated kernel time.
                     timing_line = detail[match.start():].splitlines()[0]
                     row['decode_timing'] = timing_line
-                    cpu = re.search(r'CPU ([\d.]+)\]', timing_line)
-                    if cpu:
-                        row['cpu_expert_ms_per_round'] = float(cpu[1])
+                    for field, pattern in (
+                        ('cpu_expert_ms_per_round', r'CPU ([\d.]+)\]'),
+                        ('gpu_reach_wait_ms_per_round', r'GPU-reach wait ([\d.]+)'),
+                    ):
+                        component = re.search(pattern, timing_line)
+                        if component:
+                            row[field] = float(component[1])
                 hit = re.search(r'decode expert cache hit rate: ([\d.]+)%', detail)
                 if hit:
                     row['vram_hit_pct'] = float(hit[1])
@@ -187,6 +231,7 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
                                              'CPU share is off', 'strata serve: lookup chain:',
                                              'VISION_LEASE state=', 'strata serve: slot', 'TQ Ampere'))][-24:]
                 result[name] = row
+                finished_cases.append(name)
                 if workloads:
                     if row['expert_file_reads'] != 0:
                         raise RuntimeError(f'{name}: zero expert file reads could not be confirmed')
@@ -205,6 +250,11 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
             stop.set()
             watcher.join(timeout=1)
             stop_trial(proc)
+            if workloads and trace.is_file():
+                try:
+                    attach_window_latency(trace, finished_cases, result)
+                except (OSError, ValueError) as exc:
+                    result['window_trace_error'] = type(exc).__name__
 
 
 def run_at_boot(root, cfg, directory, settings, scratch_parent):

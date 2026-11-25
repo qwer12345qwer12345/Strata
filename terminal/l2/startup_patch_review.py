@@ -22,13 +22,8 @@ def arm(name, env=None, args=None):
 
 
 GROUPS = (
-    ('attention-and-trellis', (
-        arm('decode-attention-int8-tc', {'STRATA_ATTN_DECODE_TC': '1'}),
+    ('prompt-attention', (
         arm('prefill-attention-int8-imma-off', {'STRATA_K8V4_QK_IMMA': '0'}),
-    )),
-    ('trellis-prefill', (
-        arm('trellis-f16', {'STRATA_PF_FUSED_TQ_F16': '1'}),
-        arm('trellis-fused-off', {'STRATA_PF_FUSED_TQ': '0'}),
     )),
     ('expert-kernels', (
         arm('gpu-single-row', {'STRATA_TQ_AMPERE_ROWS': '0'}),
@@ -38,10 +33,6 @@ GROUPS = (
         arm('bf16-upload-off', {'STRATA_PLE_BF16_COMPACT': '0'}),
         arm('bf16-independent-copy-off', {'STRATA_PLE_COPY_STREAM': '0'}),
     )),
-    ('dflash-projection', (
-        arm('dflash-upstream-shapes', {'STRATA_DF2_AMPERE_TUNING': '0'}),
-        arm('dflash-qkv-tensor-core', {'STRATA_DF2_GEMM_TC': '2'}),
-    )),
     ('dflash-lookup', (
         arm('dflash-lookup-eight', {'STRATA_DF2_WIDE_CONTEXT': '0'},
             {'--lookup-max-t': '8', '--lookup-sizes': '2,3,4,5,6,7,8'}),
@@ -49,14 +40,12 @@ GROUPS = (
     )),
     ('dflash-spec', (
         arm('spec-3', args={'--spec': '3'}),
-        arm('spec-6', args={'--spec': '6'}),
     )),
     ('dense-and-hc', (
         arm('dense-shape-dispatch-off', {'STRATA_DENSE_I8_AMPERE_SHAPES': '0'}),
         arm('hc-q8-off', {'STRATA_HC_Q8': '0'}),
     )),
     ('adaptive-fetch', (
-        arm('fetch-0', {'STRATA_ADAPT_FETCH': '0'}),
         arm('fetch-1', {'STRATA_ADAPT_FETCH': '1'}),
     )),
     ('adaptive-scheduling', (
@@ -119,6 +108,12 @@ COLD = ('cold_long', [{'role': 'system', 'content': LONG_SYSTEM},
 HOT = ('hot_prefix', [{'role': 'system', 'content': LONG_SYSTEM},
                        {'role': 'user', 'content': 'Write 40 detailed test plans for aborted transactions. Keep going.'}], 384)
 WORKLOADS = (WARMUP, DECODE, COLD, HOT)
+CPU_PREFILL_GROUPS = {'prompt-cpu-and-batch', 'prompt-cpu-share-variants'}
+CPU_PREFILL_CASES = tuple(
+    (name, '\\n'.join(RECORDS.splitlines()[start:start + count])
+     + '\\nDescribe how to verify these storage records. Explain several options.', 64)
+    for name, start, count in (('prefill_under_1k', 0, 16), ('prefill_1k_to_3k', 40, 42))
+)
 
 
 def vision_workloads():
@@ -193,20 +188,24 @@ def run_group(root, cfg, directory, seed, reference, report, group, variants, wo
                     row['engine_sha256'] = reference['sha256']
                 serve_trial(root, trial, folder, time.monotonic() + arm_timeout, row, workloads=workloads)
                 text = row.get('decode') or row.get('post_vision_decode', {})
+                cold, hot = row.get('cold_long'), row.get('hot_prefix')
                 if 'image_cold' in row and 'image_cached' in row:
                     extra = (f"冷图 {row['image_cold']['first_content_ms']:.0f} ms，"
                              f"缓存图 {row['image_cached']['first_content_ms']:.0f} ms")
-                elif 'cold_long' in row and 'hot_prefix' in row:
-                    extra = (f"长预填充 {row['cold_long']['timings']['prompt_ms']:.0f} ms，"
-                             f"热前缀 {row['hot_prefix']['timings'].get('cache_n', 0)} token")
+                elif cold and hot:
+                    extra = (f"冷首字 {cold['first_content_ms']:.0f} ms，冷预填充 {cold['timings']['prompt_ms']:.0f} ms，"
+                             f"热首字 {hot['first_content_ms']:.0f} ms / 复用 {hot['timings'].get('cache_n', 0)} token")
                 else:
                     extra = '参见单项结果'
-                speed = text.get('timings', {}).get('predicted_per_second')
-                speed_text = ''
-                if speed is not None:
-                    label = '解码' if text.get('decode_comparable') else '短输出解码（不参与长解码比较）'
-                    speed_text = f'{label} {speed:.1f} token/s，'
-                print(f"Strata 对照 {name}（{row['status']}）：{speed_text}{extra}。", flush=True)
+                stream = text.get('stream_gap_p99_ms')
+                window = text.get('ms_per_round')
+                if stream is not None:
+                    extra += f'，流式 p99 {stream:.1f} ms'
+                if window is not None:
+                    extra += f"，平均验证窗口 {window:.1f} ms / {text['tokens_per_round']:.2f} token"
+                if text and not text.get('decode_comparable'):
+                    extra += '（短输出，不参与长解码比较）'
+                print(f"Strata 对照 {name}（{row['status']}）：{extra}。", flush=True)
             except Exception as exc:
                 row.update(status='failed', error=str(exc))
                 print(f'Strata 对照 {name} 未完成：{exc}', flush=True)
@@ -221,7 +220,7 @@ def run_suite(root, cfg, directory, settings):
     progress = directory / 'startup-patch-review-progress.json'
     latest = directory / 'startup-patch-review-latest.json'
     results = directory / 'startup-patch-review'
-    report = {'suite': 'startup-patch-review-v3', 'status': 'running', 'groups': [], 'baselines': []}
+    report = {'suite': 'startup-patch-review-v4', 'status': 'running', 'groups': [], 'baselines': []}
     attempted = False
     try:
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -252,7 +251,7 @@ def run_suite(root, cfg, directory, settings):
             'suite': report['suite'], 'engine': engine_sha,
             'reference': reference and reference['sha256'], 'groups': groups,
             'args': baseline_args, 'env': cfg['env'], 'series': series,
-            'passes': passes, 'arm_timeout_s': arm_timeout, 'workloads': (WORKLOADS, vision_cases),
+            'passes': passes, 'arm_timeout_s': arm_timeout, 'workloads': (WORKLOADS, CPU_PREFILL_CASES, vision_cases),
         }, sort_keys=True).encode()).hexdigest()
         try:
             state = json.loads(progress.read_text())
@@ -266,7 +265,10 @@ def run_suite(root, cfg, directory, settings):
                 for pass_no in range(1, passes + 1)
                 for name, variants in (groups if pass_no == 1 else groups[::-1])]
         arms = 2 + sum(len(variants) for _, variants, _ in plan)
-        baseline_cases = WORKLOADS + (vision_cases if any(name == 'vision-lease' for name, _ in groups) else ())
+        vision_suffix = vision_cases if any(name == 'vision-lease' for name, _ in groups) else ()
+        # Run vision in the same place for its candidate and both baseline starts.
+        cpu_cases = WORKLOADS + CPU_PREFILL_CASES
+        baseline_cases = cpu_cases + vision_suffix
         report.update(series=series, engine_sha256=engine_sha, batches=len(plan), arms=arms,
                       arm_timeout_s=arm_timeout)
         attempted = True
@@ -280,11 +282,8 @@ def run_suite(root, cfg, directory, settings):
 
             def baseline(label, number):
                 report['pass_number'] = number
-                if baseline_cases != WORKLOADS:
-                    # The baseline also runs cold and cached vision for the vision arm.
-                    timeout = arm_timeout + 80
-                else:
-                    timeout = arm_timeout
+                # Baselines include the matched extra vision and CPU-prefill cases.
+                timeout = arm_timeout + 80
                 batch = run_group(root, cfg, directory, seed, reference, report, label, (arm(label),),
                                   baseline_cases, timeout)
                 name = f'{now}-{label}.json'
@@ -294,8 +293,14 @@ def run_suite(root, cfg, directory, settings):
             baseline('baseline-first', 1)
             for group, variants, pass_no in plan:
                 report['pass_number'] = pass_no
-                workloads = baseline_cases if group == 'vision-lease' else WORKLOADS
-                timeout = arm_timeout + 80 if group == 'vision-lease' else arm_timeout
+                workloads = WORKLOADS
+                timeout = arm_timeout
+                if group == 'vision-lease':
+                    workloads = baseline_cases
+                    timeout += 80
+                elif group in CPU_PREFILL_GROUPS:
+                    workloads = cpu_cases
+                    timeout += 30
                 batch = run_group(root, cfg, directory, seed, reference, report, group, variants, workloads, timeout)
                 name = f"{now}-{batch['batch']:02d}-{group}.json"
                 publish(results / name, batch)
