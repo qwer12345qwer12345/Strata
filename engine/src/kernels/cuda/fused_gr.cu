@@ -20,7 +20,6 @@
 #endif
 #include <cuda_runtime.h>
 
-#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <type_traits>
@@ -4116,39 +4115,6 @@ struct PArgs {
     double* partd;      // STRATA_HC_PERSIST=3 (a reference only): the partial dots and sums of squares in double
     double* sspd;
 };
-struct PWeight8 {
-    uint32_t lo, hi;
-    float scale;
-};
-__device__ __forceinline__ uint16_t persist_load_u16(const uint8_t* p) {
-    return *reinterpret_cast<const uint16_t*>(p);
-}
-__device__ __forceinline__ PWeight8 persist_load_q8_0(const uint8_t* base, size_t e) {
-    const uint8_t* block = base + (e / 32) * 34;
-    const uint8_t* q = block + 2 + (e & 31);
-    const uint32_t lo = (uint32_t) persist_load_u16(q) | ((uint32_t) persist_load_u16(q + 2) << 16);
-    const uint32_t hi = (uint32_t) persist_load_u16(q + 4) | ((uint32_t) persist_load_u16(q + 6) << 16);
-    const float scale = __half2float(*reinterpret_cast<const __half*>(block));
-    return {lo, hi, scale};
-}
-__device__ __forceinline__ PWeight8 persist_load_q8(const FusedGrArgs& a, bool up, size_t e) {
-    return persist_load_q8_0(up ? a.q8_up : a.q8_down, e);
-}
-template <bool DP>
-__device__ __forceinline__ typename std::conditional<DP, double, float>::type persist_dot_q8(PWeight8 w, const float* x) {
-    if constexpr (DP) {
-        double acc = 0.0;
-#pragma unroll
-        for (int i = 0; i < 8; ++i) {
-            const uint32_t word = i < 4 ? w.lo : w.hi;
-            const int shift = (i & 3) * 8;
-            acc += (double) (int8_t) (word >> shift) * (double) x[i];
-        }
-        return (double) w.scale * acc;
-    } else {
-        return w.scale * dot8q(w.lo, w.hi, x);
-    }
-}
 // Returns false when the read was aborted: a block waited longer than `ticks` (the 80 blocks were not all resident - the
 // start-up check finds that out by running every T with a short timeout) or another block aborted.  Then every block
 // leaves the kernel; the outputs are not written completely and bar[48] stays set until the host clears the words.
@@ -4233,14 +4199,14 @@ __device__ __forceinline__ double dot8d(const uint4 w, const float* x) {
     }
     return acc;
 }
-template <int T, bool DP = false, int QMODE = 0>
+template <int T, bool DP = false>
 __global__ void __launch_bounds__(THREADS) persist_kernel(PArgs f) {
     using A = typename std::conditional<DP, double, float>::type;
     __shared__ __align__(16) float xs[T][SL];
     __shared__ __align__(16) float lo[T][LR];
     __shared__ float s_rs[T][HC];
     __shared__ float g[T][HC][UPC];
-    const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5, b = blockIdx.x;
+    const int tid = threadIdx.x, lane = tid & 31, b = blockIdx.x;
     const FusedGrArgs& a0 = f.a[0];
     // (A) block b: columns [128 b, 128 b + 128) of D (one stream): R' * w_norm into LDS, the slice's sum of squares, and
     // the UNSCALED partial dots of the 320 down + 4 inject rows (w . xn = sum_c rs[c] (w[:, c] . x'[c]))
@@ -4269,28 +4235,17 @@ __global__ void __launch_bounds__(THREADS) persist_kernel(PArgs f) {
     }
     __syncthreads();
     const int hw = tid >> 4, hl = tid & 15;
-    const bool inj = a0.w_inject != nullptr || a0.q8_inject != nullptr;
+    const bool inj = a0.w_inject != nullptr;
     const int nrows = inj ? NR : LR;
 #pragma unroll 3
     for (int r = hw; r < nrows; r += 16) {
-        const bool bf16_row = QMODE == 0 || (r >= LR && a0.q8_inject == nullptr);
-        const uint16_t* wrow = nullptr;
-        if (bf16_row) wrow = r < LR ? a0.w_down + (size_t) r * D : a0.w_inject + (size_t) (r - LR) * D;
-        const uint4 w = bf16_row ? __ldg(reinterpret_cast<const uint4*>(wrow + col0) + hl) : make_uint4(0, 0, 0, 0);
+        const uint16_t* wrow = r < LR ? a0.w_down + (size_t) r * D : a0.w_inject + (size_t) (r - LR) * D;
+        const uint4 w = __ldg(reinterpret_cast<const uint4*>(wrow + col0) + hl);
         A acc[T];
 #pragma unroll
         for (int k = 0; k < T; ++k) {
             A v;
-            if constexpr (QMODE == 0) {
-                if constexpr (DP) v = dot8d(w, &xs[k][hl * 8]); else v = dot8(w, &xs[k][hl * 8]);
-            } else if (r < LR || a0.q8_inject != nullptr) {
-                PWeight8 qw;
-                if (r < LR) qw = persist_load_q8(a0, false, (size_t) r * D + col0 + hl * 8);
-                else qw = persist_load_q8_0(a0.q8_inject, (size_t) (r - LR) * D + col0 + hl * 8);
-                v = persist_dot_q8<DP>(qw, &xs[k][hl * 8]);
-            } else {
-                if constexpr (DP) v = dot8d(w, &xs[k][hl * 8]); else v = dot8(w, &xs[k][hl * 8]);
-            }
+            if constexpr (DP) v = dot8d(w, &xs[k][hl * 8]); else v = dot8(w, &xs[k][hl * 8]);
 #pragma unroll
             for (int o = 8; o > 0; o >>= 1) v += shfl_xor_persist(v, o);
             acc[k] = v;
@@ -4361,30 +4316,21 @@ __global__ void __launch_bounds__(THREADS) persist_kernel(PArgs f) {
     {
         const int d0 = b * UPC;
         const int ur = tid >> 1, uh = tid & 1, uc = ur / UPC, udd = ur - uc * UPC, ui = uc * N + d0 + udd;
+        const uint4* w4u = reinterpret_cast<const uint4*>(a0.w_up + (size_t) ui * LR) + uh * 20;
         A v[T];
 #pragma unroll
         for (int k = 0; k < T; ++k) v[k] = 0;
 #pragma unroll 1
         for (int j0 = 0; j0 < 20; j0 += 5) {   // five chunks a batch (all twenty at once costs registers)
             uint4 w[5];
-            PWeight8 qw[5];
 #pragma unroll
-            for (int q = 0; q < 5; ++q) {
-                if constexpr (QMODE == 0) {
-                    const uint4* w4u = reinterpret_cast<const uint4*>(a0.w_up + (size_t) ui * LR) + uh * 20;
-                    w[q] = __ldg(w4u + j0 + q);
-                } else {
-                    qw[q] = persist_load_q8(a0, true, (size_t) ui * LR + (size_t) (uh * 160 + (j0 + q) * 8));
-                }
-            }
+            for (int q = 0; q < 5; ++q) w[q] = __ldg(w4u + j0 + q);
 #pragma unroll
             for (int q = 0; q < 5; ++q)
 #pragma unroll
                 for (int k = 0; k < T; ++k) {
-                    if constexpr (QMODE == 0) {
-                        if constexpr (DP) v[k] += dot8d(w[q], &lo[k][uh * 160] + (j0 + q) * 8);
-                        else v[k] += dot8(w[q], &lo[k][uh * 160] + (j0 + q) * 8);
-                    } else v[k] += persist_dot_q8<DP>(qw[q], &lo[k][uh * 160] + (j0 + q) * 8);
+                    if constexpr (DP) v[k] += dot8d(w[q], &lo[k][uh * 160] + (j0 + q) * 8);
+                    else v[k] += dot8(w[q], &lo[k][uh * 160] + (j0 + q) * 8);
                 }
         }
         float acc[T];
@@ -4412,21 +4358,6 @@ __global__ void __launch_bounds__(THREADS) persist_kernel(PArgs f) {
         for (int c = 0; c < HC; ++c) s += g[k][c][col];
         f.a[k].mixed[b * UPC + col] = s / (float) HC;
     }
-    __syncthreads();
-    // This CTA owns one complete 32-value q8_1 group for every token, so QFUSE needs neither the multi-read counter
-    // nor a cross-CTA fence. It uses the same finite scale, rounding and (d, sum) epilogue as the ordinary q8 tail.
-    if (f.a[0].q8_mixed != nullptr && warp < T) {
-        const float xi = f.a[warp].mixed[b * UPC + lane];
-        float amax = fabsf(xi), sum = xi;
-#pragma unroll
-        for (int o = 16; o > 0; o >>= 1) amax = fmaxf(amax, shfl_xor_persist(amax, o));
-#pragma unroll
-        for (int o = 16; o > 0; o >>= 1) sum += shfl_xor_persist(sum, o);
-        const float d = q8_1_finite(q81_div(amax, 127.0f));
-        GrQ81* y = reinterpret_cast<GrQ81*>(f.a[warp].q8_mixed) + b;
-        y->qs[lane] = q8_1_quant(xi, d, amax);
-        if (lane == 0) y->ds = q8_1_ds(d, sum);
-    }
 }
 struct DevState {
     float* part = nullptr;
@@ -4435,7 +4366,6 @@ struct DevState {
     double* sspd = nullptr;
     unsigned* bar = nullptr;
     int max_t = 0;      // 0: off on this card
-    int max_t_q8 = 0;   // Q8_0 has its own residency check; it uses different load/dot code
     bool tried = false;
 };
 DevState g_dev[64];
@@ -4454,28 +4384,11 @@ KFn kernel_t(int T) {
     }
     return nullptr;
 }
-template <bool DP>
-KFn kernel_q8_t(int T) {
-    switch (T) {
-        case 1: return persist_kernel<1, DP, 2>;
-        case 2: return persist_kernel<2, DP, 2>;
-        case 3: return persist_kernel<3, DP, 2>;
-        case 4: return persist_kernel<4, DP, 2>;
-        case 5: return persist_kernel<5, DP, 2>;
-        case 6: return persist_kernel<6, DP, 2>;
-        case 7: return persist_kernel<7, DP, 2>;
-        case 8: return persist_kernel<8, DP, 2>;
-    }
-    return nullptr;
-}
 bool dp_on() {
     static const bool dp = [] { const char* v = std::getenv("STRATA_HC_PERSIST"); return v != nullptr && std::atoi(v) == 3; }();
     return dp;
 }
-KFn kernel_for(int T, int qmode) {
-    if (qmode == 2) return dp_on() ? kernel_q8_t<true>(T) : kernel_q8_t<false>(T);
-    return dp_on() ? kernel_t<true>(T) : kernel_t<false>(T);
-}
+KFn kernel_for(int T) { return dp_on() ? kernel_t<true>(T) : kernel_t<false>(T); }
 // s_memrealtime runs at 100 MHz on RDNA: a barrier gives up after 2 s in a read (never in a working run; it only turns a
 // hang into a wrong read) and after 50 ms in the start-up check (where a timeout means "not resident here")
 #if defined(__CUDACC__)
@@ -4489,8 +4402,7 @@ void launch(const FusedGrArgs* a, int n_tok, const DevState& st, cudaStream_t s,
     PArgs f;
     for (int t = 0; t < n_tok; ++t) f.a[t] = a[t];
     f.part = st.part; f.ssp = st.ssp; f.bar = st.bar; f.partd = st.partd; f.sspd = st.sspd; f.timeout_ticks = ticks;
-    const int qmode = (a[0].q8_down != nullptr || a[0].q8_up != nullptr) ? 2 : 0;
-    kernel_for(n_tok, qmode)<<<NB, THREADS, 0, s>>>(f);
+    kernel_for(n_tok)<<<NB, THREADS, 0, s>>>(f);
 }
 bool env_on() {
     static const bool on = [] { const char* v = std::getenv("STRATA_HC_PERSIST"); return v != nullptr && std::atoi(v) != 0; }();
@@ -4618,115 +4530,39 @@ void fused_gr_persist_init() {
         if (r != 0) break;
         max_t = T;
     }
+    cudaFree(dR); cudaFree(dbo); cudaFree(dinj); cudaFree(dwn); cudaFree(dxn); cudaFree(dlo); cudaFree(drs);
+    cudaFree(dio); cudaFree(dmix); cudaFree(dwd); cudaFree(dwu); cudaFree(dwi);
     cudaMemset(st.bar, 0, 64 * sizeof(unsigned));
     cudaDeviceSynchronize();
     cudaGetLastError();
     if (!ok) {
-        cudaFree(dR); cudaFree(dbo); cudaFree(dinj); cudaFree(dwn); cudaFree(dxn); cudaFree(dlo); cudaFree(drs);
-        cudaFree(dio); cudaFree(dmix); cudaFree(dwd); cudaFree(dwu); cudaFree(dwi);
         std::fprintf(stderr, "strata hc: CUDA%d: STRATA_HC_PERSIST=1 is off here: the check failed at %d tokens "
                              "(max relative difference %.3g)\n", dev, bad_t, worst);
         return;
     }
+    if (max_t == 0) {
+        std::fprintf(stderr, "strata hc: CUDA%d: STRATA_HC_PERSIST=1 is off here: 80 blocks are not resident at once on %d "
+                             "multiprocessors (the check timed out)\n", dev, mp);
+        return;
+    }
     st.max_t = max_t;
-    if (max_t == 0)
-        std::fprintf(stderr, "strata hc: CUDA%d: BF16 persistent read unavailable: 80 blocks did not stay resident on %d multiprocessors\n", dev, mp);
-    else
-        std::fprintf(stderr, "strata hc: CUDA%d: BF16 persistent read checked against the default path (80 blocks on %d multiprocessors, up to %d tokens; %d token counts timed out; max relative difference %.2g)\n",
-                     dev, mp, max_t, timeouts, worst);
-
-    // The Q8_0 specialization has different weight loads and register use from the BF16 specialization. Probe each row
-    // count independently before allowing it to enter the same grid barrier; if any block cannot stay resident, that
-    // count and larger counts use the ordinary Q8 path.
-    uint8_t *dq8d = nullptr, *dq8u = nullptr, *dq8i = nullptr;
-    const size_t q8d_blocks = wd.size() / 32, q8u_blocks = wu.size() / 32, q8i_blocks = wi.size() / 32;
-    bool q8_alloc = cudaMalloc((void**) &dq8d, q8d_blocks * 34) == cudaSuccess &&
-                    cudaMalloc((void**) &dq8u, q8u_blocks * 34) == cudaSuccess &&
-                    cudaMalloc((void**) &dq8i, q8i_blocks * 34) == cudaSuccess;
-    if (q8_alloc) {
-        fused_gr_quantize_q8_0(dwd, dq8d, (int64_t) q8d_blocks, nullptr);
-        fused_gr_quantize_q8_0(dwu, dq8u, (int64_t) q8u_blocks, nullptr);
-        fused_gr_quantize_q8_0(dwi, dq8i, (int64_t) q8i_blocks, nullptr);
-        q8_alloc = cudaDeviceSynchronize() == cudaSuccess;
-    }
-    if (q8_alloc) {
-        int q8_max_t = 0, q8_timeout = 0, q8_bad_t = 0;
-        bool q8_ok = true;
-        for (int T = 1; T <= kFusedGrMaxT; ++T) {
-            FusedGrArgs a[kFusedGrMaxT];
-            for (int t = 0; t < T; ++t) {
-                a[t] = FusedGrArgs{};
-                a[t].R = dR + (size_t) t * D; a[t].R_out = dR + (size_t) t * D; a[t].apply = true;
-                a[t].bo_prev = dbo + (size_t) t * N; a[t].inj_prev = dinj + (size_t) t * HC;
-                a[t].w_norm = dwn; a[t].q8_down = dq8d; a[t].q8_up = dq8u; a[t].q8_inject = dq8i; a[t].eps = 1e-6f;
-                a[t].lo = dlo + (size_t) t * LR; a[t].rs = drs + (size_t) t * HC;
-                a[t].inject_out = dio + (size_t) t * HC; a[t].mixed = dmix + (size_t) t * N;
-            }
-            cudaMemcpy(dR, R.data(), R.size() * sizeof(float), cudaMemcpyHostToDevice);
-            cudaMemset(dmix, 0xff, (size_t) TM * N * sizeof(float));
-            cudaMemset(dio, 0xff, (size_t) TM * HC * sizeof(float));
-            cudaMemset(st.bar, 0, 64 * sizeof(unsigned));
-            if (cudaDeviceSynchronize() != cudaSuccess) { cudaGetLastError(); q8_bad_t = T; q8_ok = false; break; }
-            hcp::launch(a, T, st, nullptr, hcp::kTicksCheck);
-            if (cudaDeviceSynchronize() != cudaSuccess) { cudaGetLastError(); q8_bad_t = T; q8_ok = false; break; }
-            unsigned abort_word = 0;
-            cudaMemcpy(&abort_word, st.bar + 48, sizeof abort_word, cudaMemcpyDeviceToHost);
-            if (abort_word != 0u) { ++q8_timeout; cudaMemset(st.bar, 0, 64 * sizeof(unsigned)); cudaDeviceSynchronize(); break; }
-            std::vector<float> out((size_t) T * (N + HC + D));
-            cudaMemcpy(out.data(), dmix, (size_t) T * N * sizeof(float), cudaMemcpyDeviceToHost);
-            cudaMemcpy(out.data() + (size_t) T * N, dio, (size_t) T * HC * sizeof(float), cudaMemcpyDeviceToHost);
-            cudaMemcpy(out.data() + (size_t) T * (N + HC), dR, (size_t) T * D * sizeof(float), cudaMemcpyDeviceToHost);
-            if (!std::all_of(out.begin(), out.end(), [](float x) { return std::isfinite(x); })) {
-                q8_bad_t = T; q8_ok = false; break;
-            }
-            q8_max_t = T;
-        }
-        st.max_t_q8 = q8_ok ? q8_max_t : 0;
-        if (!q8_ok)
-            std::fprintf(stderr, "strata hc: CUDA%d: Q8_0 persistent read is off: finite-output check failed at %d tokens\n", dev, q8_bad_t);
-        else if (q8_max_t == 0)
-            std::fprintf(stderr, "strata hc: CUDA%d: Q8_0 persistent read unavailable: 80 blocks did not stay resident on %d multiprocessors\n", dev, mp);
-        else
-            std::fprintf(stderr, "strata hc: CUDA%d: Q8_0 persistent read residency checked (up to %d tokens; %d token counts timed out)\n",
-                         dev, st.max_t_q8, q8_timeout);
-    } else {
-        cudaGetLastError();
-        st.max_t_q8 = 0;
-        std::fprintf(stderr, "strata hc: CUDA%d: Q8_0 persistent read is off: fixture allocation failed\n", dev);
-    }
-    if (dq8d) cudaFree(dq8d);
-    if (dq8u) cudaFree(dq8u);
-    if (dq8i) cudaFree(dq8i);
-    cudaFree(dR); cudaFree(dbo); cudaFree(dinj); cudaFree(dwn); cudaFree(dxn); cudaFree(dlo); cudaFree(drs);
-    cudaFree(dio); cudaFree(dmix); cudaFree(dwd); cudaFree(dwu); cudaFree(dwi);
+    std::fprintf(stderr, "strata hc: CUDA%d: STRATA_HC_PERSIST=1: the verifier's hyper-connection read runs as one "
+                         "persistent kernel (80 blocks on %d multiprocessors, up to %d tokens; %d token counts timed out in "
+                         "the check; checked against the default read, max relative difference %.2g)\n", dev, mp, max_t,
+                 timeouts, worst);
 }
 
 bool fused_gr_read_persist(const FusedGrArgs* a, int n_tok, void* stream) {
-    if (!hcp::env_on() || a == nullptr || n_tok < 1 || n_tok > kFusedGrMaxT) return false;
+    if (!hcp::env_on() || n_tok < 1) return false;
     int dev = 0;
     cudaGetDevice(&dev);
     if (dev < 0 || dev >= 64) return false;
     const hcp::DevState& st = hcp::g_dev[dev];
-    const bool q8_0 = a[0].q8_down != nullptr || a[0].q8_up != nullptr;
-    if (n_tok > (q8_0 ? st.max_t_q8 : st.max_t)) return false;
-    const bool q8_scaled = a[0].s_down != nullptr || a[0].s_up != nullptr;
-    if (q8_scaled) return false;
-    if (q8_0 && (a[0].q8_down == nullptr || a[0].q8_up == nullptr)) return false;
-    if (!q8_0 && a[0].q8_inject != nullptr) return false;
-    if (!a[0].R || !a[0].w_norm || !a[0].lo || !a[0].rs || !a[0].mixed ||
-        (!q8_0 && (!a[0].w_down || !a[0].w_up)) ||
-        ((a[0].w_inject || a[0].q8_inject) && !a[0].inject_out)) return false;
-    const bool qfuse = a[0].q8_mixed != nullptr;
-    for (int t = 0; t < n_tok; ++t) {
-        if (!a[t].R || !a[t].w_norm || !a[t].lo || !a[t].rs || !a[t].mixed ||
-            (a[t].apply && (!a[t].R_out || !a[t].bo_prev || !a[t].inj_prev)) ||
-            ((a[t].w_inject || a[t].q8_inject) && !a[t].inject_out) ||
-            (a[t].q8_down != nullptr) != q8_0 || (a[t].q8_up != nullptr) != q8_0 ||
-            (a[t].q8_mixed != nullptr) != qfuse || a[t].q8_down != a[0].q8_down ||
-            a[t].q8_up != a[0].q8_up || a[t].s_down != a[0].s_down || a[t].s_up != a[0].s_up ||
-            a[t].q8_inject != a[0].q8_inject || a[t].w_down != a[0].w_down || a[t].w_up != a[0].w_up ||
-            a[t].w_inject != a[0].w_inject || a[t].w_norm != a[0].w_norm) return false;
-    }
+    if (n_tok > st.max_t) return false;
+    if (a[0].q8_down != nullptr || a[0].q8_up != nullptr) return false;    // STRATA_HC_Q8: the default read
+    if (a[0].s_down != nullptr || a[0].s_up != nullptr) return false;      // #5560 STRATA_HC_REQ8: int8 rows + scales, the default read (it knows them)
+    for (int t = 0; t < n_tok; ++t)
+        if (a[t].q8_mixed != nullptr) return false;                         // STRATA_QFUSE: the default read
     hcp::launch(a, n_tok, st, (cudaStream_t) stream, hcp::kTicksRun);
     return true;
 }

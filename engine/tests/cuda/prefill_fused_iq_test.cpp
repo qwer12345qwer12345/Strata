@@ -179,13 +179,12 @@ struct Geo {
 
 // random blocks with a sane fp16 scale `d` at each block's start (every format here begins with it): scales chosen so
 // STRATA_PF_F16=1: the covered formats run on F16 weights (moe_f16_kq.cu, native_f16_kernel), not the int8 kernels
-bool f16_on(const Pair& p) {
+bool f16_on() {
     const char* v = std::getenv("STRATA_PF_F16");
     // STRATA_PF_FUSED_F16=1 / STRATA_PF_FUSED_WS=1 (the int8 kernels' f16 mma form, #3779): F16 products too, so the same limits
     const char* f = std::getenv("STRATA_PF_FUSED_F16");
     const char* w = std::getenv("STRATA_PF_FUSED_WS");
-    const char* tq = std::getenv("STRATA_PF_FUSED_TQ_F16");
-    return (tq_type(p.gu) && tq != nullptr && std::strcmp(tq, "1") == 0) || (v != nullptr && v[0] == '1') || (f != nullptr && f[0] == '1') || (w != nullptr && w[0] == '1');
+    return (v != nullptr && v[0] == '1') || (f != nullptr && f[0] == '1') || (w != nullptr && w[0] == '1');
 }
 
 // that the weights' typical size is that of a 2-3 bit expert (a few hundredths)
@@ -622,7 +621,7 @@ void reference_part(const Pair& p, cudaStream_t s, int T = 256, int E = 64, int 
                     e2.rms, e2.worst);
         // STRATA_PF_F16=1: H's int8 rounding meets values a few F16 ulps from the int8 model's (f16_on); the FP32 reference
         // checks below stay as they are
-        if (e2.rms > (f16_on(p) ? 5e-3 : 2e-3) || e2.worst > 3e-2)
+        if (e2.rms > (f16_on() ? 5e-3 : 2e-3) || e2.worst > 3e-2)
             throw std::runtime_error(std::string(p.name) + ": the fused path differs from its own arithmetic's model");
     }
     if (mq) std::printf("  MMQ   vs FP32 reference: rel RMS %.3e  worst row max rel %.3e\n", em.rms, em.worst);
@@ -922,14 +921,14 @@ void timing_part(const Pair& p, int T, cudaStream_t s) {
             const Err e2 = compare(yf, id, ref2, id, pick.size()), ev = compare(ref2, id, ref, id, pick.size());
             std::printf("  sample of %zu pairs, fused vs the int8-rounded model: rel RMS %.3e worst %.3e; the model vs FP32: rel RMS %.3e worst %.3e\n",
                         pick.size(), e2.rms, e2.worst, ev.rms, ev.worst);
-            if (e2.rms > (f16_on(p) ? 5e-3 : 2e-3) || e2.worst > 3e-2)
+            if (e2.rms > (f16_on() ? 5e-3 : 2e-3) || e2.worst > 3e-2)
                 throw std::runtime_error(std::string(p.name) + ": the fused path differs from its own arithmetic's model (timing)");
             own_only_check(p, ev, ef, true);
         } else
         if (kq_gu(p)) {
             const Err e2 = compare(yf, id, ref2, id, pick.size());
             std::printf("  sample of %zu pairs, fused vs the int8-rounded model: rel RMS %.3e worst %.3e\n", pick.size(), e2.rms, e2.worst);
-            if (e2.rms > (f16_on(p) ? 5e-3 : 2e-3) || e2.worst > 3e-2)
+            if (e2.rms > (f16_on() ? 5e-3 : 2e-3) || e2.worst > 3e-2)
                 throw std::runtime_error(std::string(p.name) + ": the fused path differs from its own arithmetic's model (timing)");
             if (mq && (ef.rms > kKqRms * em.rms || ef.worst > kKqWorst * em.worst))
                 throw std::runtime_error(std::string(p.name) + ": the fused path is further from the reference than MMQ (K-quant rule, timing)");
@@ -953,7 +952,7 @@ void timing_part(const Pair& p, int T, cudaStream_t s) {
     // RTX A4000: 1.0e-2 at 8,192 tokens, 2.6e-2 at 20,000 and 32,768 with rel RMS 2e-5, while both paths stand at the same distance from the FP32 reference).  So the worst row here is only a
     // backstop against a wrong row (a few 1e-1 and up), and the pair statistics above are information; the check that a fused path is not further from FP32 than MMQ is the sample's
     // (ef against em, 1.5x RMS and 2x worst row, or the K-quant and own-model rules), which does not grow with the row count.
-    if (mq && !no_mmq && !kq_gu(p) && (efm.rms > (f16_on(p) ? 5e-3 : 1e-3) || efm.worst > 1e-1))
+    if (mq && !no_mmq && !kq_gu(p) && (efm.rms > (f16_on() ? 5e-3 : 1e-3) || efm.worst > 1e-1))
         throw std::runtime_error(std::string(p.name) + ": the paths disagree at the real shape");
 }
 // --bits-staged: byte identity of the weight-staging kernels against the unstaged kernel of the same formats.  The same experts, input and routing run twice per size:

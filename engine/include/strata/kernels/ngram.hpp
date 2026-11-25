@@ -209,11 +209,6 @@ public:
     /// table: scale 0 and code 8 everywhere, which decode to the +0.0f gather_batch writes) for ple_iq4nl_dequant on the device.  False (nothing
     /// written) unless the table is in memory (--ple-io ram / mmap) and IQ4_NL.
     bool gather_raw_iq4nl(const uint32_t* rows, size_t n_tokens, uint8_t* out) const;
-    /// Lossless BF16 prompt upload: n_tokens * 16 * 320 raw bytes, including Direct mode.
-    /// Uses the same bounded row cache and batched reader as gather_batch; out-of-range rows are +0.
-    /// Returns false on a wrong format, pending single-token request, or I/O failure.
-    bool gather_raw_bf16(const uint32_t* rows, size_t n_tokens, uint8_t* out, std::string& err);
-
     /// Fault injection (Direct mode): every row read completes no earlier than `us` after issue.
     void set_injected_delay_us(double us);
 

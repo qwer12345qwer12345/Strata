@@ -156,10 +156,6 @@ endmacro()
 # the prompt kernels' tests: the fused experts' (linked to ${_strata_pf_tests_lib})
 macro(strata_cuda_prompt_tests)
     if(STRATA_BUILD_TESTS)
-      # SM86 K8V4: int8 K x split-INT8 query on IMMA, with the q4_0 V gather path unchanged.
-      add_test(NAME qsa_prompt_attn_parity_k8v4 COMMAND qsa_prompt_attn_parity 4096 512 2 --k8v4)
-      set_tests_properties(qsa_prompt_attn_parity_k8v4 PROPERTIES
-                           ENVIRONMENT "STRATA_K8V4_QK_IMMA=1" SKIP_RETURN_CODE 77 TIMEOUT 600)
       # P4-SPLIT: the engine and Strata's prompt library hold none of llama.cpp's MMQ (names in the bytes, nm, cuobjdump; tools/check_no_mmq.py)
       # The cuobjdump look is named, so a device look that did not run fails the test (exit 3, "NOT RUN (<why>)" in its output).  Each tool
       # gets 600 s (--tool-timeout), under the test's own limit: a slow cuobjdump ends as a named NOT RUN, not as a test killed with no line.
@@ -265,10 +261,6 @@ macro(strata_cuda_prompt_tests)
       # fused path's H rotation (set_down_rotation) against the host-side rotation of the reference and MMQ with its H rotated on the device
       add_test(NAME prefill_fused_iq_test_tqh COMMAND prefill_fused_iq_test "--only=+ T" --folded --edge --no-timing)
       set_tests_properties(prefill_fused_iq_test_tqh PROPERTIES ENVIRONMENT "STRATA_PF_FUSED_TQ=1" SKIP_RETURN_CODE 77 TIMEOUT 900)
-      add_test(NAME prefill_fused_iq_test_tq_f16 COMMAND prefill_fused_iq_test "--only=+ T" --edge --no-timing)
-      add_test(NAME prefill_fused_iq_test_tqh_f16 COMMAND prefill_fused_iq_test "--only=+ T" --folded --edge --no-timing)
-      set_tests_properties(prefill_fused_iq_test_tq_f16 prefill_fused_iq_test_tqh_f16 PROPERTIES
-                           ENVIRONMENT "STRATA_PF_FUSED_TQ=1;STRATA_PF_FUSED_TQ_F16=1" SKIP_RETURN_CODE 77 TIMEOUT 900)
       # NVFP4 / NVFP4 (ModelOpt packs) on the native kernels: weights decoded from the 36-byte blocks, the blob's tail scales on the FP32 products; edge shapes too
       add_test(NAME prefill_fused_iq_test_nvfp4 COMMAND prefill_fused_iq_test "--only=NVFP4" --edge)
       set_tests_properties(prefill_fused_iq_test_nvfp4 PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)

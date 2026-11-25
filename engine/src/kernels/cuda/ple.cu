@@ -412,19 +412,4 @@ void ple_iq4nl_dequant(const uint8_t* raw, int64_t rows, float* out, void* strea
     ple_iq4nl_dequant_kernel<<<(unsigned) ((n + 255) / 256), 256, 0, (cudaStream_t) stream>>>(raw, n, out);
 }
 
-namespace {
-__global__ void ple_bf16_widen_kernel(const uint8_t* __restrict__ raw, int64_t n, float* __restrict__ out) {
-    const int64_t i = (int64_t) blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < n) {
-        const uint32_t bits = (uint32_t(raw[2 * i]) | (uint32_t(raw[2 * i + 1]) << 8)) << 16;
-        out[i] = __uint_as_float(bits);
-    }
-}
-}
-void ple_bf16_widen(const uint8_t* raw, int64_t rows, float* out, void* stream) {
-    if (rows <= 0) return;
-    const int64_t n = rows * PLE_HEAD_DIM;
-    ple_bf16_widen_kernel<<<(unsigned) ((n + 255) / 256), 256, 0, (cudaStream_t) stream>>>(raw, n, out);
-}
-
 }  // namespace strata::kernels

@@ -1,4 +1,4 @@
-﻿// src/prefill/prefill.cpp - see include/strata/prefill/prefill.hpp.
+// src/prefill/prefill.cpp - see include/strata/prefill/prefill.hpp.
 #include "strata/kernels/fused_gr.hpp"
 #include "strata/prefill/prefill.hpp"
 #include "strata/prefill/lm_walk_rule.hpp"
@@ -196,7 +196,6 @@ void quantize_act_native(const float*, int64_t, int64_t, void*, void*) {}
 void experts_native(const Batch&, const NativeGeom&, int, int64_t, const void*, const void*, const int32_t*, void*,
                     float*, void*) {}
 bool native_wide() { return false; }
-bool native_wide(int, int) { return false; }
 #if !defined(STRATA_GPU_METAL)   // (the Metal engine has its own want_dm_f16: metal/src/engine/stubs_prompt_f16.cpp)
 void want_dm_f16(bool) {}   // STRATA_PF_DM16: prefill.cpp calls these; moe_fused_iq.cu is not built here
 #endif
@@ -298,10 +297,6 @@ bool ple_compact_on() {
 }
 // STRATA_PLE_COPY_STREAM=1 (opt-in, with PLE_COMPACT): the raw rows go up on a stream of their own instead of the compute
 // stream, which otherwise idles for the DMA (4.7 MB a 3K chunk = 2.9 ms on a Gen2 x4 link); the same bytes and kernels
-bool ple_bf16_compact_on() {
-    static const bool on = [] { const char* v = std::getenv("STRATA_PLE_BF16_COMPACT"); return v && v[0] == '1'; }();
-    return on;
-}
 bool ple_copy_stream_on() {
     static const bool on = [] { const char* v = std::getenv("STRATA_PLE_COPY_STREAM"); return v != nullptr && v[0] == '1'; }();
     return on;
@@ -1693,7 +1688,6 @@ struct Prefill::Impl {
     float* ple_emb_host[2] = {};             // pinned, double-buffered: the next chunk's rows are read while this
     cudaEvent_t ple_copied[2] = {};          // one runs; the event marks that buffer's upload done
     std::vector<uint32_t> ple_rows[2];
-    bool ple_bf16 = false;                  // BF16 raw upload, separate from IQ4_NL compact support
     bool ple_compact[2] = {false, false};    // STRATA_PLE_COMPACT: the pinned buffer holds raw IQ4_NL rows
     uint8_t* ple_raw_dev = nullptr;          // their device copy (cudaMalloc'd, the chunk's 16 rows a token)
     cudaStream_t ple_copy = nullptr;         // STRATA_PLE_COPY_STREAM: the raw rows' upload stream (null: on cs)
@@ -2601,8 +2595,6 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
         }
     }
     pf_mark("init: routing tables (pinned, mapped)", tr_last);
-    m.ple_bf16 = ple_bf16_compact_on() && ss.ple.ready() && ss.ple.table != nullptr &&
-                 std::strcmp(ss.ple.table->format(), "BF16") == 0;
     for (int b = 0; b < 2; ++b) {
         if (!m.ple_emb_host[b] &&
             (force_pageable() || cudaHostAlloc((void**) &m.ple_emb_host[b], (size_t) T * N * 4, cudaHostAllocDefault) != cudaSuccess)) {
@@ -2613,9 +2605,8 @@ bool Prefill::init(const core::WeightTable& wt, const core::ModelGeometry& g, co
         if (!m.ple_copied[b] && cudaEventCreateWithFlags(&m.ple_copied[b], cudaEventDisableTiming) != cudaSuccess)
             ok = false;
         m.ple_rows[b].resize(T * strata::kernels::PLE_N_HEADS);
-        if ((ple_compact_on() || m.ple_bf16) && m.ple_raw_dev == nullptr &&
-            cudaMalloc((void**) &m.ple_raw_dev, (size_t) T * strata::kernels::PLE_N_HEADS *
-                       (m.ple_bf16 ? strata::kernels::PLE_ROW_BYTES_BF16 : strata::kernels::PLE_ROW_BYTES)) != cudaSuccess) {
+        if (ple_compact_on() && m.ple_raw_dev == nullptr &&
+            cudaMalloc((void**) &m.ple_raw_dev, (size_t) T * strata::kernels::PLE_N_HEADS * strata::kernels::PLE_ROW_BYTES) != cudaSuccess) {
             m.ple_raw_dev = nullptr;
             (void) cudaGetLastError();
         }
@@ -4348,11 +4339,6 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
         }
         // STRATA_PLE_COMPACT=1: the raw rows (1,440 bytes a token instead of 10,240 floats' bytes) into the same pinned
         // buffer; ple_land uploads them and dequantizes on the device
-        if (m.ple_bf16 && m.ple_pageable[buf].empty() && m.ple_raw_dev != nullptr) {
-            m.ple_compact[buf] = true;
-            return ss.ple.table->gather_raw_bf16(m.ple_rows[buf].data(), (size_t) T,
-                                                (uint8_t*) m.ple_emb_host[buf], e);
-        }
         if (ple_compact_on() && m.ple_pageable[buf].empty() && m.ple_raw_dev != nullptr &&
             ss.ple.table->gather_raw_iq4nl(m.ple_rows[buf].data(), (size_t) T, (uint8_t*) m.ple_emb_host[buf])) {
             m.ple_compact[buf] = true;
@@ -4550,8 +4536,7 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                 return false;
             }
             // #1996: the pageable fallback (no RAM to pin) goes up through a pinned slot; the pinned buffers as before
-            const size_t raw_bytes = (size_t) T * strata::kernels::PLE_N_HEADS *
-                                     (m.ple_bf16 ? strata::kernels::PLE_ROW_BYTES_BF16 : strata::kernels::PLE_ROW_BYTES);
+            const size_t raw_bytes = (size_t) T * strata::kernels::PLE_N_HEADS * strata::kernels::PLE_ROW_BYTES;
             // STRATA_PLE_COPY_STREAM: the raw rows go up on their own stream once the previous chunk's dequant has read
             // the buffer (ple_raw_free), and the compute stream waits for them (ple_copied) only at the dequant - the
             // DMA overlaps layer 0 instead of idling the compute queue.  ple_copied still marks that buffer's upload
@@ -4571,16 +4556,7 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                 return false;
             }
             if (m.ple_compact[ple_buf]) {
-                if (m.ple_bf16)
-                    strata::kernels::ple_bf16_widen(m.ple_raw_dev, T * strata::kernels::PLE_N_HEADS, m.ple_emb, m.cs);
-                else
-                    strata::kernels::ple_iq4nl_dequant(m.ple_raw_dev, T * strata::kernels::PLE_N_HEADS, m.ple_emb, m.cs);
-                if (m.ple_bf16) {
-                    static std::atomic<bool> said{false};
-                    if (!said.exchange(true))
-                        std::fprintf(stderr, "prefill: lossless BF16 PLE raw upload: 5120 instead of 10240 bytes/token, %s stream\n",
-                                     ple_side ? "independent copy" : "compute");
-                }
+                strata::kernels::ple_iq4nl_dequant(m.ple_raw_dev, T * strata::kernels::PLE_N_HEADS, m.ple_emb, m.cs);
                 if (ple_side && cudaEventRecord(m.ple_raw_free, m.cs) != cudaSuccess) {
                     err = std::string("prefill: the PLE rows' upload failed: ") + cudaGetErrorString(cudaGetLastError());
                     return false;
@@ -5807,7 +5783,7 @@ bool Prefill::run_impl(const int64_t* tokens, int64_t n, int64_t pos0, std::stri
                             const int n = v ? std::atoi(v) : 0;
                             return n > 0 ? std::min(n, fused::kBatchRoom) : fused::kMaxBatch;
                         }();
-                        const bool wide = fused_nat && !fp4_nat && !fp8_nat && pf_batch > fused::kMaxBatch && fused::native_wide(mmq_gt, mmq_dt);
+                        const bool wide = fused_nat && !fp4_nat && !fp8_nat && pf_batch > fused::kMaxBatch && fused::native_wide();
                         const int per_launch = wide ? pf_batch : std::min(pf_batch, fused::kMaxBatch);
                         for (int32_t e = 0; e < m.g->n_expert;) {
                             fused::Batch b;

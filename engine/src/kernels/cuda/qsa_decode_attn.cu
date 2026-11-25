@@ -28,53 +28,6 @@ constexpr int CHUNK = 64;        // cells per block
 constexpr int THREADS = 256;
 constexpr int WARPS = THREADS / 32;
 
-#if !defined(__HIPCC__)
-// K8V4 decode scoring on INT8 tensor cores (STRATA_ATTN_DECODE_TC=1).  The instruction needs sm_80; builds for
-// older architectures compile it to a trap and decode_tc_on() never selects the path there.
-#if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ >= 800
-#define STRATA_DEC_ATTN_IMMA 1
-#else
-#define STRATA_DEC_ATTN_IMMA 0
-#endif
-
-// The m16n8k32 s8 pair of qsa_prompt_attn.cu's v3 kernel, verbatim: int32 accumulation, three 8-bit parts.
-__device__ __forceinline__ void imma16832(int* c, const uint32_t* a, const uint32_t* b) {
-#if !STRATA_DEC_ATTN_IMMA
-    __trap();
-#else
-    asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 {%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, "
-                 "{%0,%1,%2,%3};\n"
-                 : "+r"(c[0]), "+r"(c[1]), "+r"(c[2]), "+r"(c[3])
-                 : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]));
-#endif
-}
-// the low part's MMA: unsigned A (m in 0..255), signed B
-__device__ __forceinline__ void imma16832_us(int* c, const uint32_t* a, const uint32_t* b) {
-#if !STRATA_DEC_ATTN_IMMA
-    __trap();
-#else
-    asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.u8.s8.s32 {%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, "
-                 "{%0,%1,%2,%3};\n"
-                 : "+r"(c[0]), "+r"(c[1]), "+r"(c[2]), "+r"(c[3])
-                 : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]));
-#endif
-}
-// x (|x| <= 127) as X = rint(x * 65536) = h * 65536 + l * 256 + m exactly: h, l signed bytes, m an unsigned one
-__device__ __forceinline__ void split3(float x, int& h, int& l, int& m) {
-    const int X = __float2int_rn(x * 65536.0f);
-    h = (X + 32768) >> 16;
-    const int r = X - (h << 16);   // -32768 .. 32767
-    l = r >> 8;                    // -128 .. 127
-    m = r & 255;                   // 0 .. 255
-}
-__device__ __forceinline__ uint32_t pack4(int a, int b, int c, int d) {
-    return (uint32_t) (a & 0xff) | ((uint32_t) (b & 0xff) << 8) | ((uint32_t) (c & 0xff) << 16) | ((uint32_t) (d & 0xff) << 24);
-}
-__device__ __forceinline__ float join3(int h, int l, int m) {   // the parts' exact int32 sums -> h + (l*256 + m)/65536
-    return (float) h + (float) ((l << 8) + m) * (1.0f / 65536.0f);
-}
-#endif  // !__HIPCC__
-
 __device__ __forceinline__ float warp_sum(float v) {
 #pragma unroll
     for (int o = 16; o > 0; o >>= 1) v += __shfl_xor_sync(0xffffffffu, v, o);
@@ -210,7 +163,7 @@ __device__ __forceinline__ int reduce12_head_of_lane(int lane) {
 // The chunk kernel's body; `p` is the query's KV pools (the call's one set, or blockIdx.z's slot's set).
 // (the body is a device function so the batch window's rows kernel below can run it over each query's own pools without
 // the default kernel's signature, or the function-pointer types the pre-sm_75 / HIP selections build, changing)
-template <int KV_MODE, bool LANE_CELL, bool QUERY_SWIZZLE, bool REDUCE12, bool TC>
+template <int KV_MODE, bool LANE_CELL, bool QUERY_SWIZZLE, bool REDUCE12>
 __device__ __forceinline__ void attn_chunk_body(const float* __restrict__ q, QsaAttnPools p,
                                                 const int32_t* __restrict__ ids, const int32_t* __restrict__ step,
                                                 int n_kv_heads, int page_size, float scale,
@@ -241,8 +194,6 @@ __device__ __forceinline__ void attn_chunk_body(const float* __restrict__ q, Qsa
     // float4 halves of lanes whose bit 2 is set, retaining 16-byte alignment and the 12 KB tile.
     // The scoring reads undo this permutation; FP operands and operation order are unchanged.
     static_assert(!QUERY_SWIZZLE || !LANE_CELL, "query swizzle is for warp scoring only");
-    static_assert(!TC || (KV_MODE == 3 && !LANE_CELL && !QUERY_SWIZZLE && !REDUCE12),
-                  "the tensor-core score phase is for K8V4 pools with warp scoring");
     for (int i = t; i < G * HD; i += THREADS) {
         const int d = i % HD;
         const int sd = QUERY_SWIZZLE ? (d ^ ((d >> 3) & 4)) : d;
@@ -260,95 +211,7 @@ __device__ __forceinline__ void attn_chunk_body(const float* __restrict__ q, Qsa
         srow[t] = r;
     }
     __syncthreads();
-    if constexpr (TC) {
-        // K8V4 tensor-core scoring (STRATA_ATTN_DECODE_TC=1): the chunk's 64 cells as eight 8-cell tiles, one per
-        // warp; a warp owns the dimensions [warp*32, warp*32+32) and runs one m16n8k32 step per 8-bit part.  The
-        // query enters as three parts scaled per (head, this warp's 32-dim group), the K codes stay INT8 (no K8V8
-        // copy, no fp16 conversion), and each (head, cell) sums the eight warps' partials in warp order 0..7.
-        // Softmax, value accumulation, the scratch partials and the merge are the ones this kernel already has.
-        __shared__ float sptc[WARPS][G][CHUNK];   // 24 KB: the per-warp q.k partials
-        const int dim0 = warp * 32;
-        const int gid = lane >> 2, tig = lane & 3;
-        uint32_t qa[3][4];
-        float qinv[2];
-        {
-            float x[2][2][4];   // [row half][k half][4 dims]
-            float mx[2] = {0.0f, 0.0f};
-#pragma unroll
-            for (int rh = 0; rh < 2; ++rh) {
-                const int row = gid + rh * 8;   // heads; rows 12..15 are pad
-#pragma unroll
-                for (int kh = 0; kh < 2; ++kh) {
-                    float4 v = make_float4(0.f, 0.f, 0.f, 0.f);
-                    if (row < G) v = *reinterpret_cast<const float4*>(&sq[row][dim0 + kh * 16 + tig * 4]);
-                    x[rh][kh][0] = v.x; x[rh][kh][1] = v.y; x[rh][kh][2] = v.z; x[rh][kh][3] = v.w;
-                    mx[rh] = fmaxf(mx[rh], fmaxf(fmaxf(fabsf(v.x), fabsf(v.y)), fmaxf(fabsf(v.z), fabsf(v.w))));
-                }
-#pragma unroll
-                for (int o = 1; o < 4; o <<= 1) mx[rh] = fmaxf(mx[rh], __shfl_xor_sync(0xffffffffu, mx[rh], o));
-            }
-            float up[2];
-#pragma unroll
-            for (int rh = 0; rh < 2; ++rh) {
-                qinv[rh] = mx[rh] * (1.0f / 127.0f);
-                up[rh] = mx[rh] > 0.0f ? 127.0f / mx[rh] : 0.0f;
-            }
-            // Each A fragment row has its own maximum; preserve that row's scale when building the packed parts.
-#pragma unroll
-            for (int r = 0; r < 4; ++r) {   // a0: row gid, dims 0..15; a1: row gid + 8; a2: row gid, 16..31; a3
-                const int rr = r & 1, kh = r >> 1;
-                int hh[4], ll[4], mm[4];
-#pragma unroll
-                for (int e = 0; e < 4; ++e) split3(x[rr][kh][e] * up[rr], hh[e], ll[e], mm[e]);
-                qa[0][r] = pack4(hh[0], hh[1], hh[2], hh[3]);
-                qa[1][r] = pack4(ll[0], ll[1], ll[2], ll[3]);
-                qa[2][r] = pack4(mm[0], mm[1], mm[2], mm[3]);
-            }
-        }
-        int ch[4] = {0, 0, 0, 0}, cl[4] = {0, 0, 0, 0}, cm[4] = {0, 0, 0, 0};
-        // All 64 cells per warp, one 8-cell tile at a time: the warp's dimensions are the k slice, so every
-        // (head, cell) needs all eight warps.  The fragment's thread column (tile + gid) and its output column
-        // (tile + 2*tig) differ exactly as in the prompt kernel's tested layout.
-#pragma unroll
-        for (int nt = 0; nt < CHUNK / 8; ++nt) {
-            const int cell = nt * 8 + gid;
-            const long long r = cell < n_here ? srow[cell] : -1;
-            const float ksc = r >= 0 ? __half2float(__ushort_as_half(p.k_scale[r * (HD / KV_Q8_GROUP) + (warp >> 1)])) : 0.0f;
-            uint32_t b[2] = {0u, 0u};
-            if (r >= 0) {
-                b[0] = *reinterpret_cast<const uint32_t*>(p.k_q + (size_t) r * HD + dim0 + tig * 4);
-                b[1] = *reinterpret_cast<const uint32_t*>(p.k_q + (size_t) r * HD + dim0 + 16 + tig * 4);
-            }
-            const int c0 = nt * 8 + 2 * tig;
-            ch[0] = ch[1] = ch[2] = ch[3] = 0;
-            cl[0] = cl[1] = cl[2] = cl[3] = 0;
-            cm[0] = cm[1] = cm[2] = cm[3] = 0;
-            imma16832(ch, qa[0], b);
-            imma16832(cl, qa[1], b);
-            imma16832_us(cm, qa[2], b);
-            // B fragments are column-major across lanes (column = gid), while the C fragment's two output
-            // columns live on tig (2*tig and 2*tig+1). Fetch each output cell's K scale from the B lane that owns
-            // that column; using this lane's ksc would attach gid's scale to a different output cell.
-            const float ksc0 = __shfl_sync(0xffffffffu, ksc, (2 * tig) * 4);
-            const float ksc1 = __shfl_sync(0xffffffffu, ksc, (2 * tig + 1) * 4);
-            sptc[warp][gid][c0] = join3(ch[0], cl[0], cm[0]) * qinv[0] * ksc0;
-            sptc[warp][gid][c0 + 1] = join3(ch[1], cl[1], cm[1]) * qinv[0] * ksc1;
-            if (gid + 8 < G) {
-                sptc[warp][gid + 8][c0] = join3(ch[2], cl[2], cm[2]) * qinv[1] * ksc0;
-                sptc[warp][gid + 8][c0 + 1] = join3(ch[3], cl[3], cm[3]) * qinv[1] * ksc1;
-            }
-        }
-        __syncthreads();
-        // every (head, cell) sums the eight warps' partials in warp order, then takes the attention scale; a masked
-        // cell (page -1) or a cell past this chunk's width keeps the kernel's -FLT_MAX
-        for (int i = t; i < G * CHUNK; i += THREADS) {
-            const int h = i / CHUNK, c = i % CHUNK;
-            float s = 0.0f;
-#pragma unroll
-            for (int w = 0; w < WARPS; ++w) s += sptc[w][h][c];
-            sp[h][c] = (c < n_here && srow[c] >= 0) ? s * scale : -FLT_MAX;
-        }
-    } else if constexpr (LANE_CELL) {
+    if constexpr (LANE_CELL) {
         // S25 (STRATA_ATTN_LANECELL=1): thread t scores cell t % 64 for heads 3 (t / 64) .. +2 by itself - the same
         // 8-dimension partial per former lane (the identical expression), then the former warp_sum's butterfly as
         // lane 0 ran it (a[l] += a[l + o] for o = 16 .. 1), so every score is bit-identical without 12 shuffle
@@ -465,21 +328,21 @@ __device__ __forceinline__ void attn_chunk_body(const float* __restrict__ q, Qsa
     for (int h = 0; h < G; ++h) part_acc[((size_t) slot * G + h) * HD + t] = acc[h];
 }
 
-template <int KV_MODE, bool LANE_CELL = false, bool QUERY_SWIZZLE = false, bool REDUCE12 = false, bool TC = false>
+template <int KV_MODE, bool LANE_CELL = false, bool QUERY_SWIZZLE = false, bool REDUCE12 = false>
 __global__ void __launch_bounds__(THREADS) attn_chunk_kernel(const float* __restrict__ q, QsaAttnPools p,
                                                              const int32_t* __restrict__ ids,
                                                              const int32_t* __restrict__ step, int n_kv_heads,
                                                              int page_size, float scale, float* __restrict__ part_acc,
                                                              float* __restrict__ part_m, float* __restrict__ part_l,
                                                              int n_chunks, int cap = 0, long long scratch_stride = 0) {
-    attn_chunk_body<KV_MODE, LANE_CELL, QUERY_SWIZZLE, REDUCE12, TC>(q, p, ids, step, n_kv_heads, page_size, scale,
-                                                                     part_acc, part_m, part_l, n_chunks, cap,
-                                                                     scratch_stride);
+    attn_chunk_body<KV_MODE, LANE_CELL, QUERY_SWIZZLE, REDUCE12>(q, p, ids, step, n_kv_heads, page_size, scale,
+                                                                 part_acc, part_m, part_l, n_chunks, cap,
+                                                                 scratch_stride);
 }
 
 // The same blocks for queries of different slots: query blockIdx.z reads its own slot's pools, everything else is
 // attn_chunk_kernel's batched form (qsa_decode_attn_slots).
-template <int KV_MODE, bool LANE_CELL, bool TC = false>
+template <int KV_MODE, bool LANE_CELL>
 __global__ void __launch_bounds__(THREADS) attn_chunk_slots_kernel(const float* __restrict__ q, QsaAttnSlotPools ps,
                                                                    const int32_t* __restrict__ ids,
                                                                    const int32_t* __restrict__ step, int n_kv_heads,
@@ -488,12 +351,12 @@ __global__ void __launch_bounds__(THREADS) attn_chunk_slots_kernel(const float* 
                                                                    float* __restrict__ part_m,
                                                                    float* __restrict__ part_l, int n_chunks, int cap,
                                                                    long long scratch_stride) {
-    attn_chunk_body<KV_MODE, LANE_CELL, false, false, TC>(q, ps.p[blockIdx.z], ids, step, n_kv_heads, page_size, scale,
-                                                          part_acc, part_m, part_l, n_chunks, cap, scratch_stride);
+    attn_chunk_body<KV_MODE, LANE_CELL, false, false>(q, ps.p[blockIdx.z], ids, step, n_kv_heads, page_size, scale,
+                                                      part_acc, part_m, part_l, n_chunks, cap, scratch_stride);
 }
 
 // Batch windows: query blockIdx.z attends over its own slot's pools (rows.p[z]); the default kernel otherwise.
-template <int KV_MODE, bool TC = false>
+template <int KV_MODE>
 __global__ void __launch_bounds__(THREADS) attn_chunk_rows_kernel(const float* __restrict__ q, QsaAttnPoolsRows rows,
                                                                   const int32_t* __restrict__ ids,
                                                                   const int32_t* __restrict__ step, int n_kv_heads,
@@ -502,8 +365,8 @@ __global__ void __launch_bounds__(THREADS) attn_chunk_rows_kernel(const float* _
                                                                   float* __restrict__ part_m,
                                                                   float* __restrict__ part_l, int n_chunks, int cap,
                                                                   long long scratch_stride) {
-    attn_chunk_body<KV_MODE, false, false, false, TC>(q, rows.p[blockIdx.z], ids, step, n_kv_heads, page_size, scale,
-                                                      part_acc, part_m, part_l, n_chunks, cap, scratch_stride);
+    attn_chunk_body<KV_MODE, false, false, false>(q, rows.p[blockIdx.z], ids, step, n_kv_heads, page_size, scale,
+                                                  part_acc, part_m, part_l, n_chunks, cap, scratch_stride);
 }
 
 #if !defined(__HIPCC__)
@@ -609,33 +472,6 @@ __global__ void __launch_bounds__(THREADS) attn_chunk_q8_v3_kernel(const float* 
 #pragma unroll
     for (int h = 0; h < G; ++h) part_acc[((size_t) slot * G + h) * HD + t] = acc[h];
 }
-#if !defined(__HIPCC__)
-// STRATA_ATTN_DECODE_TC=1: the K8V4 chunk kernel's score phase on INT8 tensor cores (sm_80+), opt-in.  Unset it
-// stays off; =1 selects attn_chunk_kernel<3, false, false, false, true> where the plain kernel would otherwise run
-// and the pools are K8V4.  K8V4 storage, the value gather and the merge are unchanged.
-bool decode_tc_on() {
-    static const int env = [] {
-        const char* v = std::getenv("STRATA_ATTN_DECODE_TC");
-        if (v == nullptr) return 0;
-        return v[0] == '1' && v[1] == '\0' ? 1 : 0;
-    }();
-    if (env == 0) return false;
-    static int cc[64] = {};
-    int dev = 0;
-    if (cudaGetDevice(&dev) != cudaSuccess || dev < 0 || dev >= 64) { cudaGetLastError(); return false; }
-    if (!cc[dev]) {
-        int major = 0, minor = 0;
-        if (cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, dev) != cudaSuccess ||
-            cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, dev) != cudaSuccess) {
-            cudaGetLastError();
-            return false;
-        }
-        cc[dev] = 10 * major + minor;
-    }
-    return cc[dev] >= 80;
-}
-#endif
-
 bool attn_v3_on() {
     static int on[16] = {};   // by device ordinal: 0 unknown, 1 yes, -1 no
     static const int env = [] { const char* v = std::getenv("STRATA_ATTN_V3"); return v ? (v[0] == '0' ? 0 : 1) : -1; }();
@@ -1153,17 +989,9 @@ void launch_chunks_batch(const float* q, const QsaAttnPools& pools, const int32_
     const dim3 grid((unsigned) n_chunks, (unsigned) s.n_head_kv, (unsigned) n_q);
 #if defined(STRATA_ATTN_PRE75_BUILT)
     const bool pre = kernel < 0 ? pre75_attn() : kernel == 1;
-#else
-    const bool pre = false;
 #endif
     // S25: STRATA_ATTN_LANECELL=1 - the score phase one cell per thread (bit-identical scores, no shuffle reductions)
     const bool lane_cell = kernel < 0 && lane_cell_attn();
-#if !defined(__HIPCC__)
-    // TC: the environment's K8V4 tensor-core score phase, or kernel == 2 named by a harness (never the environment).
-    // Declared before the dispatch chain, which continues across the guards with else-if.
-    // The explicit K8V4 scorer takes precedence over the Daily chunk; the merge is selected separately.
-    const bool tc = kernel == 2 ? (kv_mode == 3) : (kernel < 0 && kv_mode == 3 && !lane_cell && decode_tc_on());
-#endif
 #if defined(STRATA_HIP_GFX906)
     static const bool query_swizzle = [] {
         const char* v = std::getenv("STRATA_GFX906_ATTN_QUERY_SWIZZLE"); return v && v[0] == '1';
@@ -1217,11 +1045,7 @@ void launch_chunks_batch(const float* q, const QsaAttnPools& pools, const int32_
     } else
 #endif
 #if !defined(__HIPCC__)
-    if (tc)
-        attn_chunk_kernel<3, false, false, false, true><<<grid, THREADS, 0, st>>>(q, pools, ids, steps,
-                                                                (int) s.n_head_kv, (int) s.page_size, scale,
-                                                                part_acc, part_m, part_l, n_chunks, (int) cap, stride);
-    else if (kernel < 0 && kv_mode == 1 && attn_v3_on())   // (the parity harness names its kernel: never the environment)
+    if (kernel < 0 && kv_mode == 1 && attn_v3_on())   // (the parity harness names its kernel: never the environment)
         attn_chunk_q8_v3_kernel<<<grid, THREADS, 0, st>>>(q, pools, ids, steps, (int) s.n_head_kv, (int) s.page_size,
                                                           scale, part_acc, part_m, part_l, n_chunks, (int) cap, stride);
     else
@@ -1292,14 +1116,9 @@ bool qsa_decode_attn_slots(const float* q, const QsaAttnSlotPools& pools, const 
         if (attn_kv_mode(pools.p[z]) != kv_mode) return false;
     }
     const bool lane_cell = lane_cell_attn();
-#if !defined(__HIPCC__)
-    const bool tc = kv_mode == 3 && !lane_cell && decode_tc_on();
-#else
-    [[maybe_unused]] constexpr bool tc = false;
-#endif
     // only where qsa_decode_attn_batch runs attn_chunk_kernel; its other variants keep the per-query calls
 #if defined(STRATA_ATTN_PRE75_BUILT)
-    if (!tc && !lane_cell && pre75_attn()) return false;
+    if (!lane_cell && pre75_attn()) return false;
 #endif
 #if defined(STRATA_HIP_GFX906)
     static const bool query_swizzle = [] {
@@ -1316,13 +1135,6 @@ bool qsa_decode_attn_slots(const float* q, const QsaAttnSlotPools& pools, const 
     const dim3 grid((unsigned) n_chunks, (unsigned) s.n_head_kv, (unsigned) n_q);
     cudaStream_t st = (cudaStream_t) stream;
 #define STRATA_ATTN_SLOTS(M, LC) attn_chunk_slots_kernel<M, LC><<<grid, THREADS, 0, st>>>(q, pools, ids, steps, (int) s.n_head_kv, (int) s.page_size, scale, part_acc, part_m, part_l, n_chunks, (int) cap, stride)
-#if !defined(__HIPCC__)
-    if (tc)
-        attn_chunk_slots_kernel<3, false, true><<<grid, THREADS, 0, st>>>(q, pools, ids, steps, (int) s.n_head_kv,
-                                                                          (int) s.page_size, scale, part_acc, part_m,
-                                                                          part_l, n_chunks, (int) cap, stride);
-    else
-#endif
     if (lane_cell) {
         if (kv_mode == 3) STRATA_ATTN_SLOTS(3, true);
         else if (kv_mode == 2) STRATA_ATTN_SLOTS(2, true);
@@ -1364,16 +1176,12 @@ void qsa_decode_attn_batch_rows(const float* q, const QsaAttnPoolsRows& rows, co
     const float scale = 1.0f / sqrtf((float) HD);
     const dim3 grid((unsigned) n_chunks, (unsigned) s.n_head_kv, (unsigned) n_q);
     cudaStream_t st = (cudaStream_t) stream;
-    // Lane-cell scoring and pre75 use the single-pool entry. K8V4 TC has a batched implementation.
-    const bool lane_cell = lane_cell_attn();
-#if !defined(__HIPCC__)
-    const bool tc = kv_mode == 3 && !lane_cell && decode_tc_on();
-#else
-    [[maybe_unused]] constexpr bool tc = false;
-#endif
-    bool per_row = lane_cell;
+    // The plain kernel is what qsa_decode_attn_batch runs unless one of its variants is on (lane-cell scoring, the
+    // pre-sm_75 / gfx103x kernel, the gfx906 swizzle): there each row goes through that call, one launch per row.
+    static const bool lane_cell_rows = [] { const char* v = std::getenv("STRATA_ATTN_LANECELL"); return v && v[0] == '1'; }();
+    bool per_row = lane_cell_rows;
 #if defined(STRATA_ATTN_PRE75_BUILT)
-    per_row = per_row || (!tc && pre75_attn());
+    per_row = per_row || pre75_attn();
 #endif
 #if defined(STRATA_HIP_GFX906)
     per_row = true;
@@ -1387,13 +1195,6 @@ void qsa_decode_attn_batch_rows(const float* q, const QsaAttnPoolsRows& rows, co
     }
 #define STRATA_ATTN_ROWS(M) attn_chunk_rows_kernel<M><<<grid, THREADS, 0, st>>>(q, rows, ids, steps, (int) s.n_head_kv, \
         (int) s.page_size, scale, part_acc, part_m, part_l, n_chunks, (int) cap, stride)
-#if !defined(__HIPCC__)
-    if (tc) {
-        attn_chunk_rows_kernel<3, true><<<grid, THREADS, 0, st>>>(q, rows, ids, steps, (int) s.n_head_kv,
-                                                                  (int) s.page_size, scale, part_acc, part_m, part_l,
-                                                                  n_chunks, (int) cap, stride);
-    } else
-#endif
     if (kv_mode == 3) STRATA_ATTN_ROWS(3);
     else if (kv_mode == 2) STRATA_ATTN_ROWS(2);
     else if (kv_mode == 1) STRATA_ATTN_ROWS(1);
@@ -1436,11 +1237,7 @@ void qsa_decode_attn_step(const float* q, const QsaAttnPools& pools, const int32
     const dim3 grid((unsigned) n_chunks, (unsigned) s.n_head_kv);
     cudaStream_t st = (cudaStream_t) stream;
 #if !defined(__HIPCC__)
-    if (kv_mode == 3 && decode_tc_on())
-        attn_chunk_kernel<3, false, false, false, true><<<grid, THREADS, 0, st>>>(q, pools, ids, step,
-                                                          (int) s.n_head_kv, (int) s.page_size, scale,
-                                                          part_acc, part_m, part_l, n_chunks, 0, 0);
-    else if (kv_mode == 1 && attn_v3_on())
+    if (kv_mode == 1 && attn_v3_on())
         attn_chunk_q8_v3_kernel<<<grid, THREADS, 0, st>>>(q, pools, ids, step, (int) s.n_head_kv, (int) s.page_size,
                                                           scale, part_acc, part_m, part_l, n_chunks, 0, 0);
     else
@@ -1468,14 +1265,11 @@ void qsa_decode_attn_step(const float* q, const QsaAttnPools& pools, const int32
 // qsa_merge_daily_parity: qsa_decode_attn_batch's two passes apart, the chunk kernel and the merge named by the
 // arguments (never the environment), so the Daily's kernels and upstream's can be run on the same inputs and the
 // outputs compared bit for bit.  The engine never calls these.
-// daily_chunk: 0 upstream's attn_chunk_kernel, 1 PR #540's kernel, 2 the named K8V4 tensor-core chunk kernel
-// (qsa_decode_tc_parity compares each path with a host FP64 mathematical reference and checks the production
-// environment dispatch against the corresponding named path).
 void qsa_decode_attn_chunks_only(const float* q, const QsaAttnPools& pools, const int32_t* ids, const int32_t* steps,
                                  int64_t cap, const QsaShapes& s, float* scratch, int64_t n_q, int daily_chunk,
                                  void* stream) {
     if (n_q <= 0 || n_q > 65535 || s.head_dim != HD || s.n_head != (int64_t) G * s.n_head_kv || cap <= 0 || !scratch ||
-        !q || !ids || !steps || !pools.page_table || (daily_chunk != 0 && daily_chunk != 1 && daily_chunk != 2)) {
+        !q || !ids || !steps || !pools.page_table || (daily_chunk != 0 && daily_chunk != 1)) {
         std::fprintf(stderr, "qsa_decode_attn_chunks_only: unsupported geometry or missing buffers\n");
         std::exit(1);
     }

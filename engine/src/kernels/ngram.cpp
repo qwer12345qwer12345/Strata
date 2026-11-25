@@ -840,36 +840,6 @@ bool PleTable::gather_batch(const uint32_t* rows, size_t n_tokens, float* out, s
     return true;
 }
 
-bool PleTable::gather_raw_bf16(const uint32_t* rows, size_t n_tokens, uint8_t* out, std::string& err) {
-    std::lock_guard<std::recursive_mutex> lk(impl_->mu);
-    if (impl_->pending || impl_->fmt->id != PleFormat::BF16 || !is_open()) {
-        err = "raw BF16 gather requires an open BF16 table without a pending token";
-        return false;
-    }
-    if (n_tokens > SIZE_MAX / ((size_t) PLE_N_HEADS * PLE_ROW_BYTES_BF16) ||
-        (n_tokens && (!rows || !out))) {
-        err = "invalid raw BF16 gather extent or buffer";
-        return false;
-    }
-    if (!n_tokens) return true;
-    wait_prefetches();
-    const size_t n = n_tokens * (size_t) PLE_N_HEADS;
-    if (impl_->mode == PleIo::Direct) {
-        const auto ticket = impl_->reader.issue(rows, n, out);
-        if (!impl_->reader.collect(ticket, err)) return false;
-    } else {
-        // A bounded walk keeps mmap page faults visible to the watchdog too.
-        for (size_t i = 0; i < n; ++i) {
-            uint8_t* dst = out + i * PLE_ROW_BYTES_BF16;
-            if (rows[i] >= impl_->n_rows) std::memset(dst, 0, PLE_ROW_BYTES_BF16);
-            else std::memcpy(dst, impl_->data + (size_t) rows[i] * PLE_ROW_BYTES_BF16, PLE_ROW_BYTES_BF16);
-            if ((i & 255) == 255) strata::core::progress_beat();
-        }
-    }
-    impl_->bytes_read += (uint64_t) n * PLE_ROW_BYTES_BF16;
-    return true;
-}
-
 bool PleTable::gather_raw_iq4nl(const uint32_t* rows, size_t n_tokens, uint8_t* out) const {
     std::lock_guard<std::recursive_mutex> lk(impl_->mu);
     if (impl_->data == nullptr || impl_->fmt->id != PleFormat::IQ4_NL || impl_->rb != PLE_ROW_BYTES) return false;
