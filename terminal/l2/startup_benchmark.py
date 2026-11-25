@@ -41,7 +41,7 @@ def profile_seed(cfg):
 def run_case(upstream, name, prompt, limit, log, timeout, *, open_request=urllib.request.urlopen):
     offset = log.stat().st_size if log and log.exists() else 0
     body = {
-        'messages': [{'role': 'user', 'content': prompt}],
+        'messages': prompt if isinstance(prompt, list) else [{'role': 'user', 'content': prompt}],
         'max_tokens': limit, 'temperature': 0.0, 'seed': 123, 'stream': True,
         'stream_options': {'include_usage': True}, 'reasoning_effort': 'none',
         'chat_template_kwargs': {'enable_thinking': False},
@@ -50,6 +50,8 @@ def run_case(upstream, name, prompt, limit, log, timeout, *, open_request=urllib
                                  headers={'Content-Type': 'application/json'})
     started = time.monotonic()
     first = None
+    last_content = None
+    gaps = []
     timings = None
     finish = None
     done = False
@@ -78,8 +80,12 @@ def run_case(upstream, name, prompt, limit, log, timeout, *, open_request=urllib
                 delta = choice.get('delta') or {}
                 if delta.get('content'):
                     output_hash.update(delta['content'].encode())
-                if first is None and (delta.get('content') or delta.get('reasoning_content')):
-                    first = elapsed
+                if delta.get('content') or delta.get('reasoning_content'):
+                    if first is None:
+                        first = elapsed
+                    if last_content is not None:
+                        gaps.append((elapsed - last_content) * 1000)
+                    last_content = elapsed
                 finish = choice.get('finish_reason') or finish
     if not done or first is None or finish not in ('stop', 'length'):
         raise RuntimeError(f'{name}: benchmark stream did not finish normally')
@@ -94,6 +100,10 @@ def run_case(upstream, name, prompt, limit, log, timeout, *, open_request=urllib
     row = {'case': name, 'first_content_ms': round(first * 1000, 1),
            'wall_ms': round((time.monotonic() - started) * 1000, 1), 'finish': finish,
            'timings': timings, 'output_sha256': output_hash.hexdigest()}
+    if gaps:
+        gaps.sort()
+        row['stream_gap_p95_ms'] = round(gaps[math.ceil(len(gaps) * .95) - 1], 3)
+        row['stream_gap_p99_ms'] = round(gaps[math.ceil(len(gaps) * .99) - 1], 3)
     if log and log.is_file():
         with log.open('rb') as f:
             f.seek(offset)

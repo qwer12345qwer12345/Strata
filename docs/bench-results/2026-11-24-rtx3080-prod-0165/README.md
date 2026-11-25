@@ -24,6 +24,14 @@ This time #9 increased window time by 8% with essentially unchanged output per w
 
 In the following live session, six consecutive hot turns reused a weighted 99.5% of their prompt tokens and took 0.30–1.12 s to prefill. Two later turns shared a shorter prefix with the live state and reused 14.7% and 21.2%; prefill took 23.67 s and 14.19 s. The server recorded nine failed v3 saves out of nine attempts (507, insufficient space), and its SSD spill tier did not start. The filesystem was under the 4 GiB reserve before reserving space for a new generation. That explains why disk could not backstop a live prefix miss or a restart; the token logs alone do not identify what changed in the client history. Production expert hits were 43.8–54.2% excluding PCIe, with zero resident-mode expert blob reads during decode. The aggregate contains no request text or identifiers.
 
+## Production use after freeing disk space
+
+The November 25 logs contain 458 production requests. All 457 attempted session saves returned 200 (median 0.31 s). Of 82 attempted archive preloads, 51 returned 200 and 31 returned 507. An archive preload can return 507 when the engine cannot admit it to the conversation cache. The status alone does not identify the exact cause. No request reported a resident-mode expert read from the SSD.
+
+The repeated cold boot benchmark was 83.1 tok/s, versus 82.8 in the earlier follow-up. Enabling persistent HC again gave 76.1 tok/s, with about the same 2.2 tokens per window; the window took 29.19 instead of 26.56 ms. Fetch 0 gave 81.3 tok/s and 45.6% VRAM expert hits, versus 83.1 and 48.5% with fetch 2. These short runs do not establish long-turn gains.
+
+The largest delay observed in production was before the reply. The single-slot gateway's queue median was 5.58 s, and 173 requests waited more than 10 s. Among requests with 42K–90K prompt tokens and at least 95% prefix reuse, the median engine prompt interval was 0.96 s without a logged park or restore and 3.11 s with one. The previous 0.1.65 deployment measured 1.05 s and 2.72 s for the same log-based categories. The requests were different, so neither the 0.39 s difference on switches nor the queue delay isolates an engine patch. The [boot patch review](../../boot-patch-review.md) compares fixed workloads and keeps these intervals separate.
+
 ## 0.1.65 versus 0.1.66 reference observations
 
 The long-suite references ran in alternating order, two starts per engine. Both requested persistence off, adaptive fetch 0, tail skip 7, DFlash2 spec 4 and the same other reference settings. The installed binaries did not emit the routing marker required by the harness, so these figures are from completed requests in runs the harness rejected. One 0.1.65 long-output request ended at 2,186 of 3,072 requested tokens. The table is useful for diagnosing the direction and the bottleneck, but does not compare the current production settings.

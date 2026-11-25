@@ -90,7 +90,7 @@ def stop_trial(proc):
             os.close(handle)
 
 
-def serve_trial(root, trial, folder, end, result):
+def serve_trial(root, trial, folder, end, result, *, workloads=None):
     profile = folder / 'profile.json'
     profile.write_text(json.dumps(trial))
     ready = folder / 'ready.json'
@@ -142,15 +142,16 @@ def serve_trial(root, trial, folder, end, result):
                 marker in line for marker in ('expert cache auto:', 'resident RAM mode:', 'STRATA_ADAPT_FETCH=2:',
                                               'Q8_0 persistent read residency checked', 'prompt chunk auto:'))]
             endpoint = f'http://127.0.0.1:{port}'
-            for name, prompt, tokens in (
+            default_cases = (
                 ('warmup', 'Explain database transaction isolation in a short paragraph.', 40),
                 ('timed', PROMPT, OUTPUT_TOKENS),
-            ):
+            )
+            for name, prompt, tokens in workloads or default_cases:
                 remaining = end - time.monotonic()
                 if remaining <= 0 or result.get('limit_hit'):
                     raise TimeoutError('trial exceeded its budget')
                 offset = log.stat().st_size
-                row = run_case(endpoint, name, prompt, tokens, log, min(45, remaining), open_request=opener.open)
+                row = run_case(endpoint, name, prompt, tokens, log, min(80 if workloads else 45, remaining), open_request=opener.open)
                 wait_until = min(end, time.monotonic() + 1.0)
                 while True:
                     with log.open('rb') as f:
@@ -175,10 +176,20 @@ def serve_trial(root, trial, folder, end, result):
                 if hit:
                     row['vram_hit_pct'] = float(hit[1])
                 row['expert_file_reads'] = max(map(int, reads)) if reads else None
+                if workloads:
+                    row['activation'] = [line for line in detail.splitlines()
+                                         if any(tag in line for tag in (
+                                             'wide context bridge active', 'paired-row GU enabled',
+                                             'lossless BF16 PLE raw upload', 'prefill timing:',
+                                             'CPU share is off', 'strata serve: lookup chain:',
+                                             'VISION_LEASE state=', 'strata serve: slot', 'TQ Ampere'))][-24:]
                 result[name] = row
+                if workloads and (row['expert_file_reads'] != 0 or
+                                  row['timings']['predicted_n'] < (2 if name == 'warmup' or name.startswith('image_') else tokens * 0.75)):
+                    raise RuntimeError(f'{name}: output too short or zero expert file reads could not be confirmed')
             if result.get('limit_hit'):
                 raise RuntimeError('trial reached its time or memory guard')
-            if row['expert_file_reads'] != 0 or row['timings']['predicted_n'] < OUTPUT_TOKENS * 0.75:
+            if not workloads and (row['expert_file_reads'] != 0 or row['timings']['predicted_n'] < OUTPUT_TOKENS * 0.75):
                 raise RuntimeError('timed output was too short or zero expert file reads could not be confirmed')
             result['status'] = 'measured'
         finally:
@@ -191,6 +202,9 @@ def run_at_boot(root, cfg, directory, settings, scratch_parent):
     """A diagnostic failure is recorded before the normal service starts."""
     if not headless_boot():
         return
+    if settings.get('mode') == 'patch-review':
+        from l2.startup_patch_review import run_rotation
+        return run_rotation(root, cfg, directory, settings)
     report = {'suite': 'startup-pr-ablation-v2', 'status': 'incomplete', 'runs': []}
     destination = directory / 'startup-pr-ablation-latest.json'
     try:
