@@ -158,7 +158,8 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
                         f.seek(offset)
                         detail = f.read().decode(errors='replace')
                     reads = re.findall(r'(\d+) blob reads from the file', detail)
-                    if reads or time.monotonic() >= wait_until:
+                    suffix = re.search(r'suffix drafts: (\d+) windows, (\d+) of (\d+) drafts accepted', detail)
+                    if (reads and (not workloads or suffix)) or time.monotonic() >= wait_until:
                         break
                     time.sleep(0.03)
                 match = WINDOW.search(detail)
@@ -176,6 +177,8 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
                 if hit:
                     row['vram_hit_pct'] = float(hit[1])
                 row['expert_file_reads'] = max(map(int, reads)) if reads else None
+                if suffix:
+                    row['suffix_draft'] = dict(zip(('windows', 'accepted', 'offered'), map(int, suffix.groups())))
                 if workloads:
                     row['activation'] = [line for line in detail.splitlines()
                                          if any(tag in line for tag in (
@@ -184,9 +187,15 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
                                              'CPU share is off', 'strata serve: lookup chain:',
                                              'VISION_LEASE state=', 'strata serve: slot', 'TQ Ampere'))][-24:]
                 result[name] = row
-                if workloads and (row['expert_file_reads'] != 0 or
-                                  row['timings']['predicted_n'] < (2 if name == 'warmup' or name.startswith('image_') else tokens * 0.75)):
-                    raise RuntimeError(f'{name}: output too short or zero expert file reads could not be confirmed')
+                if workloads:
+                    if row['expert_file_reads'] != 0:
+                        raise RuntimeError(f'{name}: zero expert file reads could not be confirmed')
+                    row['decode_comparable'] = (
+                        name != 'warmup' and not name.startswith('image_') and
+                        row['timings']['predicted_n'] >= tokens * 0.75
+                    )
+                    # A natural stop still yields a valid first-content and prefix measurement.
+                    # Do not discard other cases, or compare short decodes as long ones.
             if result.get('limit_hit'):
                 raise RuntimeError('trial reached its time or memory guard')
             if not workloads and (row['expert_file_reads'] != 0 or row['timings']['predicted_n'] < OUTPUT_TOKENS * 0.75):

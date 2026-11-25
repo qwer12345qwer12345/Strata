@@ -132,7 +132,7 @@ def vision_workloads():
                                  'six detailed sentences about their left-to-right positions and appearance.'},
         {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + base64.b64encode(png).decode()}},
     ]}]
-    return (WARMUP, ('image_cold', image, 40), ('image_cached', image, 40), DECODE)
+    return (('image_cold', image, 40), ('image_cached', image, 40), ('post_vision_decode', *DECODE[1:]))
 
 
 def publish(path, document):
@@ -159,10 +159,14 @@ def run_group(root, cfg, directory, seed, reference, report, group, variants, wo
              'engine_sha256': report['engine_sha256'],
              'expert_profile_sha256': report['expert_profile_sha256'],
              'workloads': [x[0] for x in workloads]}
-    print(f"Strata 开机补丁对照 {batch['batch']}/{batch['batches']}：{group}", flush=True)
+    if group.startswith('baseline-'):
+        print(f'Strata 开机补丁对照：{group}', flush=True)
+        batch.pop('batch')
+    else:
+        print(f"Strata 开机补丁对照 {batch['batch']}/{batch['batches']}：{group}", flush=True)
     # Use disk scratch, not tmpfs. Remove each group's scratch before starting the next.
     with tempfile.TemporaryDirectory(prefix='patch-review-', dir=directory) as tmp:
-        for name, environment, arguments in (arm('baseline-first'), *variants, arm('baseline-last')):
+        for name, environment, arguments in variants:
             row = {'arm': name, 'status': 'failed', 'engine_sha256': batch['engine_sha256'],
                    'environment_overrides': environment, 'argument_overrides': arguments}
             batch['runs'].append(row)
@@ -188,14 +192,21 @@ def run_group(root, cfg, directory, seed, reference, report, group, variants, wo
                         raise ValueError('lean candidate fingerprint mismatch')
                     row['engine_sha256'] = reference['sha256']
                 serve_trial(root, trial, folder, time.monotonic() + arm_timeout, row, workloads=workloads)
-                if group == 'vision-lease':
+                text = row.get('decode') or row.get('post_vision_decode', {})
+                if 'image_cold' in row and 'image_cached' in row:
                     extra = (f"冷图 {row['image_cold']['first_content_ms']:.0f} ms，"
                              f"缓存图 {row['image_cached']['first_content_ms']:.0f} ms")
-                else:
+                elif 'cold_long' in row and 'hot_prefix' in row:
                     extra = (f"长预填充 {row['cold_long']['timings']['prompt_ms']:.0f} ms，"
                              f"热前缀 {row['hot_prefix']['timings'].get('cache_n', 0)} token")
-                print(f"Strata 对照 {name}：解码 {row['decode']['timings']['predicted_per_second']:.1f} token/s，"
-                      f"{extra}。", flush=True)
+                else:
+                    extra = '参见单项结果'
+                speed = text.get('timings', {}).get('predicted_per_second')
+                speed_text = ''
+                if speed is not None:
+                    label = '解码' if text.get('decode_comparable') else '短输出解码（不参与长解码比较）'
+                    speed_text = f'{label} {speed:.1f} token/s，'
+                print(f"Strata 对照 {name}（{row['status']}）：{speed_text}{extra}。", flush=True)
             except Exception as exc:
                 row.update(status='failed', error=str(exc))
                 print(f'Strata 对照 {name} 未完成：{exc}', flush=True)
@@ -210,7 +221,7 @@ def run_suite(root, cfg, directory, settings):
     progress = directory / 'startup-patch-review-progress.json'
     latest = directory / 'startup-patch-review-latest.json'
     results = directory / 'startup-patch-review'
-    report = {'suite': 'startup-patch-review-v2', 'status': 'running', 'groups': []}
+    report = {'suite': 'startup-patch-review-v3', 'status': 'running', 'groups': [], 'baselines': []}
     attempted = False
     try:
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -254,7 +265,8 @@ def run_suite(root, cfg, directory, settings):
         plan = [(name, variants if pass_no == 1 else variants[::-1], pass_no)
                 for pass_no in range(1, passes + 1)
                 for name, variants in (groups if pass_no == 1 else groups[::-1])]
-        arms = sum(len(variants) + 2 for _, variants, _ in plan)
+        arms = 2 + sum(len(variants) for _, variants, _ in plan)
+        baseline_cases = WORKLOADS + (vision_cases if any(name == 'vision-lease' for name, _ in groups) else ())
         report.update(series=series, engine_sha256=engine_sha, batches=len(plan), arms=arms,
                       arm_timeout_s=arm_timeout)
         attempted = True
@@ -265,17 +277,36 @@ def run_suite(root, cfg, directory, settings):
             seed.write_bytes(seed_path.read_bytes())
             report['expert_profile_sha256'] = digest_file(seed)
             publish(latest, report)
+
+            def baseline(label, number):
+                report['pass_number'] = number
+                if baseline_cases != WORKLOADS:
+                    # The baseline also runs cold and cached vision for the vision arm.
+                    timeout = arm_timeout + 80
+                else:
+                    timeout = arm_timeout
+                batch = run_group(root, cfg, directory, seed, reference, report, label, (arm(label),),
+                                  baseline_cases, timeout)
+                name = f'{now}-{label}.json'
+                publish(results / name, batch)
+                report['baselines'].append({'status': batch['status'], 'report': name})
+                publish(latest, report)
+            baseline('baseline-first', 1)
             for group, variants, pass_no in plan:
                 report['pass_number'] = pass_no
-                workloads = vision_cases if group == 'vision-lease' else WORKLOADS
-                batch = run_group(root, cfg, directory, seed, reference, report, group, variants, workloads, arm_timeout)
+                workloads = baseline_cases if group == 'vision-lease' else WORKLOADS
+                timeout = arm_timeout + 80 if group == 'vision-lease' else arm_timeout
+                batch = run_group(root, cfg, directory, seed, reference, report, group, variants, workloads, timeout)
                 name = f"{now}-{batch['batch']:02d}-{group}.json"
                 publish(results / name, batch)
                 report['groups'].append({'group': group, 'pass_number': pass_no,
                                          'status': batch['status'], 'report': name})
                 report['elapsed_s'] = round(time.monotonic() - started, 1)
                 publish(latest, report)
-        report['status'] = 'measured' if all(x['status'] == 'measured' for x in report['groups']) else 'incomplete'
+            baseline('baseline-last', passes)
+        report['elapsed_s'] = round(time.monotonic() - started, 1)
+        report['status'] = ('measured' if all(x['status'] == 'measured'
+                                             for x in report['groups'] + report['baselines']) else 'incomplete')
         publish(latest, report)
         publish(progress, {'fingerprint': fingerprint, 'all_groups_attempted': True,
                            'status': report['status'], 'groups': report['groups']})
