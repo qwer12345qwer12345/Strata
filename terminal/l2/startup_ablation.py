@@ -203,8 +203,8 @@ def run_at_boot(root, cfg, directory, settings, scratch_parent):
     if not headless_boot():
         return
     if settings.get('mode') == 'patch-review':
-        from l2.startup_patch_review import run_rotation
-        return run_rotation(root, cfg, directory, settings)
+        from l2.startup_patch_review import run_suite
+        return run_suite(root, cfg, directory, settings)
     report = {'suite': 'startup-pr-ablation-v2', 'status': 'incomplete', 'runs': []}
     destination = directory / 'startup-pr-ablation-latest.json'
     try:

@@ -1,4 +1,4 @@
-"""Bounded headless review. One group per boot, no production writes or promotion."""
+"""Run the full headless patch review before serving, without production writes."""
 
 import base64
 import hashlib
@@ -152,13 +152,65 @@ def digest_file(path):
         return hashlib.file_digest(f, 'sha256').hexdigest()
 
 
-def run_rotation(root, cfg, directory, settings):
-    """Run a baseline at each end; rotate even if one arm could not be measured."""
+def run_group(root, cfg, directory, seed, reference, report, group, variants, workloads, arm_timeout):
+    batch = {'suite': report['suite'], 'group': group, 'status': 'incomplete', 'runs': [],
+             'batch': len(report['groups']) + 1, 'batches': report['batches'],
+             'pass_number': report['pass_number'], 'series': report['series'],
+             'engine_sha256': report['engine_sha256'],
+             'expert_profile_sha256': report['expert_profile_sha256'],
+             'workloads': [x[0] for x in workloads]}
+    print(f"Strata 开机补丁对照 {batch['batch']}/{batch['batches']}：{group}", flush=True)
+    # Use disk scratch, not tmpfs. Remove each group's scratch before starting the next.
+    with tempfile.TemporaryDirectory(prefix='patch-review-', dir=directory) as tmp:
+        for name, environment, arguments in (arm('baseline-first'), *variants, arm('baseline-last')):
+            row = {'arm': name, 'status': 'failed', 'engine_sha256': batch['engine_sha256'],
+                   'environment_overrides': environment, 'argument_overrides': arguments}
+            batch['runs'].append(row)
+            folder = Path(tmp) / name
+            folder.mkdir()
+            try:
+                print(f'Strata 对照 {group}/{name} 开始。', flush=True)
+                trial = trial_config(cfg, folder, seed, None, None)
+                trial['env'].update(environment)
+                trial['env']['STRATA_PREFILL_TIMING'] = '1'
+                # Never let a trial use or clean the production spill directory.
+                storage = {**arguments, '--conversation-spill-dir': str(folder/'spill'),
+                           '--conversation-spill-mib': '0'}
+                for k in ('args', 'user_args'):
+                    trial[k] = set_options(trial[k], storage)
+                if trial.get('vision'):
+                    trial['vision']['cache_parent'] = str(folder/'vision')
+                    if name == 'upstream-elastic-vision':
+                        trial['vision'].update(expert_lease=False, elastic=True)
+                if name == 'lean-candidate':
+                    trial['exe'] = reference['exe']
+                    if digest_file(trial['exe']) != reference['sha256']:
+                        raise ValueError('lean candidate fingerprint mismatch')
+                    row['engine_sha256'] = reference['sha256']
+                serve_trial(root, trial, folder, time.monotonic() + arm_timeout, row, workloads=workloads)
+                if group == 'vision-lease':
+                    extra = (f"冷图 {row['image_cold']['first_content_ms']:.0f} ms，"
+                             f"缓存图 {row['image_cached']['first_content_ms']:.0f} ms")
+                else:
+                    extra = (f"长预填充 {row['cold_long']['timings']['prompt_ms']:.0f} ms，"
+                             f"热前缀 {row['hot_prefix']['timings'].get('cache_n', 0)} token")
+                print(f"Strata 对照 {name}：解码 {row['decode']['timings']['predicted_per_second']:.1f} token/s，"
+                      f"{extra}。", flush=True)
+            except Exception as exc:
+                row.update(status='failed', error=str(exc))
+                print(f'Strata 对照 {name} 未完成：{exc}', flush=True)
+    if all(row['status'] == 'measured' for row in batch['runs']):
+        batch['status'] = 'measured'
+    return batch
+
+
+def run_suite(root, cfg, directory, settings):
+    """Attempt every group in one boot and retain results as groups finish."""
     now = datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     progress = directory / 'startup-patch-review-progress.json'
     latest = directory / 'startup-patch-review-latest.json'
     results = directory / 'startup-patch-review'
-    report = {'suite': 'startup-patch-review-v1', 'status': 'incomplete', 'runs': []}
+    report = {'suite': 'startup-patch-review-v2', 'status': 'running', 'groups': []}
     attempted = False
     try:
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -178,100 +230,66 @@ def run_rotation(root, cfg, directory, settings):
                 'STRATA_DF2_WIDE_CONTEXT': '0', 'STRATA_PF_BATCH': '0',
             }, {'--lookup-max-t': '8', '--lookup-sizes': '2,3,4,5,6,7,8'}),)),) + groups
         vision_cases = vision_workloads()
+        passes = int(settings.get('passes', 1))
+        if passes not in (1, 2):
+            raise ValueError('patch review supports one or two passes')
+        arm_timeout = int(settings.get('arm_timeout_s', 125))
+        if arm_timeout <= 0:
+            raise ValueError('patch review needs a positive timeout per arm')
+        series = settings.get('series', 1)
         fingerprint = hashlib.sha256(json.dumps({
-            'engine': engine_sha, 'reference': reference and reference['sha256'],
-            'groups': groups, 'args': baseline_args, 'env': cfg['env'],
-            'series': settings.get('series', 1), 'passes': settings.get('passes', 1),
-            'workloads': (WORKLOADS, vision_cases),
+            'suite': report['suite'], 'engine': engine_sha,
+            'reference': reference and reference['sha256'], 'groups': groups,
+            'args': baseline_args, 'env': cfg['env'], 'series': series,
+            'passes': passes, 'arm_timeout_s': arm_timeout, 'workloads': (WORKLOADS, vision_cases),
         }, sort_keys=True).encode()).hexdigest()
         try:
             state = json.loads(progress.read_text())
         except (OSError, ValueError):
             state = {}
-        if state.get('fingerprint') != fingerprint:
-            state = {'fingerprint': fingerprint, 'next': 0, 'completed': {}}
-        passes = int(settings.get('passes', 1))
-        if passes not in (1, 2):
-            raise ValueError('patch review supports one or two passes')
-        order = [(i, bool(pass_no)) for pass_no in range(passes)
-                 for i in (range(len(groups) - 1, -1, -1) if pass_no else range(len(groups)))]
-        idx = state['next']
-        if idx >= len(order):
-            print(f'Strata 开机补丁对照已完成 {len(order)} 批，直接启动正式服务。', flush=True)
+        if state.get('fingerprint') == fingerprint and state.get('all_groups_attempted'):
+            print(f'Strata 开机补丁对照已跑过 {len(groups) * passes} 组，直接启动正式服务。', flush=True)
             return
-        group_idx, reverse = order[idx]
-        group, variants = groups[group_idx]
-        if reverse:
-            variants = variants[::-1]
-        workloads = vision_cases if group == 'vision-lease' else WORKLOADS
-        report.update(group=group, batch=idx + 1, batches=len(order), engine_sha256=engine_sha,
-                      series=settings.get('series', 1), pass_number=2 if reverse else 1)
+
+        plan = [(name, variants if pass_no == 1 else variants[::-1], pass_no)
+                for pass_no in range(1, passes + 1)
+                for name, variants in (groups if pass_no == 1 else groups[::-1])]
+        arms = sum(len(variants) + 2 for _, variants, _ in plan)
+        report.update(series=series, engine_sha256=engine_sha, batches=len(plan), arms=arms,
+                      arm_timeout_s=arm_timeout)
         attempted = True
-        deadline = time.monotonic() + int(settings.get('budget_s', 480))
-        print(f'Strata 开机补丁对照 {idx+1}/{len(order)}：{group}，结束后启动正式服务。', flush=True)
-        # Keep scratch files out of tmpfs on a 32 GiB resident-expert host.
-        with tempfile.TemporaryDirectory(prefix='patch-review-', dir=directory) as tmp:
-            scratch = Path(tmp)
-            seed = scratch / 'expert-profile.bin'
+        started = time.monotonic()
+        print(f'Strata 开机补丁对照：本次串行跑完 {len(plan)} 组、{arms} 次引擎启动，再开放正式 API。', flush=True)
+        with tempfile.TemporaryDirectory(prefix='patch-review-seed-', dir=directory) as tmp:
+            seed = Path(tmp) / 'expert-profile.bin'
             seed.write_bytes(seed_path.read_bytes())
             report['expert_profile_sha256'] = digest_file(seed)
-            # Do not let a trial clean or write the production SSD-spill directory.
-            report['workloads'] = [x[0] for x in workloads]
-            expected = len(variants) + 2
-            for name, environment, arguments in (arm('baseline-first'), *variants, arm('baseline-last')):
-                if time.monotonic() >= deadline:
-                    report['error'] = 'boot budget exhausted'
-                    break
-                row = {'arm': name, 'status': 'failed', 'engine_sha256': engine_sha,
-                       'environment_overrides': environment, 'argument_overrides': arguments}
-                report['runs'].append(row)
-                folder = scratch / name
-                folder.mkdir()
-                trial = trial_config(cfg, folder, seed, None, None)
-                trial['env'].update(environment)
-                trial['env']['STRATA_PREFILL_TIMING'] = '1'
-                storage = dict(arguments, **{'--conversation-spill-dir': str(folder/'spill'), '--conversation-spill-mib': '0'})
-                for k in ('args','user_args'):
-                    trial[k] = set_options(trial[k], storage)
-                if trial.get('vision'):
-                    trial['vision']['cache_parent'] = str(folder/'vision')
-                    if name == 'upstream-elastic-vision':
-                        trial['vision'].update(expert_lease=False, elastic=True)
-                try:
-                    if name == 'lean-candidate':
-                        trial['exe'] = reference['exe']
-                        if digest_file(trial['exe']) != reference['sha256']:
-                            raise ValueError('lean candidate fingerprint mismatch')
-                        row['engine_sha256'] = reference['sha256']
-                    serve_trial(root, trial, folder, min(deadline, time.monotonic() + 125), row,
-                                workloads=workloads)
-                    if group == 'vision-lease':
-                        extra = (f"冷图 {row['image_cold']['first_content_ms']:.0f} ms，"
-                                 f"缓存图 {row['image_cached']['first_content_ms']:.0f} ms")
-                    else:
-                        extra = (f"长预填充 {row['cold_long']['timings']['prompt_ms']:.0f} ms，"
-                                 f"热前缀 {row['hot_prefix']['timings'].get('cache_n', 0)} token")
-                    print(f"Strata 对照 {name}：解码 {row['decode']['timings']['predicted_per_second']:.1f} token/s，"
-                          f"{extra}。", flush=True)
-                except Exception as exc:
-                    row['error'] = str(exc)
-                    print(f'Strata 对照 {name} 未完成：{exc}', flush=True)
-                    if row.get('limit_hit') == 'memory':
-                        break
-            if len(report['runs']) == expected and all(row['status'] == 'measured' for row in report['runs']):
-                report['status'] = 'measured'
-        report_path = results / (now + '-' + group + '.json')
-        publish(report_path, report)
+            publish(latest, report)
+            for group, variants, pass_no in plan:
+                report['pass_number'] = pass_no
+                workloads = vision_cases if group == 'vision-lease' else WORKLOADS
+                batch = run_group(root, cfg, directory, seed, reference, report, group, variants, workloads, arm_timeout)
+                name = f"{now}-{batch['batch']:02d}-{group}.json"
+                publish(results / name, batch)
+                report['groups'].append({'group': group, 'pass_number': pass_no,
+                                         'status': batch['status'], 'report': name})
+                report['elapsed_s'] = round(time.monotonic() - started, 1)
+                publish(latest, report)
+        report['status'] = 'measured' if all(x['status'] == 'measured' for x in report['groups']) else 'incomplete'
         publish(latest, report)
-        state['next'] = idx + 1
-        if report['status'] == 'measured':
-            state['completed'][f'{group}:{report["pass_number"]}'] = report_path.name
-        state.setdefault('attempts', {})[f'{group}:{report["pass_number"]}'] = {'status': report['status'], 'report': report_path.name}
-        publish(progress, state)
+        publish(progress, {'fingerprint': fingerprint, 'all_groups_attempted': True,
+                           'status': report['status'], 'groups': report['groups']})
     except KeyboardInterrupt:
+        report['status'] = 'interrupted'
         raise
     except Exception as exc:
+        report.update(status='incomplete', error=str(exc))
         print(f'Strata 开机补丁对照中止：{exc}', flush=True)
     finally:
         if attempted:
-            print(f"Strata 开机补丁对照结束（{report['status']}），继续启动正式服务。", flush=True)
+            try:
+                publish(latest, report)
+            except OSError as exc:
+                print(f'Strata 开机补丁对照总报告写入失败：{exc}', flush=True)
+            continuation = '，继续启动正式服务' if report['status'] != 'interrupted' else ''
+            print(f"Strata 开机补丁对照结束（{report['status']}）{continuation}。报告：{latest}", flush=True)
