@@ -6726,7 +6726,7 @@ index 20df4804c6b3b53541ec5a2a372b91bb229684a8..e517912ca53b9f5e0c1bd6e43b78635e
          });
      }
 diff --git a/engine/src/program/generate.cpp b/engine/src/program/generate.cpp
-index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f603fb98192 100644
+index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..d78bd71ce69187dbdb777530a97045740dfa3331 100644
 --- a/engine/src/program/generate.cpp
 +++ b/engine/src/program/generate.cpp
 @@ -1,3 +1,4 @@
@@ -7792,7 +7792,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                   "(%.2f of %.2f GiB over %zu cache(s)), CUDA0 %lld MiB free now, prompt chunk %lld, in %.0f ms%s\n",
                           reserve, sum_slots, sum_full, (double) sum_mapped / 1073741824.0, (double) sum_bytes / 1073741824.0,
                           cards.size(), (long long) (free_b >> 20), (long long) o.prefill_chunk,
-@@ -16739,6 +16825,83 @@ int main(int argc, char** argv) {
+@@ -16739,6 +16825,86 @@ int main(int argc, char** argv) {
                          (long long) (free_b >> 20), (long long) o.prefill_chunk, extra.c_str());
              return true;
          };
@@ -7846,11 +7846,14 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
 +#endif
 +            if(vision_lease.active()){e="vision lease: restore the active lease first";return false;}
 +            for(const PfPart& p:pf_parts)if(!p.lent.empty()){e="vision lease: a prompt loan is still out";return false;}
-+            if(!adapt_tick(true)){e="vision lease: adaptive refill failed";return false;}
-+            if(src.exchanges_pending()){e="vision lease: RAM ownership exchange is still pending";return false;}
 +            if(!ver.wait_commit(e))return false;
-+            adapt_quiesce();
 +            if(cudaDeviceSynchronize()!=cudaSuccess){e="vision lease: device did not quiesce";return false;}
++            // A text turn may leave a blocking adaptive round in flight. Settle the
++            // verifier's Fetch exchanges and that round before inspecting ownership.
++            if(!finish_fetch_exchanges(e))return false;
++            adapt_quiesce();
++            if(a_err.load()){e="vision lease: adaptive refill failed";return false;}
++            if(src.exchanges_pending()){e="vision lease: RAM ownership exchange is still pending";return false;}
 +            size_t max_blob=0;
 +            for(int64_t l=0;l<g.n_layers;++l)max_blob=std::max(max_blob,(size_t)strata::kernels::cpu::expert_layout().blob_bytes(l));
 +            if(!lease_staging.p){
@@ -7876,7 +7879,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
          // ---- --batch: the slots of the batch windows
          struct BSlot {
              bool active = false, stop = false;
-@@ -17073,18 +17236,18 @@ int main(int argc, char** argv) {
+@@ -17073,18 +17239,18 @@ int main(int argc, char** argv) {
              return;
  #endif
              if (use_mtp && !batch_mtp) {   // no draft K/V of its own: an image without it would not restore beside the drafter
@@ -7898,7 +7901,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                               b, why.c_str());
                  return;
              }
-@@ -17099,12 +17262,12 @@ int main(int argc, char** argv) {
+@@ -17099,12 +17265,12 @@ int main(int argc, char** argv) {
                  if (park_source(src, 0)) return;
                  // the snapshot failed (the copy's own memory, as in #3350): the slot is not touched, so go on without
                  // the image; a non-sticky allocation error is cleared, a sticky one comes back from the next call
@@ -7913,7 +7916,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
              }
          };
          // one batch window over the active slots only (row t is the t-th active slot): an idle slot is not touched,
-@@ -17241,6 +17404,7 @@ int main(int argc, char** argv) {
+@@ -17241,6 +17407,7 @@ int main(int argc, char** argv) {
                  std::printf("ERR %s\n", drive.d.failed && drive.d.fail ? drive.d.fail : err.c_str());
                  return false;
              }
@@ -7921,7 +7924,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
              const Clock::time_point w1 = Clock::now();
              // The adaptive VRAM tier, as the solo loop runs it: every --adapt-every windows, on a thread beside the commit and
              // the drafts.  Every stage's window has finished here (run_slot_rows synchronised each stage's stream), and
-@@ -17628,7 +17792,7 @@ int main(int argc, char** argv) {
+@@ -17628,7 +17795,7 @@ int main(int argc, char** argv) {
              const strata::core::OnDevice on_last(stage_verifier(n_pipe - 1).device());
              for (cudaEvent_t& e : pm_copied)
                  if (cudaEventCreateWithFlags(&e, cudaEventDisableTiming) != cudaSuccess) {
@@ -7930,7 +7933,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                      return 1;
                  }
          }
-@@ -18403,7 +18567,7 @@ int main(int argc, char** argv) {
+@@ -18403,7 +18570,7 @@ int main(int argc, char** argv) {
              line_drain_ms = 0.0;
              strata::core::manifest::instance().flush_if_dirty("request");   // STRATA_MANIFEST: what the last request added (a no-op when off)
              // Between requests (nothing in flight): the park pools' upkeep, which the park and the prompt read leave alone
@@ -7939,7 +7942,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                  pool_topup();
                  segpool_kick();
              }
-@@ -18434,6 +18598,18 @@ int main(int argc, char** argv) {
+@@ -18434,6 +18601,18 @@ int main(int argc, char** argv) {
              } else if (!next_line(line)) {
                  break;
              }
@@ -7958,7 +7961,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
              // --batch: BSTOP <slot> ends that slot at its next batch window; BGEN <slot> <max_new> ... reads the
              // request's prompt and first token as a GEN 1, then continues it in that slot
              if (line.rfind("BSTOP ", 0) == 0) {
-@@ -18575,14 +18751,63 @@ int main(int argc, char** argv) {
+@@ -18575,14 +18754,63 @@ int main(int argc, char** argv) {
              // (fingerprint file, state capture, file flush, rename + folder flush, validation, device transfer):
              // that step is allowed <seconds> (session_phase_limit_s) by the watchdog and by the server, no more.
              // (A verifier commit that fails before the command still answers ERR and exits, as for a request.)
@@ -8026,7 +8029,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                   why.c_str());
                      std::string one = why;   // one protocol line
                      for (char& c : one) if (c == '\n' || c == '\r') c = ' ';
-@@ -18590,12 +18815,19 @@ int main(int argc, char** argv) {
+@@ -18590,12 +18818,19 @@ int main(int argc, char** argv) {
                      std::fflush(stdout);
                      err.clear();
                  };
@@ -8048,7 +8051,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                  };
                  // a step that blocks in one call: its explicit allowance, on both sides, announced before it starts
                  auto blocking = [&](const char* phase, uint64_t bytes) {
-@@ -18633,11 +18865,196 @@ int main(int argc, char** argv) {
+@@ -18633,11 +18868,196 @@ int main(int argc, char** argv) {
                      refuse(std::string("session identity: ") + e.what(), strata::core::SessionError::io);
                      continue;
                  }
@@ -8246,7 +8249,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                          // RAM PREFLIGHT for the save (not a reservation), BEFORE anything is copied: the deepest
                          // checkpoint is chosen by reference, and the copies it will take (the list below and the one
                          // in `meta`), the copied live running state with its tokens and images, the K/V source
-@@ -18669,20 +19086,35 @@ int main(int argc, char** argv) {
+@@ -18669,20 +19089,35 @@ int main(int argc, char** argv) {
                                  if (tail_ckpt_len >= 0 && std::none_of(checks.begin(), checks.end(), [&](const auto& c) {
                                          return int64_t(c.ids.size()) == tail_ckpt_len;
                                      })) tail_ckpt_len = -1;
@@ -8291,7 +8294,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                          };
                          std::vector<ConvCheckpoint> disk_checks;
                          std::string why;
-@@ -18712,19 +19144,20 @@ int main(int argc, char** argv) {
+@@ -18712,19 +19147,20 @@ int main(int argc, char** argv) {
                              continue;
                          }
                          if (st.dir_flush_unsupported)
@@ -8314,7 +8317,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                      try {
                          // bounds this session can ever restore (geometry, layer range, tokens, checkpoints, every
                          // state and K/V part), checked as the file is parsed and before each array is allocated; the
-@@ -18733,14 +19166,33 @@ int main(int argc, char** argv) {
+@@ -18733,14 +19169,33 @@ int main(int argc, char** argv) {
                          limits.progress = moving;
                          const uint64_t floor = (uint64_t) o.conversation_cache_min_free_mib << 20;
                          pools_budget.shrink((size_t) -1);   // (the park pools' idle memory goes back before the RAM checks of a session load)
@@ -8356,7 +8359,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                          };
                          if (!strata::core::conversation_session_read_limits(
                                  limits, ss, g, session_draft, (uint64_t) o.max_context,
-@@ -18749,7 +19201,52 @@ int main(int argc, char** argv) {
+@@ -18749,7 +19204,52 @@ int main(int argc, char** argv) {
                              continue;
                          }
                          strata::core::SessionStatus st;
@@ -8410,7 +8413,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                              refuse(err, st.error);
                              continue;
                          }
-@@ -18758,10 +19255,33 @@ int main(int argc, char** argv) {
+@@ -18758,10 +19258,33 @@ int main(int argc, char** argv) {
                          continue;
                      }
                      const double read_ms = ms();
@@ -8448,7 +8451,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                          continue;
                      }
                      // the elastic K/V (--kv-grow) maps only the cells it has grown to: make room for the file's cells
-@@ -18777,7 +19297,7 @@ int main(int argc, char** argv) {
+@@ -18777,7 +19300,7 @@ int main(int argc, char** argv) {
                          strata::core::ConversationRestore::restored) {
                          // validated above: a failure here is a transfer failure, after device writes began - never
                          // decode from a partial state; the server starts the engine again
@@ -8457,7 +8460,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                       err.c_str());
                          std::printf("FATAL restoring the session file failed after the device state was changed: %s\n",
                                      err.c_str());
-@@ -18797,7 +19317,7 @@ int main(int argc, char** argv) {
+@@ -18797,7 +19320,7 @@ int main(int argc, char** argv) {
                                               "replaces the live one; dropped %zu parked conversation%s\n", n_parked,
                                       n_parked == 1 ? "" : "s");
                      }
@@ -8466,7 +8469,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                   "in %.1f ms (read+check %.1f ms)\n", live.size(), checks.size(), bytes, path.c_str(),
                                   ms(), read_ms);
                      std::printf("RESTORED %zu %zu %.1f\n", live.size(), bytes, ms());
-@@ -18805,6 +19325,28 @@ int main(int argc, char** argv) {
+@@ -18805,6 +19328,28 @@ int main(int argc, char** argv) {
                  std::fflush(stdout);
                  continue;
              }
@@ -8495,7 +8498,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
              const bool geni = bgen_rewritten ? bgen_img : (line.rfind("GENI ", 0) == 0);
              const bool is_gen = bgen_rewritten || geni || line.rfind("GEN ", 0) == 0;
              if (is_gen) {
-@@ -19131,6 +19673,9 @@ int main(int argc, char** argv) {
+@@ -19131,6 +19676,9 @@ int main(int argc, char** argv) {
                  begin_before[(size_t) r] = remote_experts[(size_t) r].ms_begin();
                  wait_before[(size_t) r] = remote_experts[(size_t) r].ms_wait();
              }
@@ -8505,7 +8508,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
              cur = ids;
              const Clock::time_point r0 = Clock::now();
              Clock::time_point read_t0 = r0;   // where the prompt pass itself starts (after a park and a restore): the SSD tier's cost rule
-@@ -19146,6 +19691,14 @@ int main(int argc, char** argv) {
+@@ -19146,6 +19694,14 @@ int main(int argc, char** argv) {
                      if ((int32_t) ids[(size_t) i] != pre[(size_t) i]) return false;
                  return imgs_below(req_imgs, L) == pre_imgs;
              };
@@ -8520,7 +8523,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
              const bool want_cvec = strata::kernels::cvec().loaded() ? req_cvec != 0 : true;
              // the last request's final commit may still be running on the verifier's stream (set_commit_async):
              // everything below reads, restores or zeroes the session from other streams and the host (the end of the
-@@ -19227,7 +19780,7 @@ int main(int argc, char** argv) {
+@@ -19227,7 +19783,7 @@ int main(int argc, char** argv) {
                      return 1;
                  }
                  arm_prompt_helpers();   // the rebuild above dropped them (they live inside the layout)
@@ -8529,7 +8532,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                               std::chrono::duration<double, std::milli>(Clock::now() - head_t0).count());
              }
              auto kv_quiesce = adapt_quiesce;
-@@ -19272,7 +19825,7 @@ int main(int argc, char** argv) {
+@@ -19272,7 +19828,7 @@ int main(int argc, char** argv) {
                          sl.checks.clear();
                          ++n_slots;
                      }
@@ -8538,7 +8541,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                       "checkpoint%s, %zu parked conversation%s and %zu idle slot%s (%zu running slot%s "
                                       "not kept after their reply); reading this prompt from token 0\n", n_checks,
                               n_checks == 1 ? "" : "s", n_parked, n_parked == 1 ? "" : "s", n_slots,
-@@ -19282,6 +19835,16 @@ int main(int argc, char** argv) {
+@@ -19282,6 +19838,16 @@ int main(int argc, char** argv) {
              bool from_live = false;
              if (o.prompt_cache > 0 && want_cvec == cvec_cached) {
                  if (live_ok && starts_with(live, live_imgs)) { resume = (int64_t) live.size(); from_live = true; }
@@ -8555,7 +8558,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                  for (const ConvCheckpoint& c : checks)
                      if ((int64_t) c.ids.size() > resume && starts_with(c.ids, c.imgs)) {
                          resume = (int64_t) c.ids.size();
-@@ -19368,7 +19931,7 @@ int main(int argc, char** argv) {
+@@ -19368,7 +19934,7 @@ int main(int argc, char** argv) {
                      const std::vector<ImgKey> now = imgs_below(req_imgs, deep);
                      size_t k = 0;
                      while (k < now.size() && k < deep_imgs->size() && now[k] == (*deep_imgs)[k]) ++k;
@@ -8564,7 +8567,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                           "tokens but picture %zu (at token %lld) is not the same as when it was saved "
                                           "(its embeddings changed): it cannot be reused (#2228)\n", (long long) deep,
                                   k + 1, (long long) (k < now.size() ? now[k].start : -1));
-@@ -19604,14 +20167,15 @@ int main(int argc, char** argv) {
+@@ -19604,14 +20170,15 @@ int main(int argc, char** argv) {
              // Reject the entire image before parking/overwriting the outgoing
              // state. Invalid entries can safely fall back to its existing prefix.
              if (incoming && incoming->stage_images.size() != stages.size()) {
@@ -8583,7 +8586,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                   err.c_str());
                      incoming.reset();
                      err.clear();
-@@ -19619,8 +20183,9 @@ int main(int argc, char** argv) {
+@@ -19619,8 +20186,9 @@ int main(int argc, char** argv) {
                  }
              }
              if (incoming && !strata::core::conversation_snapshot_validate(*incoming, ss, g,
@@ -8595,7 +8598,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                  incoming.reset();
                  err.clear();
              }
-@@ -19653,7 +20218,7 @@ int main(int argc, char** argv) {
+@@ -19653,7 +20221,7 @@ int main(int argc, char** argv) {
                                                                 strata::program::conv_cache::kRestoreFirstUseMib << 20)) {
                      for (size_t k = 0; k < restore_free.size(); ++k)
                          if (!restore_ready[k] && restore_free[k] < (strata::program::conv_cache::kRestoreFirstUseMib << 20)) tight = (int) k;
@@ -8604,7 +8607,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                           "yet, which needs up to %lld MiB); rereading the prompt\n",
                                   tight <= 0 ? "CUDA0" : ("stage " + std::to_string(tight)).c_str(),
                                   (long long) (tight >= 0 ? restore_free[(size_t) tight] >> 20 : 0),
-@@ -19661,7 +20226,7 @@ int main(int argc, char** argv) {
+@@ -19661,7 +20229,7 @@ int main(int argc, char** argv) {
                      auto retry = std::move(*incoming);
                      incoming.reset();
                      if (!conversations.put(std::move(retry)))
@@ -8613,7 +8616,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                      err.clear();
                  }
              }
-@@ -19670,7 +20235,7 @@ int main(int argc, char** argv) {
+@@ -19670,7 +20238,7 @@ int main(int argc, char** argv) {
                  if (donor == nullptr ||
                      !strata::core::conversation_snapshot_validate(*donor, ss, g, use_mtp ? &mtp.kv_state() : nullptr,
                                                                    err)) {
@@ -8622,7 +8625,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                           "(%s)\n", err.empty() ? "gone" : err.c_str());
                      borrow = false;
                      err.clear();
-@@ -19845,7 +20410,7 @@ int main(int argc, char** argv) {
+@@ -19845,7 +20413,7 @@ int main(int argc, char** argv) {
                  if (blocked) {
                      // the outgoing conversation fits only in the donor's room: it keeps its place, the donor is
                      // taken whole as before (it was validated above)
@@ -8631,7 +8634,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                           "this request starts with; taking it instead of borrowing\n");
                      borrow = false;
                      if (const size_t at = conversations.index_of(parked.serial); at != SIZE_MAX)
-@@ -19980,7 +20545,7 @@ int main(int argc, char** argv) {
+@@ -19980,7 +20548,7 @@ int main(int argc, char** argv) {
                  resume = parked.tokens;
                  from_live = false;
                  conversations.count_borrow();
@@ -8640,7 +8643,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                               "conversation, which stays parked, in %.1f ms; parked=%zu bytes=%zu borrowed=%zu\n",
                               (long long) resume, std::chrono::duration<double, std::milli>(Clock::now() - t0).count(),
                               conversations.size(), conversations.bytes(), conversations.borrowed());
-@@ -20015,7 +20580,7 @@ int main(int argc, char** argv) {
+@@ -20015,7 +20583,7 @@ int main(int argc, char** argv) {
                          std::printf("ERR verifying restored draft KV: %s\n", err.c_str());
                          return 1;
                      }
@@ -8649,7 +8652,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                   (unsigned long long) draft_hash, (long long) draft_kv.cells,
                                   mtp.kv_state().kv_mode, "ram",
                                   (long long) (mtp.kv_state().n_slots * strata::kernels::qsa_real_shapes().page_size));
-@@ -20037,10 +20602,11 @@ int main(int argc, char** argv) {
+@@ -20037,10 +20605,11 @@ int main(int argc, char** argv) {
                      std::vector<std::vector<strata::core::ConversationKv>> stage_kv;   // every stage's, for its next park
                      for (auto& si : incoming->stage_images) stage_kv.push_back(std::move(si.kv));
                      conversations.retain(std::move(incoming->kv), int64_t(live.size()), std::move(stage_kv), live);
@@ -8662,7 +8665,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                               (long long) resume, from_live ? "live" : "checkpoint",
                               std::chrono::duration<double, std::milli>(Clock::now() - t0).count(),
                               conversations.size(), conversations.bytes());
-@@ -20107,7 +20673,7 @@ int main(int argc, char** argv) {
+@@ -20107,7 +20676,7 @@ int main(int argc, char** argv) {
                          cudaStreamSynchronize(st->stream);
                      }
                      reread_to = resume;
@@ -8671,7 +8674,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                           "restoring\n", (long long) resume);
                  } else if (c == nullptr || !checkpoint_restore(*c, ss, g) || c->stage_parts.size() != stages.size() ||
                             [&] {
-@@ -20151,7 +20717,7 @@ int main(int argc, char** argv) {
+@@ -20151,7 +20720,7 @@ int main(int argc, char** argv) {
                              resume_plan_at = 0;
                              resume_plan_end = resume;
                          } else {
@@ -8680,7 +8683,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                                   "segment that started at %lld, so a read from 0 has other chunks\n",
                                           (long long) k.plan.from);
                          }
-@@ -20232,7 +20798,7 @@ int main(int argc, char** argv) {
+@@ -20232,7 +20801,7 @@ int main(int argc, char** argv) {
              if (short_read_off_once) {   // #3465: the request after non-finite logits in a prompt window
                  short_read_off_once = false;
                  req_short_read = 0;
@@ -8689,7 +8692,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                       "whole prompt through the batched path, none of it through the verify windows\n");
              }
              auto windows_ok = [&](int64_t a, int64_t b) -> bool {
-@@ -20407,6 +20973,18 @@ int main(int argc, char** argv) {
+@@ -20407,6 +20976,18 @@ int main(int argc, char** argv) {
                  const double ms = std::chrono::duration<double, std::milli>(Clock::now() - pp_t0).count();
                  std::printf("PP %lld %lld %.0f %.1f\n", (long long) b, (long long) pp_total, ms,
                              ms > 0.0 ? 1000.0 * (double) (b - pp_from) / ms : 0.0);
@@ -8708,7 +8711,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                  strata::core::progress_beat();
                  std::fflush(stdout);
                  return true;
-@@ -20446,6 +21024,7 @@ int main(int argc, char** argv) {
+@@ -20446,6 +21027,7 @@ int main(int argc, char** argv) {
                          if (drive.d.failed && drive.d.fail) e = drive.d.fail;
                          return false;
                      }
@@ -8716,7 +8719,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                      if (nonfinite_hit(ver, "prompt")) {   // (its commit is not needed: the next request reads from 0)
                          e = "non-finite logits (#879)";
                          return false;
-@@ -20481,6 +21060,18 @@ int main(int argc, char** argv) {
+@@ -20481,6 +21063,18 @@ int main(int argc, char** argv) {
                  const double ms = std::chrono::duration<double, std::milli>(Clock::now() - pp_t0).count();
                  std::printf("PP %lld %lld %.0f %.1f\n", (long long) b, (long long) pp_total, ms,
                              ms > 0.0 ? 1000.0 * (double) (b - pp_from) / ms : 0.0);
@@ -8735,7 +8738,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                  strata::core::progress_beat();
                  std::fflush(stdout);
                  return true;
-@@ -20684,11 +21275,11 @@ int main(int argc, char** argv) {
+@@ -20684,11 +21278,11 @@ int main(int argc, char** argv) {
                              return false;
                          }
                          if (want_p != want_cut)
@@ -8749,7 +8752,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                           "auto chunk's (%lld slots): starting it earlier (#2090)\n", (long long) want_p,
                                           (long long) need_p, (long long) (p.cache->slots() - p.first));
                          first = (int32_t) (p.cache->slots() - need_p);
-@@ -21435,7 +22026,7 @@ int main(int argc, char** argv) {
+@@ -21435,7 +22029,7 @@ int main(int argc, char** argv) {
                  const bool want = req_aux_cpus < 0 ? aux_start : req_aux_cpus != 0;
                  strata::aux_cpus::set_enabled(want);
                  if (want != was_on)
@@ -8758,7 +8761,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                   want && !strata::aux_cpus::enabled() ? " (asked for, but no CPU is spare: see the start-up line)" : "");
              }
              ver.pause_pcie_balance(req_pcie_set);   // the measured costs keep across requests
-@@ -21509,14 +22100,14 @@ int main(int argc, char** argv) {
+@@ -21509,14 +22103,14 @@ int main(int argc, char** argv) {
              };
              if (req_pin > 0) {
                  if (o.prompt_cache < 3 || !req_ckpt)
@@ -8776,7 +8779,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                   "%lld)\n", (long long) req_pin, (long long) read_from);
              }
              std::vector<int64_t> cuts = {reread_to, root_at, message_at, turn_at, n - 1};
-@@ -21592,7 +22183,7 @@ int main(int argc, char** argv) {
+@@ -21592,7 +22186,7 @@ int main(int argc, char** argv) {
                  }
                  if (!sp_ok) {
                      if (yielded_at < 0 && (batch_fatal || !stop_req.load())) {
@@ -8785,7 +8788,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                          std::printf("ERR %s\n", err.c_str());
                          // #224: a CUDA fault (an illegal address) poisons the context for the whole process, and
                          // unwinding the destructors on it could hang until the 60 s watchdog: leave at once
-@@ -21613,13 +22204,13 @@ int main(int argc, char** argv) {
+@@ -21613,13 +22207,13 @@ int main(int argc, char** argv) {
                          std::printf("ERR saving a conversation checkpoint failed%s\n", ckpt_why.c_str());
                          return 1;
                      }
@@ -8802,7 +8805,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                   (long long) message_at, (long long) (turn_at - message_at));
              }
              if (!refill(err)) {
-@@ -21790,6 +22381,10 @@ int main(int argc, char** argv) {
+@@ -21790,6 +22384,10 @@ int main(int argc, char** argv) {
              double dt_run = 0, dt_commit = 0, dt_draft = 0;
              double dt_adapt_wait = 0, dt_adapt_join = 0;   // the tier's wait before a window / join after the draft (ms, summed)
              const int64_t dt_sw0 = ajob ? a_swapped : adapt_nswaps;
@@ -8813,7 +8816,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
              int64_t dec_windows = 0, dec_T = 0;
              const int64_t decode_hits0 = drive.d.cache_hits;
              // CS-T: the RAM and file tiers of this request (the mmap source; 0 with the arena)
-@@ -21815,7 +22410,7 @@ int main(int argc, char** argv) {
+@@ -21815,7 +22413,7 @@ int main(int argc, char** argv) {
              if (pl_serial != nullptr) {   // said once per reason
                  static std::set<std::string> said;
                  if (said.insert(pl_serial).second)
@@ -8822,7 +8825,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                   pl_serial);
              }
              if (pl_want && pl_serial == nullptr && !cancelled && produced_n < cap_now()) {
-@@ -21915,7 +22510,7 @@ int main(int argc, char** argv) {
+@@ -21915,7 +22513,7 @@ int main(int argc, char** argv) {
                  // window in flight keeps spinning on a flag nobody raises, and the tier's thread can finish (the
                  // asynchronous tier's job does host work alone: it ends)
                  auto die = [&](const std::string& m) -> int {
@@ -8831,7 +8834,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                      strata::core::diag_pipeline_fn().store(nullptr);
                      strata::core::release_gpu_waits(stderr);
                      if (pl_adapt_thr.joinable()) pl_adapt_thr.join();
-@@ -22410,6 +23005,13 @@ int main(int argc, char** argv) {
+@@ -22410,6 +23008,13 @@ int main(int argc, char** argv) {
                      if (drive.d.fs) drive.d.fs->completed.fetch_add(1, std::memory_order_release);
                      ++dec_windows;
                      dec_T += A.T;
@@ -8845,7 +8848,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                      const bool nf = nonfinite_hit(V1(A), "decode");   // #879: none of its tokens goes out
                      bool eos = false;
                      for (int i = 0; !nf && i <= a && produced_n < cap_now() && !eos; ++i) {
-@@ -22992,6 +23594,7 @@ int main(int argc, char** argv) {
+@@ -22992,6 +23597,7 @@ int main(int argc, char** argv) {
                      std::printf("ERR %s\n", drive.d.failed && drive.d.fail ? drive.d.fail : err.c_str());
                      return 1;
                  }
@@ -8853,7 +8856,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                  if (aflipped) apply_pending(true);   // 0.1.43: every layer's copies were waited for in the window; the bookkeeping now
                  // Diagnostics (as in generate): STRATA_DUMP_FIRST_LOGITS=<path> writes the logits of each request's first
                  // window to <path>.<n>, so the prompt paths (a peer card's share, a split) can be compared by KL
-@@ -23003,7 +23606,7 @@ int main(int argc, char** argv) {
+@@ -23003,7 +23609,7 @@ int main(int argc, char** argv) {
                          const std::string path = std::string(fl) + "." + std::to_string(fl_n++);
                          std::FILE* f = ver.copy_logits(merged ? T - 1 : 0, row.data()) ? std::fopen(path.c_str(), "wb") : nullptr;
                          if (f == nullptr || std::fwrite(row.data(), sizeof(float), row.size(), f) != row.size())
@@ -8862,7 +8865,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                          if (f) std::fclose(f);
                      }
                  }
-@@ -23147,6 +23750,13 @@ int main(int argc, char** argv) {
+@@ -23147,6 +23753,13 @@ int main(int argc, char** argv) {
                      auto msd = [](Clock::time_point a0, Clock::time_point b0) { return std::chrono::duration<double, std::milli>(b0 - a0).count(); };
                      dt_run += msd(tw0, tw1); dt_commit += msd(tw1, tw2); dt_draft += msd(tw2, tw3);
                      ++dec_windows; dec_T += merged ? 1 : T;   // a merged window's prompt rows are not decode rows
@@ -8876,7 +8879,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                  }
                  pcie_auto_step(req_pcie_frac);   // the default share, refined from the CPU pool's speed (PcieAuto); a request's own share is left alone
                  if (adapt_thr.joinable()) {
-@@ -23168,17 +23778,17 @@ int main(int argc, char** argv) {
+@@ -23168,17 +23781,17 @@ int main(int argc, char** argv) {
                      const auto act = asw.window(asw_ms, asw_wait_ms, a + 1);
                      if (act == strata::core::AdaptAsyncSelf::Action::ToAsync) {
                          ajob = std::make_unique<JobThread>();
@@ -8897,7 +8900,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                               "per token)\n", asw.trial_ms_per_token(), asw.measure_ms_per_token());
                      }
                  }
-@@ -23389,7 +23999,7 @@ int main(int argc, char** argv) {
+@@ -23389,7 +24002,7 @@ int main(int argc, char** argv) {
                      else std::fprintf(stderr, "strata decode GPU stages, stage %d (ms/window):%s\n", st, pr.c_str());
                  }
              }
@@ -8906,7 +8909,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
              if (!cancelled) {
                  // a prompt stopped halfway leaves the session somewhere between two chunks: nothing to continue from
                  // (the checkpoints taken while reading it are still good)
-@@ -23405,7 +24015,7 @@ int main(int argc, char** argv) {
+@@ -23405,7 +24018,7 @@ int main(int argc, char** argv) {
                  live.assign(cur.begin(), cur.begin() + pp_reached);
                  live_imgs = imgs_below(req_imgs, pp_reached);
                  live_ok = true;
@@ -8915,7 +8918,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                               (long long) pp_reached);
              }
              if (nib::config().recheck && nib::any_on() && !cancelled) {
-@@ -23421,12 +24031,12 @@ int main(int argc, char** argv) {
+@@ -23421,12 +24034,12 @@ int main(int argc, char** argv) {
                      checked += nib_st[i].n;
                  }
                  if (!ok) {
@@ -8930,7 +8933,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                               (long long) checked, std::chrono::duration<double, std::milli>(Clock::now() - rt0).count());
              }
              static const bool state_hash = std::getenv("STRATA_STATE_HASH") != nullptr;
-@@ -23475,7 +24085,7 @@ int main(int argc, char** argv) {
+@@ -23475,7 +24088,7 @@ int main(int argc, char** argv) {
                          std::snprintf(b, sizeof(b), "%04llx ", (unsigned long long) (hash_dev((const uint8_t*) ss.gdn_state + i * per, per, 1469598103934665603ull) & 0xffff));
                          s += b;
                      }
@@ -8939,7 +8942,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                  }
                  uint64_t h_ple = hash_dev(ss.ple_hist, ss.ple_hist ? z.ple : 0, 1469598103934665603ull);
                  uint64_t h_tail = 1469598103934665603ull, h_pool = h_tail, h_kv = h_tail, h_stale = h_tail;
-@@ -23530,7 +24140,7 @@ int main(int argc, char** argv) {
+@@ -23530,7 +24143,7 @@ int main(int argc, char** argv) {
                      std::printf("ERR reading state fingerprint\n");
                      return 1;
                  }
@@ -8948,7 +8951,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                       "kv=%016llx mtp=%016llx stale=%016llx dead=%016llx pooled_full=%016llx ple_prev=%d,%d\n", (long long) L,
                               (unsigned long long) h_gdn, (unsigned long long) h_ple, (unsigned long long) h_tail,
                               (unsigned long long) h_pool, (unsigned long long) h_kv, (unsigned long long) h_mtp,
-@@ -23583,13 +24193,31 @@ int main(int argc, char** argv) {
+@@ -23583,13 +24196,31 @@ int main(int argc, char** argv) {
                          (long long) req_offload, chain_txt, (long long) req_chunk,
                          (long long) (sp.chain_experts_streamed() - streamed0));
              std::fflush(stdout);
@@ -8981,7 +8984,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                      bs[(size_t) admit_slot].cached = false;   // its sessions may be half written
                      cont = false;
                  }
-@@ -23757,7 +24385,7 @@ int main(int argc, char** argv) {
+@@ -23757,7 +24388,7 @@ int main(int argc, char** argv) {
                  std::snprintf(read_txt, sizeof(read_txt), "%lld of %lld", (long long) read_n, (long long) fresh);
              else
                  std::snprintf(read_txt, sizeof(read_txt), "%lld", (long long) fresh);
@@ -8990,7 +8993,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                   "%lld generated in %.0f ms (%.1f tok/s), drafts accepted %lld of %lld, %zu checkpoints%s\n",
                           (long long) n, (long long) resume, read_txt, prompt_ms,
                           prompt_ms > 0 ? 1000.0 * read_n / prompt_ms : 0.0, (long long) produced_n, decode_ms,
-@@ -23771,8 +24399,10 @@ int main(int argc, char** argv) {
+@@ -23771,8 +24402,10 @@ int main(int argc, char** argv) {
                  const std::string pause_line = strata::core::gpu_pause_request_line(g_req_gpu_pause_ms.load(), gpu_pause_now());
                  if (!pause_line.empty()) std::fprintf(stderr, "%s\n", pause_line.c_str());
              }
@@ -9002,7 +9005,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                               serve_adapt_drain_ms);
              // the VRAM share of the experts the pool looked up while decoding; experts it sent over PCIe for the GPU
              // to read (--pcie-frac) are in neither count - #588: so that share is said beside it (raising --pcie-frac
-@@ -23784,31 +24414,31 @@ int main(int argc, char** argv) {
+@@ -23784,31 +24417,31 @@ int main(int argc, char** argv) {
                                    "all %lld routed)", (long long) req_offload,
                                    100.0 * (double) req_offload / (double) (req_look + req_offload),
                                    (long long) (req_look + req_offload));
@@ -9040,7 +9043,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                       "%.1f ms per round (start to flip, between windows)",
                               (long long) a_rounds, (long long) a_swapped, a_rounds > 0 ? a_ms / (double) a_rounds : 0.0);
              if (ajob) {
-@@ -23819,12 +24449,12 @@ int main(int argc, char** argv) {
+@@ -23819,12 +24452,12 @@ int main(int argc, char** argv) {
                      std::fprintf(stderr, "\n");
              }
              if (src.exchange_rotation())
@@ -9055,7 +9058,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                       "%.1f MB read%s\n", (long long) req_hits, (long long) src.ram_reads(),
                               (long long) src.file_reads(), (double) src.file_read_bytes() / 1e6,
                               src.gguf_mode() ? " (the GGUF in place)" : "");
-@@ -23837,7 +24467,7 @@ int main(int argc, char** argv) {
+@@ -23837,7 +24470,7 @@ int main(int argc, char** argv) {
                  const strata::core::FileExpertSource::IoCounters ic = src.io_counters();
                  const uint64_t fb = src.file_read_bytes();
                  if (io_now.valid) {
@@ -9064,7 +9067,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                           "%.1f MB of expert reads", (double) (io_now.read_bytes - io_prev.read_bytes) / 1e6,
                                   (unsigned long long) (io_now.major_faults - io_prev.major_faults), (double) (fb - fb_prev) / 1e6);
                      if (src.io_stats())
-@@ -23881,7 +24511,7 @@ int main(int argc, char** argv) {
+@@ -23881,7 +24514,7 @@ int main(int argc, char** argv) {
                  static strata::core::ExpertDispatch cp;
                  const strata::core::ExpertDispatch& c = drive.d;
                  const double nl = (double) std::max<int64_t>(1, c.cold_layers - cp.cold_layers);
@@ -9073,7 +9076,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                       "directly; %lld layers with a blob to "
                                       "read (%lld such experts, %lld ready beside them, %lld pool batches); per such layer: "
                                       "R %.3f ms, C_r %.3f ms, C_c %.3f ms, the decode waited %.3f ms; total waited %.1f ms, min(R, C_r) %.1f ms\n",
-@@ -23901,7 +24531,7 @@ int main(int argc, char** argv) {
+@@ -23901,7 +24534,7 @@ int main(int argc, char** argv) {
                  for (int st = 0; st < n_stages; ++st) {
                      const strata::core::Verifier& v = stage_ver(st);
                      const double w = v.windows > 0 ? (double) v.windows : 1.0;
@@ -9082,7 +9085,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                           "pool + plan %.3f ms, host staging %.3f ms, commit %.3f ms\n", st,
                                   (long long) v.windows, v.ms_wait / w, v.ms_pool / w, v.ms_host / w, v.ms_commit / w);
                  }
-@@ -23915,29 +24545,29 @@ int main(int argc, char** argv) {
+@@ -23915,29 +24548,29 @@ int main(int argc, char** argv) {
                          strata::kernels::kv_stream_counters(ss.qsa_states[ss.qsa_ord0 + j].map);
                      miss += c.misses; look += c.lookups; over = over || c.overflow;
                  }
@@ -9118,7 +9121,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                       "(%.1f MiB with full rows) in this request; host %.0f ms staging+launching, %.0f ms "
                                       "waiting for it in this request\n", r + 1,
                               (long long) (remote_experts[(size_t) r].computed() - remote_before[(size_t) r]),
-@@ -23948,7 +24578,7 @@ int main(int argc, char** argv) {
+@@ -23948,7 +24581,7 @@ int main(int argc, char** argv) {
                               remote_experts[(size_t) r].ms_wait() - wait_before[(size_t) r]);
              if (prefill_helper_src) {
                  const uint64_t blobs = prefill_helper_src->helper_blobs(), bytes = prefill_helper_src->helper_bytes();
@@ -9127,7 +9130,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                                       "cache in this request\n",
                               (long long) (blobs - helper_blobs_before), (double) (bytes - helper_bytes_before) / 1048576.0);
                  helper_blobs_before = blobs;
-@@ -24582,7 +25212,7 @@ int main(int argc, char** argv) {
+@@ -24582,7 +25215,7 @@ int main(int argc, char** argv) {
                              : o.pcie_mode == "dma" || o.pcie_mode == "direct" ? "--pcie-mode dma / direct"
                              : drive.d.plan == nullptr ? "no GPU plan"
                              : drive.d.pcie_num <= 0 ? "no PCIe share"
@@ -9136,7 +9139,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
              if (off != nullptr) {
                  if (strata::core::adapt_fetch_is_default())
                      std::fprintf(stderr, "strata generate: STRATA_ADAPT_FETCH=2 (the default for this card) is not used in this run (%s)\n", off);
-@@ -24590,16 +25220,20 @@ int main(int argc, char** argv) {
+@@ -24590,16 +25223,20 @@ int main(int argc, char** argv) {
              }
              else {
                  drive.d.fetch_admit = adapt_fetch();
@@ -9159,7 +9162,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
              }
          }
          // before every window: the device's table follows the host's (the tier's evictions while its copies are in
-@@ -24698,6 +25332,22 @@ int main(int argc, char** argv) {
+@@ -24698,6 +25335,22 @@ int main(int argc, char** argv) {
                  drive.d.res_dirty_idx.clear();
              }
          };
@@ -9182,7 +9185,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
          // Plan v0.3 P6: the VRAM tier follows the conversation.  Candidates are missing experts routed at least
          // twice (decayed); each is paired with its layer's least-routed resident expert and swapped when it was
          // routed clearly more often.  Copies run between rounds, when the GPU is idle.
-@@ -25130,7 +25780,8 @@ int main(int argc, char** argv) {
+@@ -25130,7 +25783,8 @@ int main(int argc, char** argv) {
              if (!ver.run(T, window.data(), p, decode_pool_fn, &drive, outv.data(), err)) {
                  // The graph of a window size is captured the first time it is used, and the draft source took VRAM: when the capture runs
                  // out of memory the window gets one row narrower (the widths below it are already captured) instead of the run failing.
@@ -9192,7 +9195,7 @@ index af2724f6a28cb195b04a8df60769fb0e1e80f7ae..8d26c1923bbc91b92a407a19c7f81f60
                      win_cap = T - 1;
                      --window_hist[(size_t) T];
                      std::fprintf(stderr, "strata generate: not enough VRAM left for a %d-token verify window: windows are %d tokens at most from here\n", T, win_cap);
-@@ -25146,6 +25797,10 @@ int main(int argc, char** argv) {
+@@ -25146,6 +25800,10 @@ int main(int argc, char** argv) {
                               drive.d.fail ? drive.d.fail : "(no message)");
                  return 1;
              }
