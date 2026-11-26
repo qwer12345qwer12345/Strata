@@ -13,7 +13,11 @@ Both long-code samples generated 1,536 tokens and reported zero expert file read
 
 The production engine reported `dflash2: draft rows out of range` at 18:28:47 and restarted. The eight-row drafter rejects its input before allocating or launching a graph when `n_new > 8`. The suffix verifier supports up to 16 rows and the commit-to-draft path passed those committed taps straight to the eight-row entry point. Some 16-row verifier windows complete without incident when they commit at most eight. Logged pre-capture VRAM reached 148 MiB, and the driver log had no CUDA allocation or GPU fault at this failure.
 
-The follow-up restores the wide handoff from the previous work. It writes the first committed rows to the DFlash2 context ring in narrow batches, copies the final row to the existing landing buffer and launches the same eight-row draft block. It keeps the narrow CUDA graphs bound to their original taps. The first headless check uses the real Q4 drafter pack to compare narrow and wide calls against explicit context updates, including 9, 12 and 16 rows, graph invalidation and ring wrap.
+[Upstream PR #7015](https://github.com/Niko1221/Strata/pull/7015) uses a synchronous bridge. It commits the prefix in narrow batches, copies the last row to a fixed landing buffer and runs the regular graph on that row. The new candidate captures the same context batches and the eight-row block on the original verifier buffer. Each attention layer waits for the final context chunk's K/V signal. The host waits at draft completion. Context-only updates also support 16 committed rows, including the idle DFlash2 drafter when auto mode selects MTP.
+
+The candidate reuses the current SM86 shape kernels, K/V buffers and context scratch. It reserves eight extra position entries and 22.5 KiB of pinned host staging for the ring log. CUDA Graphs for widths above eight are created on first use. A wide graph allocation failure switches that width to the same kernels queued without a graph. The model keeps its eight-row block and the target verifier still checks every proposed token.
+
+Sixteen-row verification is expensive for a short acceptance streak. In the earlier Signal 2 baseline one 16-row suffix window took 68.6 ms and accepted one draft. Four-row neural windows had a median of 24.0 ms. The next run tests upstream `STRATA_DF2_LOOKUP_SKIP=8` for long suffix matches. The existing draft policy still decides whether to use the suffix. When it does, the engine updates the DFlash2 ring and skips a neural draft. Trace timing includes deferred context and fallback drafting work. The report counts both outcomes by request.
 
 ## Save latency and host memory
 
@@ -25,6 +29,8 @@ The tentative memory arm limits context to 221,184 tokens and halves the BF16 PL
 
 ## Planned boot
 
-Signal 2 runs one baseline at prior 0.5, then prior 0.25 and 0, the interrupted mid-coverage adaptation comparison, and one archive-memory arm. All matched arms use the same staged engine, frozen expert profile, input workload and seed. Compare by neural or suffix source and exact verify width, together with disk expert reads and memory pressure. The completed production binary is still the original 0.1.69 artifact. The follow-up CUDA build and 57 Python protocol tests passed. The real-pack parity test is queued for the next headless boot.
+Signal 2 runs one baseline at prior 0.5 and five variants. The variants test long-match draft deferral, prior 0.25 and 0, mid-coverage adaptation off and archive memory headroom. The baseline and the deferral variant get an identical 64-line rewrite prompt. Compare output length and hash, suffix draft acceptance, window latency by source and width, stream p99, expert reads and RAM pressure.
+
+The boot first compares real Q4-pack draft tokens, probabilities and ring state against the synchronous bridge. It covers widths 9–16, narrow calls between wide ones, ring wrap, graph invalidation and context-only updates. The check records 24 warm paired samples at width 16, with p50 and p95 draft latency for both implementations. The CUDA SM86 engine and check executable built. Eight startup and configuration tests passed, and a mock launch verified the six-start plan and trace parsing. Real GPU parity and speed remain pending because the desktop GPU is occupied.
 
 [Follow-up source patch](signal2-follow-up.patch) applies on top of the existing 0.2.22 production source.

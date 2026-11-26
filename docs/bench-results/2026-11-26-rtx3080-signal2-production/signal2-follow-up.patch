@@ -16,114 +16,366 @@ index 1d77e66f12e5afe06e38d7035671c2e4350df81a..d177c794b2312582d6ebf61953141e14
    # unconditionally: tests/ is added at the end of this file, but the flag has to be known before it runs.
    if(STRATA_ENABLE_CUDA)
 diff --git a/engine/include/strata/core/dflash2.hpp b/engine/include/strata/core/dflash2.hpp
-index 92a8649140e1668cc81581173edd9a147406fdd2..e0f466d0b96a3736b5cc27ca8a7c2fbeb716344d 100644
+index 92a8649140e1668cc81581173edd9a147406fdd2..85a14bc6c941a0af1888834e3905d31ef230a5d4 100644
 --- a/engine/include/strata/core/dflash2.hpp
 +++ b/engine/include/strata/core/dflash2.hpp
-@@ -137,6 +137,18 @@ public:
+@@ -21,6 +21,7 @@
+ 
+ #include <cuda_runtime.h>
+ 
++#include <array>
+ #include <chrono>
+ #include <cstdint>
+ #include <deque>
+@@ -38,6 +39,11 @@ class Dflash2Drafter {
+ public:
+     static constexpr int kRows = 8;           ///< block rows: the anchor + 7 masks
+     static constexpr int kDrafts = kRows - 1;
++#if defined(STRATA_GPU_METAL)
++    static constexpr int kContextRows = kRows;
++#else
++    static constexpr int kContextRows = 2 * kRows;  ///< committed verifier rows per CUDA/HIP decode update
++#endif
+     static constexpr int kRing2048 = 2048;    ///< positions the deferred-rows buffer holds
+     static constexpr int kRing = 2064;        ///< K/V slots per layer: the 2048 window + slack for rows written ahead of a rejection
+ 
+@@ -128,15 +134,17 @@ public:
+     void note_rows(const int32_t* toks, int64_t n, int64_t pos0);
+     /// Context rows without a draft: `n` rows of taps (device, [n][5 * n_embd]) for positions pos0 ... pos0 + n - 1.
+     bool context(const float* taps_dev, int64_t n, int64_t pos0, std::string& err);
+-    /// The same without the wait: the rows are queued on the drafter's stream (n <= kRows) and a later context_wait() (or the next draft / context call, which
++    /// The same without the wait: the rows are queued on the drafter's stream (n <= kContextRows) and a later context_wait() (or the next draft / context call, which
+     /// waits first) finds them done.  The taps must stay as they are until then.  --draft auto keeps the idle drafter current this way, overlapped with the other's draft.
+     bool context_async(const float* taps_dev, int64_t n, int64_t pos0, std::string& err);
+     bool context_wait(std::string& err);
+-    /// One round: the new context rows (n_new in 1..8: the committed window rows, taps device [n_new][5 * n_embd], positions pos0 ...),
++    /// One round: the new context rows (n_new in 1..kContextRows: the committed window rows, taps device [n_new][5 * n_embd], positions pos0 ...),
+     /// then the block for `anchor` (the last committed token, at pos0 + n_new).  `drafts` / `probs` get kDrafts entries (the
      /// selector's pick and its probability).  The taps pointer must be the same device buffer on every call (graphs are captured on it).
      bool draft(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err);
  
-+    /// Solo decode bridge for lookup windows of 9..16 rows. Prefix rows enter the
-+    /// existing context ring; only the final row launches the unchanged eight-row block.
-+    /// Synchronous: the caller owns the taps until return. Normal 1..8 calls are unchanged.
-+#if defined(STRATA_GPU_METAL)
-+    bool draft_extended(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err) {
-+        return draft(taps_dev, n_new, pos0, anchor, drafts, probs, err);
-+    }
-+#else
-+    bool draft_extended(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err);
-+#endif
 +    uint64_t wide_rounds = 0, wide_rows = 0;
 +
      /// draft() in two halves: draft_launch queues the round's graph and returns, draft_finish waits and reads the picks.  Several drafters (batch slots, each on its
      /// own stream) can launch first and finish after, so their graphs run at the same time.
      bool draft_launch(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, std::string& err);
-@@ -235,6 +247,7 @@ private:
+@@ -171,7 +179,13 @@ private:
+     const float* f32(const std::string& name) const { return reinterpret_cast<const float*>(blob_ + find(name).off); }
+     /// planar Q8 matrices (1..3 of them, same input width) times the planar activations in xqp_ / xdp_ (ncols columns)
+     void gemm(std::initializer_list<const char*> names, std::initializer_list<float*> outs, int ncols, cudaStream_t cs, const uint8_t* xq, const float* xd);
+-    bool record_context(const float* taps, int n, cudaStream_t cs, std::string& err, bool rope = true);
++    static constexpr int kMetaBase = 32;
++    static constexpr int kMetaSize = kMetaBase + kContextRows - kRows;
++    static constexpr int context_pos(int row) { return row < kRows ? row : kMetaBase + row - kRows; }
++    bool record_context(const float* taps, int n, cudaStream_t cs, std::string& err,
++                        bool rope = true, int row = 0, bool signal_layer = true);
++    bool record_decode_context(const float* taps, int n, cudaStream_t cs, std::string& err, bool narrow_rope = true);
++    void stage_context_positions(int n, int64_t pos0);
+     bool record_block(cudaStream_t cs, std::string& err, bool rope = true);
+     bool capture(int n, const float* taps, std::string& err);
+     bool alloc(std::string& err);
+@@ -210,7 +224,7 @@ private:
+     bool bound_ = false;
+ 
+     // device buffers
+-    int32_t* d_meta_ = nullptr;     ///< [0..7] context positions, [8..15] block positions, [16] anchor token, [17] anchor position, [24..31] block tokens
++    int32_t* d_meta_ = nullptr;     ///< [0..7] context positions, [8..15] block positions, [16] anchor token, [17] anchor position, [24..31] block tokens, [32..39] extra context positions
+     int32_t* h_meta_ = nullptr;     ///< host staging of d_meta_ (mapped; m_meta_ is its device alias)
+     int32_t* m_meta_ = nullptr;
+     int32_t* h_out_ = nullptr;      ///< pinned: 7 draft tokens then 7 probabilities
+@@ -234,7 +248,8 @@ private:
+     float *logits_ = nullptr, *topval_ = nullptr, *hsel_ = nullptr, *out_prob_ = nullptr;
      int32_t *toptok_ = nullptr, *out_tok_ = nullptr;
      uint32_t* topscratch_ = nullptr;
-     cudaGraphExec_t exec_[kRows + 1] = {};
-+    cudaGraphExec_t wide_exec_ = nullptr;   ///< one-row graph bound to the existing landing buffer
+-    cudaGraphExec_t exec_[kRows + 1] = {};
++    cudaGraphExec_t exec_[kContextRows + 1] = {};  ///< narrow warmed at startup, wide captured on first use
++    std::array<bool, kContextRows - kRows> wide_uncaptured_{};  ///< allocation failure: keep using the bounded scratch without a graph
      const float* graph_taps_ = nullptr;
      int ndraft_ = kDrafts;          ///< drafts a window can use (set_max_drafts)
      int64_t have_ctx_ = 0;
+@@ -253,7 +268,7 @@ private:
+     std::deque<Lineage> stash_;                           ///< parked lineages, newest last
+     bool log_on_ = false;           ///< set by init_ring_log() once the pinned staging exists
+     uint64_t stash_budget_ = 256ull << 20;
+-    int8_t* h_logq_ = nullptr;      ///< pinned: the last update's codes [8][2560] ...
++    int8_t* h_logq_ = nullptr;      ///< pinned: the last update's codes [kContextRows][2560] ...
+     float* h_logd_ = nullptr;       ///< ... and scales [8][80], filled by the update's graph
+     int64_t pend_pos0_ = -1;        ///< positions the update in flight will leave in h_log*
+     int pend_n_ = 0;
+@@ -268,7 +283,7 @@ private:
+     bool rebuild(int64_t lo, int64_t hi, int64_t* rebuilt, int64_t* missing, std::string& err);
+     void stash_push(Lineage&& l);
+     void invalidate_ring();                    ///< a new epoch: every slot is stale, the shadow forgets them
+-    bool record_kv(int n, cudaStream_t cs, const uint8_t* xq, const float* xd, const int32_t* pos, std::string& err);
++    bool record_kv(int n, cudaStream_t cs, const uint8_t* xq, const float* xd, const int32_t* pos, std::string& err, bool signal_layer = true);
+     int64_t ring_hi_ = 0;           ///< one past the highest position written in this epoch
+     bool ctx_pending_ = false;      ///< context_async() queued rows nobody has waited for yet
+     int32_t epoch_ = 0;             ///< stamped into the ring tags: a new epoch makes every older slot invalid
 diff --git a/engine/src/core/dflash2.cpp b/engine/src/core/dflash2.cpp
-index 3652596e0f69e1c0d749d7d171093f3f1a0d89bc..021a49179cb27f8da5d673e38bf5634f57b46a29 100644
+index 3652596e0f69e1c0d749d7d171093f3f1a0d89bc..3da1c6d9586209500ae59903289c0e1967197356 100644
 --- a/engine/src/core/dflash2.cpp
 +++ b/engine/src/core/dflash2.cpp
-@@ -45,6 +45,7 @@ Dflash2Drafter::~Dflash2Drafter() {
-     if (cs_) cudaStreamSynchronize(cs_);
-     for (cudaGraphExec_t& e : exec_)
-         if (e) cudaGraphExecDestroy(e);
-+    if (wide_exec_) cudaGraphExecDestroy(wide_exec_);
-     auto fr = [](void* p) { if (p) cudaFree(p); };
-     if (h_logq_) cudaFreeHost(h_logq_);
-     if (h_logd_) cudaFreeHost(h_logd_);
-@@ -745,6 +746,7 @@ void Dflash2Drafter::set_max_drafts(int n) {
-     cudaDeviceSynchronize();
-     for (auto& e : exec_)
-         if (e) { cudaGraphExecDestroy(e); e = nullptr; }
-+    if (wide_exec_) { cudaGraphExecDestroy(wide_exec_); wide_exec_ = nullptr; }
-     graph_taps_ = nullptr;
-     ndraft_ = n;
- }
-@@ -1171,6 +1173,47 @@ bool Dflash2Drafter::draft(const float* taps, int n_new, int64_t pos0, int32_t a
-     return draft_launch(taps, n_new, pos0, anchor, err) && draft_finish(drafts, probs, err);
+@@ -310,7 +310,7 @@ bool Dflash2Drafter::alloc(std::string& err) {
+         return true;
+     };
+     const size_t B = kRows;
+-    bool ok = dev(&d_meta_, 32) && dev(&xq_, kernels::native_q8_1_bytes(N_, kRows) + 4096) && dev(&xil_, kernels::native_q8_1_il_bytes(N_, kRows) + 4096) && dev(&xqp_, (size_t) 5 * N_ * 8 + 4096) && dev(&xdp_, (size_t) 5 * N_ / 32 * 8 + 64) && dev(&xqc_, (size_t) 5 * N_ * 8 + 4096) && dev(&xdc_, (size_t) 5 * N_ / 32 * 8 + 64) && dev(&rt_ctx_, 2 * B * 128) && dev(&rope_inv_, 64) &&
++    bool ok = dev(&d_meta_, kMetaSize) && dev(&xq_, kernels::native_q8_1_bytes(N_, kRows) + 4096) && dev(&xil_, kernels::native_q8_1_il_bytes(N_, kRows) + 4096) && dev(&xqp_, (size_t) 5 * N_ * 8 + 4096) && dev(&xdp_, (size_t) 5 * N_ / 32 * 8 + 64) && dev(&xqc_, (size_t) 5 * N_ * 8 + 4096) && dev(&xdc_, (size_t) 5 * N_ / 32 * 8 + 64) && dev(&rt_ctx_, 2 * B * 128) && dev(&rope_inv_, 64) &&
+               dev(&fcy_, B * N_) && dev(&hctx_, B * N_) && dev(&kc_, B * NKV_ * HD_) && dev(&vc_, B * NKV_ * HD_) && dev(&h_, B * N_) && dev(&xn_, B * N_) &&
+               dev(&xc_, B * N_) && dev(&dyn_, B * 640) && dev(&q_, B * NH_ * HD_) && dev(&qn_, B * NH_ * HD_) && dev(&k_, B * NKV_ * HD_) && dev(&v_, B * NKV_ * HD_) &&
+               dev(&kblk_, B * NKV_ * HD_) && dev(&ao_, B * NH_ * HD_) && dev(&o_, B * N_) && dev(&gate_, B * I_) && dev(&up_, B * I_) && dev(&mlp_, B * N_) &&
+@@ -321,7 +321,7 @@ bool Dflash2Drafter::alloc(std::string& err) {
+     if (!ok) { err = "dflash2: the drafter's buffers do not fit in VRAM"; return false; }
+     void* hd = nullptr;
+     void* dd = nullptr;
+-    if (!mapped(32 * 4, (void**) &hd, &dd)) { err = "dflash2: mapped staging"; return false; }
++    if (!mapped(kMetaSize * sizeof(int32_t), (void**) &hd, &dd)) { err = "dflash2: mapped staging"; return false; }
+     h_meta_ = (int32_t*) hd;
+     m_meta_ = (int32_t*) dd;
+     if (!mapped(64 * 4, &hd, &dd)) { err = "dflash2: mapped output"; return false; }
+@@ -492,7 +492,7 @@ void Dflash2Drafter::gemm(std::initializer_list<const char*> names, std::initial
+ 
+ // The part of a context update after the activations are quantized: per layer the keys and values (projection, k-norm, rope, ring write).  Also what a ring
+ // rebuild runs over logged rows: `xq` / `xd` are then the log's codes and scales, `pos` the rows' positions (device), rt_ctx_ their rope table.
+-bool Dflash2Drafter::record_kv(int n, cudaStream_t cs, const uint8_t* xq, const float* xd, const int32_t* pos, std::string& err) {
++bool Dflash2Drafter::record_kv(int n, cudaStream_t cs, const uint8_t* xq, const float* xd, const int32_t* pos, std::string& err, bool signal_layer) {
+     using namespace kernels;
+     try {
+         for (int l = 0; l < L_; ++l) {
+@@ -502,7 +502,7 @@ bool Dflash2Drafter::record_kv(int n, cudaStream_t cs, const uint8_t* xq, const
+             stamp("gemm:kp");
+             df2_kv_ring(kc_, vc_, f32(p + "self_attn.k_norm.weight"), pos, rt_ctx_, kring_[l], vring_[l], kRing, n, NKV_, eps_, cs, tag_, d_meta_ + 18);
+             stamp("df2_kv_ring");
+-            if (fork_) cudaEventRecord(ev_ctx_[l], cs);   // layer l's keys and values are in the ring
++            if (fork_ && signal_layer) cudaEventRecord(ev_ctx_[l], cs);   // layer l's keys and values are in the ring
+         }
+     } catch (const std::exception& e) {
+         err = e.what();
+@@ -511,12 +511,13 @@ bool Dflash2Drafter::record_kv(int n, cudaStream_t cs, const uint8_t* xq, const
+     return true;
  }
  
-+bool Dflash2Drafter::draft_extended(const float* taps, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err) {
-+    if (n_new >= 1 && n_new <= kRows) return draft(taps, n_new, pos0, anchor, drafts, probs, err);
-+    if (n_new <= kRows || n_new > 16 ||
-+        !bound_ || !taps || !landing_ || taps == landing_ || launched_ || (graph_taps_ && graph_taps_ != taps)) {
-+        err = "dflash2: wide context requires stable verifier taps and 9..16 committed rows";
-+        return false;
+-bool Dflash2Drafter::record_context(const float* taps, int n, cudaStream_t cs, std::string& err, bool rope) {
++bool Dflash2Drafter::record_context(const float* taps, int n, cudaStream_t cs, std::string& err, bool rope, int row, bool signal_layer) {
+     using namespace kernels;
+     if (skip_part("ctx")) return true;
+     try {
+         const int tap_n = (int) taps_.size() * N_;
+-        if (rope) df2_rope_table_inv(d_meta_ + 0, n, rope_inv_, rt_ctx_, cs);
++        const int32_t* pos = d_meta_ + context_pos(row);
++        if (rope) df2_rope_table_inv(pos, n, rope_inv_, rt_ctx_, cs);
+         stamp("df2_rope_table");
+         df2_quant_rows(taps, tap_n, n, xqc_, xdc_, cs);
+         stamp("df2_quant_rows");
+@@ -525,10 +526,10 @@ bool Dflash2Drafter::record_context(const float* taps, int n, cudaStream_t cs, s
+         df2_rms_quant(fcy_, f32("hidden_norm.weight"), nullptr, n, N_, eps_, xqc_, xdc_, cs);
+         stamp("df2_rms_quant");
+         if (log_on_) {   // the ring log: these codes and scales are all the K/V of the five layers are made from (see begin_request)
+-            cudaMemcpyAsync(h_logq_, xqc_, (size_t) n * N_, cudaMemcpyDeviceToHost, cs);
+-            cudaMemcpyAsync(h_logd_, xdc_, (size_t) n * (N_ / 32) * 4, cudaMemcpyDeviceToHost, cs);
++            cudaMemcpyAsync(h_logq_ + (size_t) row * N_, xqc_, (size_t) n * N_, cudaMemcpyDeviceToHost, cs);
++            cudaMemcpyAsync(h_logd_ + (size_t) row * (N_ / 32), xdc_, (size_t) n * (N_ / 32) * 4, cudaMemcpyDeviceToHost, cs);
+         }
+-        if (!record_kv(n, cs, xqc_, xdc_, d_meta_ + 0, err)) return false;
++        if (!record_kv(n, cs, xqc_, xdc_, pos, err, signal_layer)) return false;
+     } catch (const std::exception& e) {
+         err = e.what();
+         return false;
+@@ -536,6 +537,24 @@ bool Dflash2Drafter::record_context(const float* taps, int n, cudaStream_t cs, s
+     return true;
+ }
+ 
++bool Dflash2Drafter::record_decode_context(const float* taps, int n, cudaStream_t cs, std::string& err, bool narrow_rope) {
++    if (n <= kRows) return record_context(taps, n, cs, err, narrow_rope);
++
++    // Match the bridge's arithmetic and keep its scratch size. The final row
++    // releases each attention layer only after all earlier rows are in its ring.
++    const size_t stride = taps_.size() * (size_t) N_;
++    for (int from = 0; from < n - 1; from += kRows) {
++        const int count = std::min(kRows, n - 1 - from);
++        if (!record_context(taps + from * stride, count, cs, err, true, from, false)) return false;
 +    }
-+    const OnDevice on_device(device_);
-+    const auto t0 = Clock::now();
-+    // Reuse the narrow context scratch. A 9..16-row lookup must not allocate the
-+    // large prompt-context batch arena. Chunking also matches ring-log rebuild GEMMs.
-+    const size_t row = taps_.size() * (size_t) N_;
-+    for (int from = 0; from < n_new - 1; from += kRows) {
-+        const int count = std::min(kRows, n_new - 1 - from);
-+        if (!context(taps + (size_t) from * row, count, pos0 + from, err)) return false;
-+    }
-+    if (cudaMemcpyAsync(landing_, taps + (size_t) (n_new - 1) * row, row * sizeof(float), cudaMemcpyDeviceToDevice, cs_) != cudaSuccess) {
-+        err = "dflash2: wide context landing copy failed";
-+        return false;
-+    }
-+    const double prefix_ms = ms_since(t0);
-+    // Keep all normal graphs bound to their original buffer. The synchronous bridge
-+    // borrows slot 1 only while using its own graph, so subsequent narrow calls replay
-+    // exactly the original graph. Restore on every return, including capture failures.
-+    struct Restore {
-+        cudaGraphExec_t &slot, &wide;
-+        const float*& taps;
-+        cudaGraphExec_t old;
-+        const float* old_taps;
-+        ~Restore() { wide = slot; slot = old; taps = old_taps; }
-+    } restore{exec_[1], wide_exec_, graph_taps_, exec_[1], graph_taps_};
-+    exec_[1] = wide_exec_;
-+    graph_taps_ = landing_;
-+    if (!draft(landing_, 1, pos0 + n_new - 1, anchor, drafts, probs, err)) return false;
-+    ms_draft += prefix_ms;
-+    ++wide_rounds;
-+    wide_rows += n_new;
-+    if (wide_rounds == 1) std::fprintf(stderr, "dflash2: wide context bridge active (%d committed rows, unchanged 8-row block)\n", n_new);
-+    return true;
++    return record_context(taps + (n - 1) * stride, 1, cs, err, true, n - 1);
 +}
 +
++void Dflash2Drafter::stage_context_positions(int n, int64_t pos0) {
++    for (int i = 0; i < std::max(kRows, n); ++i)
++        h_meta_[context_pos(i)] = (int32_t) (pos0 + std::min(i, n - 1));
++}
++
+ bool Dflash2Drafter::record_block(cudaStream_t cs, std::string& err, bool rope) {
+     using namespace kernels;
+     try {
+@@ -621,8 +640,14 @@ bool Dflash2Drafter::record_block(cudaStream_t cs, std::string& err, bool rope)
+ bool Dflash2Drafter::capture(int n, const float* taps, std::string& err) {
+     if (exec_[n]) return true;
+     if (cudaStreamBeginCapture(cs_, cudaStreamCaptureModeThreadLocal) != cudaSuccess) { err = "dflash2: begin capture"; return false; }
+-    kernels::copy_i32_from_mapped(d_meta_, m_meta_, 32, cs_);
+-    kernels::df2_rope_table_inv(d_meta_, 16, rope_inv_, rt_ctx_, cs_);   // the context rows' and the block rows' tables in one launch, before the branches split
++    const bool wide = n > kRows;
++    kernels::copy_i32_from_mapped(d_meta_, m_meta_, wide ? kMetaSize : kMetaBase, cs_);
++    if (wide) {
++        kernels::df2_rope_table_inv(d_meta_ + kRows, kRows, rope_inv_, rt_blk_, cs_);
++    } else {
++        // Narrow rounds keep the fused context + block RoPE launch.
++        kernels::df2_rope_table_inv(d_meta_, 2 * kRows, rope_inv_, rt_ctx_, cs_);
++    }
+     // the context update (fc, the keys and values) and the block's front run side by side: they meet before each layer's attention
+     // measured: -0.3 ms a round on an RTX 3060, +0.0..0.7 on a Strix Halo (gfx1151), so the HIP builds keep one stream (STRATA_DF2_FORK=1 / 0 overrides)
+ #if defined(STRATA_USE_HIP)
+@@ -636,7 +661,7 @@ bool Dflash2Drafter::capture(int n, const float* taps, std::string& err) {
+         cudaEventRecord(ev_fork_, cs_);
+         cudaStreamWaitEvent(cs2_, ev_fork_, 0);
+     }
+-    bool ok = record_context(taps, n, fork_ ? cs2_ : cs_, err, false);
++    bool ok = record_decode_context(taps, n, fork_ ? cs2_ : cs_, err, false);
+     if (fork_) cudaEventRecord(ev_join_, cs2_);
+     if (ok) ok = record_block(cs_, err, false);
+     if (fork_) cudaStreamWaitEvent(cs_, ev_join_, 0);
+@@ -644,15 +669,24 @@ bool Dflash2Drafter::capture(int n, const float* taps, std::string& err) {
+     cudaGraph_t graph = nullptr;
+     const cudaError_t ce = cudaStreamEndCapture(cs_, &graph);
+     if (!ok) { if (graph) cudaGraphDestroy(graph); return false; }
+-    if (ce != cudaSuccess || cudaGraphInstantiate(&exec_[n], graph, 0) != cudaSuccess) {
+-        if (graph) cudaGraphDestroy(graph);
+-        err = std::string("dflash2: capture: ") + cudaGetErrorString(ce);
+-        return false;
++    cudaError_t status = ce;
++    if (status == cudaSuccess) status = cudaGraphInstantiate(&exec_[n], graph, 0);
++    if (graph) cudaGraphDestroy(graph);
++    if (status == cudaSuccess) status = cudaGraphUpload(exec_[n], cs_);
++    if (status == cudaSuccess) status = cudaStreamSynchronize(cs_);
++    if (status == cudaSuccess) return true;
++    if (exec_[n]) {
++        cudaGraphExecDestroy(exec_[n]);
++        exec_[n] = nullptr;
+     }
+-    cudaGraphDestroy(graph);
+-    cudaGraphUpload(exec_[n], cs_);
+-    cudaStreamSynchronize(cs_);
+-    return true;
++    if (wide && status == cudaErrorMemoryAllocation) {
++        (void) cudaGetLastError();
++        wide_uncaptured_[n - kRows - 1] = true;
++        std::fprintf(stderr, "dflash2: wide graph allocation failed for %d rows; using the same kernels without a graph\n", n);
++        return true;
++    }
++    err = std::string("dflash2: capture: ") + cudaGetErrorString(status);
++    return false;
+ }
+ 
+ bool Dflash2Drafter::clone_alloc(const Dflash2Drafter& parent, std::string& err) {
+@@ -825,8 +859,8 @@ void Dflash2Drafter::init_ring_log() {
+     const char* off = std::getenv("STRATA_DF2_RING_LOG");
+     if (off && off[0] == '0') { log_on_ = false; return; }
+     if (const char* e = std::getenv("STRATA_DF2_LOG_MIB"); e && e[0]) stash_budget_ = (uint64_t) std::max(0, std::atoi(e)) << 20;
+-    if (h_logq_ == nullptr && cudaHostAlloc((void**) &h_logq_, (size_t) kRows * N_, cudaHostAllocDefault) != cudaSuccess) h_logq_ = nullptr;
+-    if (h_logd_ == nullptr && cudaHostAlloc((void**) &h_logd_, (size_t) kRows * (N_ / 32) * 4, cudaHostAllocDefault) != cudaSuccess) h_logd_ = nullptr;
++    if (h_logq_ == nullptr && cudaHostAlloc((void**) &h_logq_, (size_t) kContextRows * N_, cudaHostAllocDefault) != cudaSuccess) h_logq_ = nullptr;
++    if (h_logd_ == nullptr && cudaHostAlloc((void**) &h_logd_, (size_t) kContextRows * (N_ / 32) * 4, cudaHostAllocDefault) != cudaSuccess) h_logd_ = nullptr;
+     log_on_ = h_logq_ != nullptr && h_logd_ != nullptr;
+     if (!log_on_) {
+         (void) cudaGetLastError();
+@@ -1143,15 +1177,15 @@ bool Dflash2Drafter::context(const float* taps, int64_t n, int64_t pos0, std::st
+ }
+ 
+ bool Dflash2Drafter::context_async(const float* taps, int64_t n, int64_t pos0, std::string& err) {
+-    if (n < 1 || n > kRows) { err = "dflash2: context_async rows out of range"; return false; }
++    if (n < 1 || n > kContextRows) { err = "dflash2: context_async rows out of range"; return false; }
+     if (!context_wait(err)) return false;   // h_meta_ is read by the queued copy: the previous call must be done
+     const OnDevice on_device(device_);
+-    for (int i = 0; i < (int) n; ++i) h_meta_[i] = (int32_t) (pos0 + i);
++    stage_context_positions((int) n, pos0);
+     h_meta_[18] = epoch_;
+     std::atomic_thread_fence(std::memory_order_seq_cst);
+-    kernels::copy_i32_from_mapped(d_meta_, m_meta_, 32, cs_);
++    kernels::copy_i32_from_mapped(d_meta_, m_meta_, n > kRows ? kMetaSize : kMetaBase, cs_);
+     log_stage(pos0, (int) n);
+-    if (!record_context(taps, (int) n, cs_, err)) return false;
++    if (!record_decode_context(taps, (int) n, cs_, err)) return false;
+     ctx_pending_ = true;
+     have_ctx_ = std::max<int64_t>(have_ctx_, pos0 + n);
+     ring_hi_ = std::max<int64_t>(ring_hi_, pos0 + n);
+@@ -1174,18 +1208,20 @@ bool Dflash2Drafter::draft(const float* taps, int n_new, int64_t pos0, int32_t a
  bool Dflash2Drafter::draft_launch(const float* taps, int n_new, int64_t pos0, int32_t anchor, std::string& err) {
      if (!bound_) { err = "dflash2: not bound"; return false; }
      if (!context_wait(err)) return false;
+-    if (n_new < 1 || n_new > kRows) { err = "dflash2: draft rows out of range"; return false; }
++    if (n_new < 1 || n_new > kContextRows) { err = "dflash2: draft rows out of range"; return false; }
+     const OnDevice on_device(device_);
+     const Clock::time_point t0 = Clock::now();
+     if (graph_taps_ != nullptr && graph_taps_ != taps) { err = "dflash2: the taps buffer moved after capture"; return false; }
+-    if (!prof_ && !exec_[n_new]) {
++    const bool uncaptured = n_new > kRows && wide_uncaptured_[n_new - kRows - 1];
++    if (!prof_ && !exec_[n_new] && !uncaptured) {
+         // the staging must hold valid positions while the capture runs the (empty) kernels' parameter checks
+-        for (int i = 0; i < 8; ++i) h_meta_[i] = (int32_t) (pos0 + i);
++        stage_context_positions(n_new, pos0);
+         if (!capture(n_new, taps, err)) return false;
+         graph_taps_ = taps;
+     }
+     const int64_t s = pos0 + n_new;
+-    for (int i = 0; i < 8; ++i) { h_meta_[i] = (int32_t) (pos0 + std::min(i, n_new - 1)); h_meta_[8 + i] = (int32_t) (s + i); }
++    stage_context_positions(n_new, pos0);
++    for (int i = 0; i < kRows; ++i) h_meta_[kRows + i] = (int32_t) (s + i);
+     h_meta_[16] = anchor;
+     h_meta_[18] = epoch_;
+     h_meta_[17] = (int32_t) s;
+@@ -1195,17 +1231,21 @@ bool Dflash2Drafter::draft_launch(const float* taps, int n_new, int64_t pos0, in
+     std::atomic_thread_fence(std::memory_order_seq_cst);
+     log_stage(pos0, n_new);
+     if (timing_) cudaEventRecord(ev_a_, cs_);
+-    if (prof_) {   // the same round without its graph, an event after every stage
+-        cudaStreamSynchronize(cs_);
+-        for (cudaEvent_t e : prof_->ev) cudaEventDestroy(e);   // the stamps of context() calls are not a round
+-        prof_->ev.clear();
+-        prof_->name.clear();
+-        kernels::copy_i32_from_mapped(d_meta_, m_meta_, 32, cs_);
++    if (exec_[n_new]) {
++        const cudaError_t status = cudaGraphLaunch(exec_[n_new], cs_);
++        if (status != cudaSuccess) { err = std::string("dflash2 draft: ") + cudaGetErrorString(status); return false; }
++    } else {
++        if (prof_) {
++            cudaStreamSynchronize(cs_);
++            for (cudaEvent_t e : prof_->ev) cudaEventDestroy(e);   // the stamps of context() calls are not a round
++            prof_->ev.clear();
++            prof_->name.clear();
++        }
++        kernels::copy_i32_from_mapped(d_meta_, m_meta_, n_new > kRows ? kMetaSize : kMetaBase, cs_);
+         stamp("start");
+-        if (!record_context(taps, n_new, cs_, err) || !record_block(cs_, err)) return false;
+-        prof_collect();
+-    } else
+-    if (cudaGraphLaunch(exec_[n_new], cs_) != cudaSuccess) { err = std::string("dflash2 draft: ") + cudaGetErrorString(cudaGetLastError()); return false; }
++        if (!record_decode_context(taps, n_new, cs_, err) || !record_block(cs_, err)) return false;
++        if (prof_) prof_collect();
++    }
+     if (timing_) cudaEventRecord(ev_b_, cs_);
+     (void) cudaStreamQuery(cs_);
+     launch_t0_ = t0;
+@@ -1237,6 +1277,11 @@ bool Dflash2Drafter::draft_finish(int32_t* drafts, float* probs, std::string& er
+     ring_hi_ = std::max<int64_t>(ring_hi_, pos0 + n_new);
+     ms_draft += ms_since(t0);
+     ++rounds;
++    if (n_new > kRows) {
++        ++wide_rounds;
++        wide_rows += n_new;
++        if (wide_rounds == 1) std::fprintf(stderr, "dflash2: fused wide context active (%d committed rows, unchanged 8-row block)\n", n_new);
++    }
+     return true;
+ }
+ 
 diff --git a/engine/src/core/dflash2_wide_test.cpp b/engine/src/core/dflash2_wide_test.cpp
 new file mode 100644
-index 0000000000000000000000000000000000000000..018a7f35db8f26ebad9fac7cc2ec623079c8172d
+index 0000000000000000000000000000000000000000..9e3b179aa1a5a14ff5ca23cf8afb8309c6af6da9
 --- /dev/null
 +++ b/engine/src/core/dflash2_wide_test.cpp
-@@ -0,0 +1,65 @@
-+// Real Q4 drafter: wide bridge versus explicit context + unchanged one-row draft.
+@@ -0,0 +1,110 @@
++// Real Q4 drafter: fused wide graph versus explicit context + unchanged one-row draft.
 +#include "strata/core/dflash2.hpp"
 +#include <cuda_runtime.h>
 +#include <algorithm>
++#include <chrono>
 +#include <cmath>
 +#include <cstdio>
 +#include <cstdlib>
@@ -155,15 +407,21 @@ index 0000000000000000000000000000000000000000..018a7f35db8f26ebad9fac7cc2ec6230
 +  auto equal=[&](){std::vector<float>a,b;std::vector<int64_t>ta,tb;ck(ref.debug_ring(a,ta,err),err);ck(wide.debug_ring(b,tb,err),err);ck(a.size()==b.size()&&memcmp(a.data(),b.data(),a.size()*4)==0&&ta==tb,"ring or epoch tags differ");};
 +  int32_t a[7],b[7];float pa[7],pb[7];
 +  // Invalid calls must reject before modifying the context ring.
-+  for(int invalid:{0,17,-1}) { ck(!wide.draft_extended(tap,invalid,pos,4,b,pb,err),"invalid width accepted"); }
++  for(int invalid:{0,17,-1}) { ck(!wide.draft(tap,invalid,pos,4,b,pb,err),"invalid width accepted"); }
 +  equal();
-+  for(int rows:{9,1,12,4,16,8,9,12,16}) {
++  auto bridge = [&](int rows, int64_t position) {
++   for(int from = 0; from < rows - 1; from += 8)
++    ck(ref.context(tap + from * T, std::min(8, rows - 1 - from), position + from, err), err);
++   cu(cudaMemcpyAsync(last, tap + (rows - 1) * T, T * 4, cudaMemcpyDeviceToDevice, ref.stream()));
++   ck(ref.draft(last, 1, position + rows - 1, 4, a, pa, err), err);
++  };
++  for(int rows:{9,1,10,11,12,4,16,13,14,8,15,9,12,16}) {
 +   std::vector<float> ht(rows*T);for(size_t i=0;i<ht.size();++i){rs=rs*1664525+1013904223;ht[i]=(int(rs>>16)-32768)/32768.f;}
 +   cu(cudaMemcpy(tap,ht.data(),ht.size()*4,cudaMemcpyHostToDevice));
 +   cu(cudaDeviceSynchronize()); // pageable H2D must complete before either nonblocking stream reads taps
-+   if(rows>8){for(int from=0;from<rows-1;from+=8)ck(ref.context(tap+from*T,std::min(8,rows-1-from),pos+from,err),err);cu(cudaMemcpyAsync(last,tap+(rows-1)*T,T*4,cudaMemcpyDeviceToDevice,ref.stream()));ck(ref.draft(last,1,pos+rows-1,4,a,pa,err),err);}
++   if(rows>8) bridge(rows, pos);
 +   else {cu(cudaMemcpyAsync(last,tap,rows*T*4,cudaMemcpyDeviceToDevice,ref.stream()));ck(ref.draft(last,rows,pos,4,a,pa,err),err);}
-+   ck(wide.draft_extended(tap,rows,pos,4,b,pb,err),err);
++   ck(wide.draft(tap,rows,pos,4,b,pb,err),err);
 +   bool same=memcmp(a,b,sizeof(a))==0&&memcmp(pa,pb,sizeof(pa))==0;
 +   if(!same)for(int j=0;j<7;++j)std::fprintf(stderr,"rows=%d pick %d ref=%d %.9g wide=%d %.9g\n",rows,j,a[j],pa[j],b[j],pb[j]);
 +   equal();ck(same,"draft tokens or probabilities differ");
@@ -175,18 +433,56 @@ index 0000000000000000000000000000000000000000..018a7f35db8f26ebad9fac7cc2ec6230
 +   std::vector<int32_t> ids(rows);for(int i=0;i<rows;++i)ids[i]=int(pos+i)%V;
 +   ref.note_rows(ids.data(),rows,pos);wide.note_rows(ids.data(),rows,pos);
 +   std::printf("rows=%d pos=%lld tokens/probabilities/ring/tags bitwise equal\n",rows,(long long)pos);pos+=rows;
-+   // Changing spec invalidates both the normal and landing graph caches.
-+   if(rows==16){ref.set_max_drafts(3);wide.set_max_drafts(3);ck(ref.prepare(last,err),err);ck(wide.prepare(tap,err),err);}
++   // Changing spec invalidates the narrow and wide graph variants.
++   if(rows==16 && wide.wide_rounds == 5){ref.set_max_drafts(3);wide.set_max_drafts(3);ck(ref.prepare(last,err),err);ck(wide.prepare(tap,err),err);}
 +  }
-+  ck(wide.wide_rounds==6&&wide.wide_rows==74,"wide counters differ");
-+  ck(initial==wide.vram_bytes(),"bridge allocated model or scratch VRAM");
-+  std::printf("dflash2_wide_test: PASS (6 wide + 3 narrow, ring wrap, graph invalidation, no extra arena)\n");
++  ck(wide.wide_rounds == 11 && wide.wide_rows == 137,"wide counters differ");
++  // The lookup-only and idle-auto paths update exactly the same context without drafting.
++  for(int rows : {9, 16}) {
++   ck(wide.context_async(tap, rows, pos, err), err);
++   for(int from = 0; from < rows - 1; from += 8)
++    ck(ref.context(tap + from * T, std::min(8, rows - 1 - from), pos + from, err), err);
++   ck(ref.context(tap + (rows - 1) * T, 1, pos + rows - 1, err), err);
++   ck(wide.context_wait(err), err);
++   equal();
++   pos += rows;
++  }
++  ck(initial == wide.vram_bytes(), "wide path allocated extra model or scratch VRAM");
++
++  // Warm same-width graph on both branches. Each pair uses the same rows and anchor.
++  using Clock = std::chrono::steady_clock;
++  auto elapsed = [](auto start) {
++   return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
++  };
++  std::vector<double> bridge_ms, fused_ms;
++  for(int i = 0; i < 25; ++i) {
++   auto measure_bridge = [&] {
++    const auto start = Clock::now();
++    bridge(16, pos);
++    if(i) bridge_ms.push_back(elapsed(start));
++   };
++   auto measure_fused = [&] {
++    const auto start = Clock::now();
++    ck(wide.draft(tap, 16, pos, 4, b, pb, err), err);
++    if(i) fused_ms.push_back(elapsed(start));
++   };
++   if(i % 2 == 0) { measure_bridge(); measure_fused(); }
++   else { measure_fused(); measure_bridge(); }
++   ck(memcmp(a, b, sizeof(a)) == 0 && memcmp(pa, pb, sizeof(pa)) == 0, "timed round differs");
++   pos += 16;
++  }
++  equal();
++  std::sort(bridge_ms.begin(), bridge_ms.end());
++  std::sort(fused_ms.begin(), fused_ms.end());
++  std::printf("DFlash2 16-row ms/round: bridge p50=%.3f p95=%.3f, fused p50=%.3f p95=%.3f (24 pairs)\n",
++              bridge_ms[11], bridge_ms[22], fused_ms[11], fused_ms[22]);
++  std::printf("dflash2_wide_test: PASS (all widths 9..16 and 3 narrow, async context, ring wrap, graph invalidation)\n");
 +  // Drafters die before their bound buffers are released by CUDA process teardown.
 +  return 0;
 + }catch(const std::exception&e){std::fprintf(stderr,"FAIL: %s\n",e.what());return 1;}
 +}
 diff --git a/engine/src/program/generate.cpp b/engine/src/program/generate.cpp
-index d78bd71ce69187dbdb777530a97045740dfa3331..12bcdb0d6d069a57d7c60c9fb63f5409adada109 100644
+index d78bd71ce69187dbdb777530a97045740dfa3331..7974e61e745177f85c3e33b0e647e1e8a30527f4 100644
 --- a/engine/src/program/generate.cpp
 +++ b/engine/src/program/generate.cpp
 @@ -13668,6 +13668,10 @@ int main(int argc, char** argv) {
@@ -200,16 +496,27 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..12bcdb0d6d069a57d7c60c9fb63f5409
              if (!ver.gather_taps(df2.landing(), df2.device(), 0, rows, 0, df2.stream(), e)) return nullptr;
              return df2.landing();
          };
-@@ -23244,7 +23248,7 @@ int main(int argc, char** argv) {
-                 int32_t dd[strata::core::Dflash2Drafter::kDrafts];
-                 float pp[strata::core::Dflash2Drafter::kDrafts];
-                 const float* tp = df2_win_taps(a_ + 1, err);
--                if (tp == nullptr || !df2.draft(tp, a_ + 1, p, outv[(size_t) a_], dd, pp, err)) return false;
-+                if (tp == nullptr || !df2.draft_extended(tp, a_ + 1, p, outv[(size_t) a_], dd, pp, err)) return false;
-                 for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
-                 if (ss.ple.ready() && ss.ple.table != nullptr) {   // the PLE rows of the next window's tokens, read ahead (as the MTP's draft does)
-                     int n_pf = 0;
-@@ -23282,13 +23286,15 @@ int main(int argc, char** argv) {
+@@ -22249,7 +22253,7 @@ int main(int argc, char** argv) {
+             std::vector<int32_t> drafts(DS, 0), window(WS), outv(WS);
+             std::vector<float> dprob(DS, 0.0f);
+             std::array<float, 8> dwin_s{};   // the probabilities the current window was chosen from (STRATA_SPEC_COST)
+-            // STRATA_SPEC_TRACE=<file> in serve (bench only, off by default): per round "R p T a sfx ms k match | probs | drafts | lookup draft | committed tokens"
++            // STRATA_SPEC_TRACE=<file> in serve (bench only, off by default): per round "R p T a sfx ms k match df2_defer | probs | drafts | lookup draft | committed tokens"
+             static std::FILE* const df2_trace = [] { const char* tf = std::getenv("STRATA_SPEC_TRACE"); return tf != nullptr && tf[0] != '\0' ? std::fopen(tf, "a") : nullptr; }();
+             static const bool trace_nopick = std::getenv("STRATA_SPEC_TRACE_NOPICK") != nullptr;   // the lookup draft is logged but never taken
+             std::array<int32_t, 8> tr_d{};
+@@ -23274,21 +23278,26 @@ int main(int argc, char** argv) {
+                 bool from_sfx = false;
+                 int sfx_pad = 0;      // a learning stretch's lookup window longer than the proposal: the filler rows (DraftPolicy::Pick::pad)
+                 int sfx_match = 0;
+-                bool dfr_lookup = false;
++                bool dfr_lookup = false, dfr_fallback = false;
+                 int dfr_T = 0, dfr_match = 0;
++                Clock::time_point round0;
+ #if defined(STRATA_HAVE_DFLASH2)
+                 if (df2_deferred) {   // the draft skipped for a long lookup match: the lookup if the policy takes it, else the draft now (same taps and rows)
++                    round0 = Clock::now();   // include deferred context/draft work in the next window's measured cost
+                     df2_deferred = false;
                      const int kd = sfx.propose(S_look - 1, sbuf.data());
                      const int md = sfx.last_match();
                      const strata::spec::DraftPolicy::Pick pk = kd > 0 ? policy.choose(S_mtp, kd, md) : strata::spec::DraftPolicy::Pick{};
@@ -218,33 +525,46 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..12bcdb0d6d069a57d7c60c9fb63f5409
                      if (kd > 0 && pk.lookup) {
                          dfr_lookup = true; dfr_T = pk.t; dfr_match = md;
 -                        if (!df2.context(ver.tap_dev(), dfr_n, dfr_pos, err)) { std::printf("ERR %s\n", err.c_str()); return 1; }
-+                        if (!df2.context(tp, dfr_n, dfr_pos, err)) { std::printf("ERR %s\n", err.c_str()); return 1; }
++                        if (!df2.context_async(tp, dfr_n, dfr_pos, err) || !df2.context_wait(err)) { std::printf("ERR %s\n", err.c_str()); return 1; }
                      } else {
++                        dfr_fallback = true;
                          int32_t dd[strata::core::Dflash2Drafter::kDrafts];
                          float pp[strata::core::Dflash2Drafter::kDrafts];
 -                        if (!df2.draft(ver.tap_dev(), dfr_n, dfr_pos, dfr_anchor, dd, pp, err)) { std::printf("ERR %s\n", err.c_str()); return 1; }
-+                        if (!df2.draft_extended(tp, dfr_n, dfr_pos, dfr_anchor, dd, pp, err)) { std::printf("ERR %s\n", err.c_str()); return 1; }
++                        if (!df2.draft(tp, dfr_n, dfr_pos, dfr_anchor, dd, pp, err)) { std::printf("ERR %s\n", err.c_str()); return 1; }
                          for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
                      }
                  }
-@@ -25613,7 +25619,7 @@ int main(int argc, char** argv) {
-                 if (wait_commit_first && !ver.wait_commit(err)) return false;
-                 int32_t dd[strata::core::Dflash2Drafter::kDrafts];
-                 float pp[strata::core::Dflash2Drafter::kDrafts];
--                if (!df2.draft(ver.tap_dev(), a_ + 1, p, outv[(size_t) a_], dd, pp, err)) return false;
-+                if (!df2.draft_extended(ver.tap_dev(), a_ + 1, p, outv[(size_t) a_], dd, pp, err)) return false;
-                 for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
-                 // what the MTP does while it drafts: the PLE rows of the tokens the next window will hold are read ahead
-                 // (the window's gather would otherwise wait for them: 1.8 ms a round on strix)
-@@ -25660,7 +25666,7 @@ int main(int argc, char** argv) {
+@@ -23402,7 +23411,7 @@ int main(int argc, char** argv) {
+                 const int T_mtp = T;
+                 T += chain_n;
+                 const bool timed_round = !first_window;
+-                const Clock::time_point round0 = Clock::now();
++                if (round0 == Clock::time_point{}) round0 = Clock::now();
+                 if (p + T > o.max_context) break;
+                 window[0] = x;
+                 for (int i = 1; i < T_mtp; ++i)
+@@ -23806,8 +23815,9 @@ int main(int argc, char** argv) {
+                     source_policy.defer_cost(std::max<int64_t>(p + T - 1, p + a + 1 + S_mtp), T,
+                                              std::chrono::duration<double, std::milli>(Clock::now() - round0).count());
+                 if (df2_trace != nullptr && timed_round) {
+-                    std::fprintf(df2_trace, "R %lld %d %d %d %.3f %d %d |", (long long) p, T, a, from_sfx ? 1 : 0,
+-                                 std::chrono::duration<double, std::milli>(Clock::now() - round0).count(), tr_k, tr_match);
++                    std::fprintf(df2_trace, "R %lld %d %d %d %.3f %d %d %d |", (long long) p, T, a, from_sfx ? 1 : 0,
++                                 std::chrono::duration<double, std::milli>(Clock::now() - round0).count(), tr_k, tr_match,
++                                 dfr_lookup ? 1 : (dfr_fallback ? 2 : 0));
+                     for (int i = 0; i < 7; ++i) std::fprintf(df2_trace, " %.4f", (double) dwin_s[(size_t) i]);
+                     std::fprintf(df2_trace, " |");
+                     for (int i = 0; i < 7; ++i) std::fprintf(df2_trace, " %d", (int) tr_d[(size_t) i]);
+@@ -25656,7 +25666,7 @@ int main(int argc, char** argv) {
+                 const strata::spec::DraftPolicy::Pick pk = kd > 0 ? policy.choose(S_mtp, kd, md) : strata::spec::DraftPolicy::Pick{};
+                 if (kd > 0 && pk.lookup) {
+                     dfr_lookup = true; dfr_T = pk.t; dfr_match = md;
+-                    if (!df2.context(ver.tap_dev(), dfr_n, dfr_pos, err)) { std::fprintf(stderr, "strata generate: %s\n", err.c_str()); return 1; }
++                    if (!df2.context_async(ver.tap_dev(), dfr_n, dfr_pos, err) || !df2.context_wait(err)) { std::fprintf(stderr, "strata generate: %s\n", err.c_str()); return 1; }
                  } else {
                      int32_t dd[strata::core::Dflash2Drafter::kDrafts];
                      float pp[strata::core::Dflash2Drafter::kDrafts];
--                    if (!df2.draft(ver.tap_dev(), dfr_n, dfr_pos, dfr_anchor, dd, pp, err)) { std::fprintf(stderr, "strata generate: %s\n", err.c_str()); return 1; }
-+                    if (!df2.draft_extended(ver.tap_dev(), dfr_n, dfr_pos, dfr_anchor, dd, pp, err)) { std::fprintf(stderr, "strata generate: %s\n", err.c_str()); return 1; }
-                     for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
-                 }
-             }
 diff --git a/terminal/l2/reference_controller.py b/terminal/l2/reference_controller.py
 index 6d585f2fa697e1683fa2a44bacd8be0579b2306c..1da4d4700410015fcad0e61afa38586cdd605171 100644
 --- a/terminal/l2/reference_controller.py
@@ -263,7 +583,7 @@ index 6d585f2fa697e1683fa2a44bacd8be0579b2306c..1da4d4700410015fcad0e61afa38586c
   idx[name]={'family':fp,'hashes':hs,'filename':name,'updated':time.time()}
   # Saves are synchronous in managed_server, so deleting old archives cannot race a writer.
 diff --git a/terminal/l2/startup_ablation.py b/terminal/l2/startup_ablation.py
-index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..e74b59516519238d84ec6023618f47a45b7b6b2b 100644
+index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..41011b238058d9c32fd71f395e53c66be97d96e1 100644
 --- a/terminal/l2/startup_ablation.py
 +++ b/terminal/l2/startup_ablation.py
 @@ -11,6 +11,7 @@ import sys
@@ -274,11 +594,42 @@ index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..e74b59516519238d84ec6023618f47a4
  import urllib.request
  from pathlib import Path
  
-@@ -126,12 +127,38 @@ def attach_window_latency(trace, cases, result):
+@@ -97,12 +98,14 @@ def attach_window_latency(trace, cases, result):
+     with trace.open('rb') as f:
+         for line in f:
+             if line.startswith(b'# request '):
+-                requests.append((int(line.split()[3]), {}))
++                requests.append((int(line.split()[3]), {}, []))
+             elif requests and line.startswith(b'R '):
+                 fields = line.split(b'|', 1)[0].split()
+                 if len(fields) < 6:
+                     continue
+                 _, _, width, accepted, lookup, ms, *_ = fields
++                if len(fields) >= 9:
++                    requests[-1][2].append(int(fields[8]))
+                 key = ('suffix' if lookup == b'1' else 'neural', int(width))
+                 requests[-1][1].setdefault(key, []).append((float(ms), int(accepted)))
+ 
+@@ -110,7 +113,7 @@ def attach_window_latency(trace, cases, result):
+     # trace from an unexpected retry to another case.
+     if len(requests) != len(cases):
+         return
+-    for name, (prompt_n, sample) in zip(cases, requests):
++    for name, (prompt_n, sample, deferrals) in zip(cases, requests):
+         row = result[name]
+         if row['timings'].get('prompt_n') != prompt_n:
+             continue
+@@ -124,14 +127,45 @@ def attach_window_latency(trace, cases, result):
+                 **{f'p{p}_ms': times[math.ceil(n * p / 100) - 1] for p in (50, 95, 99)},
+             }
          row['window_latency_ms_by_source_width'] = summary
++        if deferrals:
++            row['dflash2_deferred_windows'] = {
++                'lookup_only': deferrals.count(1),
++                'neural_fallback': deferrals.count(2),
++            }
++
  
- 
--def serve_trial(root, trial, folder, end, result, *, workloads=None):
 +def probe_archive(opener, endpoint, timeout):
 +    body = json.dumps({'filename': 'signal2-probe.bin', 'wait_for_ram': False}).encode()
 +    request = urllib.request.Request(endpoint + '/slots/0?action=saveinc', data=body,
@@ -299,7 +650,8 @@ index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..e74b59516519238d84ec6023618f47a4
 +            'error_kind': error.get('kind'),
 +            'save_required_mib': [int(value) for value in re.findall(
 +                r'(\d+) MiB', error.get('message', ''))] if error.get('kind') == 'memory' else []}
-+
+ 
+-def serve_trial(root, trial, folder, end, result, *, workloads=None):
 +
 +def serve_trial(root, trial, folder, end, result, *, workloads=None, archive_probe=False):
      profile = folder / 'profile.json'
@@ -314,7 +666,7 @@ index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..e74b59516519238d84ec6023618f47a4
      profile.write_text(json.dumps(trial))
      ready = folder / 'ready.json'
      log = Path(trial['log'])
-@@ -246,6 +273,10 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
+@@ -246,6 +280,10 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
                      # Do not discard other cases, or compare short decodes as long ones.
              if result.get('limit_hit'):
                  raise RuntimeError('trial reached its time or memory guard')
@@ -325,7 +677,7 @@ index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..e74b59516519238d84ec6023618f47a4
              if not workloads and (row['expert_file_reads'] != 0 or row['timings']['predicted_n'] < OUTPUT_TOKENS * 0.75):
                  raise RuntimeError('timed output was too short or zero expert file reads could not be confirmed')
              result['status'] = 'measured'
-@@ -253,6 +284,14 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
+@@ -253,6 +291,14 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
              stop.set()
              watcher.join(timeout=1)
              stop_trial(proc)
@@ -341,7 +693,7 @@ index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..e74b59516519238d84ec6023618f47a4
                  try:
                      attach_window_latency(trace, finished_cases, result)
 diff --git a/terminal/l2/startup_patch_review.py b/terminal/l2/startup_patch_review.py
-index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..d911b94f334fa8f68a9f3035eebc9890cb27152a 100644
+index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..959dc6ec5dd704eaea14eedd6b1bba6956793c25 100644
 --- a/terminal/l2/startup_patch_review.py
 +++ b/terminal/l2/startup_patch_review.py
 @@ -5,6 +5,7 @@ import hashlib
@@ -352,13 +704,15 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..d911b94f334fa8f68a9f3035eebc9890
  import tempfile
  import time
  import zlib
-@@ -22,12 +23,16 @@ def arm(name, env=None, args=None):
+@@ -22,12 +23,19 @@ def arm(name, env=None, args=None):
  
  
  GROUPS = (
 -    ('upstream-ampere-q8', (
 -        arm('upstream-q80-single-row-off', {'STRATA_Q80_ROWS1': '0'}),
--    )),
++    ('dflash2-lookup', (
++        arm('dflash2-lookup-skip-8', {'STRATA_DF2_LOOKUP_SKIP': '8'}),
+     )),
      ('upstream-cache-adaptation', (
          arm('upstream-mid-coverage-adaptation-off', {'STRATA_ADAPT_MID': '0'}),
      )),
@@ -372,7 +726,22 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..d911b94f334fa8f68a9f3035eebc9890
  )
  
  
-@@ -130,7 +135,9 @@ def run_group(root, cfg, directory, seed, references, report, group, variants, w
+@@ -47,6 +55,14 @@ COLD = ('cold_long', [{'role': 'system', 'content': LONG_SYSTEM},
+ HOT = ('hot_prefix', [{'role': 'system', 'content': LONG_SYSTEM},
+                        {'role': 'user', 'content': 'Write 40 detailed test plans for aborted transactions. Keep going.'}], 384)
+ WORKLOADS = (WARMUP, DECODE, COLD, HOT)
++LOOKUP_REWRITE = (
++    'lookup_rewrite',
++    'Copy the following test configuration verbatim. Output only the 64 lines.\n\n' + '\n'.join(
++        f'partition_{i:02d} = ["zone-{(i * 19) % 97}", {100_000 + i * 1697}, {(i * 23) % 262}]'
++        for i in range(64)
++    ),
++    1280,
++)
+ CPU_PREFILL_GROUPS = {'prompt-cpu-and-batch', 'prompt-cpu-share-variants'}
+ CPU_PREFILL_CASES = tuple(
+     (name, '\\n'.join(RECORDS.splitlines()[start:start + count])
+@@ -130,7 +146,9 @@ def run_group(root, cfg, directory, seed, references, report, group, variants, w
                      if reference.get('root'):
                          trial_root = Path(reference['root'])
                          trial['cwd'] = str(trial_root)
@@ -383,7 +752,7 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..d911b94f334fa8f68a9f3035eebc9890
                  text = row.get('decode') or row.get('post_vision_decode', {})
                  cold, hot = row.get('cold_long'), row.get('hot_prefix')
                  if 'image_cold' in row and 'image_cached' in row:
-@@ -171,12 +178,24 @@ def run_suite(root, cfg, directory, settings):
+@@ -171,12 +189,27 @@ def run_suite(root, cfg, directory, settings):
          results.mkdir(exist_ok=True, mode=0o700)
          baseline_args = cfg['args']
          seed_path = Path(baseline_args[baseline_args.index('--expert-profile') + 1])
@@ -395,6 +764,7 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..d911b94f334fa8f68a9f3035eebc9890
          if requested is not None and len(groups) != len(requested):
              raise ValueError('Unknown or duplicate Strata patch-review group')
 +        manifest = directory / 'trial-engine.json'
++        candidate = {}
 +        if manifest.is_file():
 +            candidate = json.loads(manifest.read_text())
 +            if digest_file(candidate['exe']) != candidate['sha256']:
@@ -406,25 +776,35 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..d911b94f334fa8f68a9f3035eebc9890
 +                references[name] = candidate
 +        else:
 +            groups = tuple(group for group in groups if group[0] != 'archive-memory')
++        if not candidate.get('df2_lookup_skip_trial'):
++            groups = tuple(group for group in groups if group[0] != 'dflash2-lookup')
          if not (cfg.get('vision') or {}).get('gpu'):
              groups = tuple(g for g in groups if g[0] != 'vision-lease')
          if settings.get('lean_candidate'):
-@@ -202,7 +221,7 @@ def run_suite(root, cfg, directory, settings):
+@@ -201,13 +234,14 @@ def run_suite(root, cfg, directory, settings):
+             raise ValueError('patch review needs a positive timeout per arm')
          series = settings.get('series', 1)
          final_baseline = settings.get('final_baseline', True)
++        df2_cases = WORKLOADS + ((LOOKUP_REWRITE,) if any(name == 'dflash2-lookup' for name, _ in groups) else ())
          fingerprint = hashlib.sha256(json.dumps({
 -            'suite': report['suite'], 'engine': engine_sha,
 +            'suite': report['suite'], 'engine': engine_sha, 'production_engine': production_sha,
              'references': {name: item['sha256'] for name, item in references.items()}, 'groups': groups,
              'include_vision': bool(settings.get('include_vision')),
              'args': baseline_args, 'env': cfg['env'], 'series': series,
-@@ -225,11 +244,22 @@ def run_suite(root, cfg, directory, settings):
+             'passes': passes, 'final_baseline': final_baseline, 'arm_timeout_s': arm_timeout,
+-            'workloads': (WORKLOADS, CPU_PREFILL_CASES, vision_cases),
++            'workloads': (df2_cases, CPU_PREFILL_CASES, vision_cases),
+         }, sort_keys=True).encode()).hexdigest()
+         try:
+             state = json.loads(progress.read_text())
+@@ -225,11 +259,25 @@ def run_suite(root, cfg, directory, settings):
              name == 'vision-lease' for name, _ in groups) else ()
          # Run vision in the same place for its candidate and both baseline starts.
          cpu_cases = WORKLOADS + CPU_PREFILL_CASES
 -        baseline_cases = cpu_cases + vision_suffix
 -        report.update(series=series, engine_sha256=engine_sha, batches=len(plan), arms=arms,
-+        baseline_cases = WORKLOADS if manifest.is_file() else cpu_cases + vision_suffix
++        baseline_cases = df2_cases if manifest.is_file() else cpu_cases + vision_suffix
 +        report.update(series=series, engine_sha256=engine_sha, production_engine_sha256=production_sha,
 +                      batches=len(plan), arms=arms,
                        arm_timeout_s=arm_timeout)
@@ -432,17 +812,32 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..d911b94f334fa8f68a9f3035eebc9890
          started = time.monotonic()
 +        if manifest.is_file() and candidate.get('wide_test'):
 +            check = subprocess.run([candidate['wide_test'], candidate['draft_pack']],
-+                                   capture_output=True, text=True, timeout=45)
++                                   capture_output=True, text=True, timeout=45,
++                                   env={**os.environ, **cfg['env']})
++            check_lines = check.stdout.strip().splitlines()
 +            report['dflash2_wide_check'] = {
 +                'exit_code': check.returncode,
-+                'result': (check.stdout.strip().splitlines()[-1] if check.returncode == 0 and check.stdout.strip()
++                'result': (check_lines[-1] if check.returncode == 0 and check_lines
 +                           else check.stderr.strip()[-512:]),
++                'wide_round_timing': next((line for line in check_lines if line.startswith('DFlash2 16-row ')), None),
 +            }
 +            if check.returncode:
 +                raise RuntimeError('The DFlash2 wide-window candidate failed its parity check')
          print(f'Strata 开机补丁对照：本次串行跑完 {len(plan)} 组、{arms} 次引擎启动，再开放正式 API。', flush=True)
          with tempfile.TemporaryDirectory(prefix='patch-review-seed-', dir=directory) as tmp:
              seed = Path(tmp) / 'expert-profile.bin'
+@@ -252,7 +300,10 @@ def run_suite(root, cfg, directory, settings):
+                 report['pass_number'] = pass_no
+                 workloads = WORKLOADS
+                 timeout = arm_timeout
+-                if group == 'vision-lease':
++                if group == 'dflash2-lookup':
++                    workloads = df2_cases
++                    timeout += 30
++                elif group == 'vision-lease':
+                     workloads = baseline_cases
+                     timeout += 80
+                 elif group in CPU_PREFILL_GROUPS:
 diff --git a/terminal/serve/server.py b/terminal/serve/server.py
 index 63778d5d4908c0573f9511e9a7b471a76a8a8df4..76fa65b7f3a1f07eab554cd7d9f31288f636e95d 100644
 --- a/terminal/serve/server.py
