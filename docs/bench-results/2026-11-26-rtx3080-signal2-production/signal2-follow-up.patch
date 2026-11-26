@@ -1,3 +1,16 @@
+diff --git a/engine/CMakeLists.txt b/engine/CMakeLists.txt
+index c651f5d027b4955e33f564d3d667b8a82e51c011..af6d493462025348375c4e05998dd0af5a82aadc 100644
+--- a/engine/CMakeLists.txt
++++ b/engine/CMakeLists.txt
+@@ -212,6 +212,8 @@ if(STRATA_BUILD_CONVERSATION_TESTS)
+   target_compile_features(conversation_spill_test PRIVATE cxx_std_17)
+   target_link_libraries(conversation_spill_test PRIVATE Threads::Threads)   # (P2 step 2c: the background writer)
+   add_test(NAME conversation_spill_test COMMAND conversation_spill_test)
++  add_test(NAME conversation_spill_v3_test COMMAND conversation_spill_test)
++  set_tests_properties(conversation_spill_v3_test PROPERTIES ENVIRONMENT "STRATA_SESSION_V2=1;STRATA_SESSION_V3=1")
+   # #6052: the periodic conversation checkpoints (--prompt-cache-every) on the resumed request's grid (header-only)
+   add_executable(prompt_checkpoint_grid_test src/core/prompt_checkpoint_grid_test.cpp)
+   target_include_directories(prompt_checkpoint_grid_test PRIVATE include)
 diff --git a/engine/cmake/strata_gpu_engine.cmake b/engine/cmake/strata_gpu_engine.cmake
 index 1d77e66f12e5afe06e38d7035671c2e4350df81a..d177c794b2312582d6ebf61953141e14f1274df3 100644
 --- a/engine/cmake/strata_gpu_engine.cmake
@@ -15,6 +28,24 @@ index 1d77e66f12e5afe06e38d7035671c2e4350df81a..d177c794b2312582d6ebf61953141e14
    # Tells tests/CMakeLists.txt to add the CUDA-dependent Catch2 target.  It cannot be declared there
    # unconditionally: tests/ is added at the end of this file, but the flag has to be known before it runs.
    if(STRATA_ENABLE_CUDA)
+diff --git a/engine/include/strata/core/conversation_buffer.hpp b/engine/include/strata/core/conversation_buffer.hpp
+index 5e7665412198f6144288584ace088efe6011b103..2390e28abe816d851e88868461409f35bc78381c 100644
+--- a/engine/include/strata/core/conversation_buffer.hpp
++++ b/engine/include/strata/core/conversation_buffer.hpp
+@@ -105,8 +105,12 @@ private:
+                 if (fd >= 0) ::unlink(path_tmp);   // unnamed from here on; gone when the mapping closes
+             }
+             if (fd < 0) return nullptr;
+-            if (::ftruncate(fd, (off_t) total) != 0) {   // a hole: fresh pages read as zeros, no disk traffic
++            // Reserve disk blocks before mapping. ftruncate alone leaves a hole; a later
++            // write fault on a full filesystem can raise SIGBUS rather than return ENOSPC.
++            const int e = ::posix_fallocate(fd, 0, (off_t) total);
++            if (e != 0) {
+                 ::close(fd);
++                errno = e;
+                 return nullptr;
+             }
+         }
 diff --git a/engine/include/strata/core/conversation_file.hpp b/engine/include/strata/core/conversation_file.hpp
 index becae8382ce14e69f43383c00c2f0c9a0227e40c..735e9aa0f9a10a581e9ebb69f386aebf6f99d3c9 100644
 --- a/engine/include/strata/core/conversation_file.hpp
@@ -62,6 +93,144 @@ index c0835d4405788edd2f8b2acfd1e9b1d61e332c29..700e8c1848b3af5beed51dbd6b37fc67
  bool conversation_snapshot_validate(const SavedConversation& image, const SessionState& session,
                                      const ModelGeometry& g, const QsaState& draft, std::string& error);
  /// #2409: true when a restore (or a copy) on CUDA device `device` from the calling thread creates no copy stream: this
+diff --git a/engine/include/strata/core/conversation_spill.hpp b/engine/include/strata/core/conversation_spill.hpp
+index 906956c16344096634e671137e58ef60643cf81c..d4550d7800569686fe536c28341b814f40502a5b 100644
+--- a/engine/include/strata/core/conversation_spill.hpp
++++ b/engine/include/strata/core/conversation_spill.hpp
+@@ -286,10 +286,11 @@ public:
+     /// that folder is deleted.  The folders of other fingerprints go.  Reads leave the entries in place; a per-process folder
+     /// (persist null, or the stable one held by another engine) behaves as before.
+     bool open(const std::filesystem::path& root, uint64_t cap, std::string& error, size_t* cleaned = nullptr,
+-              const SessionFileIdentity* persist = nullptr, size_t* adopted = nullptr) {
++              const SessionFileIdentity* persist = nullptr, size_t* adopted = nullptr, uint64_t min_free_bytes = 0) {
+         std::lock_guard<std::mutex> lk(mu_);
+         entries_.clear();
+         budget_ = SpillBudget{cap, 0, 0};
++        min_free_bytes_ = min_free_bytes;
+         tick_ = 0;
+         next_serial_ = 1;
+         if (adopted) *adopted = 0;
+@@ -319,7 +320,7 @@ public:
+     /// lock, under a budget reserved for it.
+     bool put(const SavedConversation& image, const SessionFileIdentity& id, std::string& error, uint64_t* serial_out = nullptr) {
+         const uint64_t need = (uint64_t) image.bytes() + (uint64_t(1) << 20);   // the payload and the file's own tables
+-        uint64_t serial = 0;
++        uint64_t serial = 0, min_free_bytes = 0;
+         std::filesystem::path f;
+         {
+             std::lock_guard<std::mutex> lk(mu_);
+@@ -334,13 +335,15 @@ public:
+             }
+             serial = next_serial_++;
+             f = ns_.file_for(serial);
++            min_free_bytes = min_free_bytes_;
+         }
+         size_t written = 0;
+-        const bool ok = session_file_write(f.string(), image, id, written, error);
+-        if (!ok) {
+-            std::error_code ec;
+-            std::filesystem::remove(f, ec);
+-        }
++        // Spill entries are immutable one-shot snapshots. Only the separate L2 archive needs V3 generations.
++        SessionWriteOptions options;
++        options.use_v3 = false;
++        options.min_free_bytes = min_free_bytes;
++        const bool ok = session_file_write(f.string(), image, id, written, error, options);
++        const bool orphan = !ok && !remove_payload(f);
+         Entry e;
+         if (ok) {
+             e.serial = serial; e.file = f; e.bytes = written; e.cvec = image.cvec;
+@@ -348,11 +351,10 @@ public:
+             for (const auto& c : image.checkpoints) e.checkpoints.push_back(stub(c));
+         }
+         std::lock_guard<std::mutex> lk(mu_);
+-        budget_.finish(need, ok ? written : 0);
++        const uint64_t charge = ok ? written : (orphan ? std::max<uint64_t>(need, written) : 0);
++        budget_.finish(need, charge);
+         if (ok && ns_.persistent() && !meta_write(f, e, id)) {
+-            std::error_code ec;
+-            std::filesystem::remove(f, ec);
+-            budget_.drop(written);
++            if (remove_payload(f)) budget_.drop(written);
+             error = "the entry's index file could not be written";
+             return false;
+         }
+@@ -391,27 +393,32 @@ public:
+     bool take_serial(uint64_t serial, const SessionFileIdentity& id, const SessionReadLimits& limits, SavedConversation& out,
+                      std::string& error) {
+         std::filesystem::path f;
++        uint64_t charge = 0;
++        bool keep;
+         {
+             std::lock_guard<std::mutex> lk(mu_);
+             const size_t i = index_locked(serial);
+             if (i == SIZE_MAX) { error = "no such SSD entry"; return false; }
+             f = entries_[i].file;
+-            if (ns_.persistent()) {   // kept: a restart finds it again; the next spill that extends it replaces it
++            keep = ns_.persistent();
++            if (keep) {   // kept: a restart finds it again; the next spill that extends it replaces it
+                 entries_[i].used = ++tick_;
+                 std::error_code ec;
+                 std::filesystem::last_write_time(meta_path(f), std::filesystem::file_time_type::clock::now(), ec);
+             } else {
+-                budget_.drop(entries_[i].bytes);
++                charge = entries_[i].bytes;
+                 entries_.erase(entries_.begin() + (std::ptrdiff_t) i);
+             }
+         }
+-        const bool keep = persistent_now();
+         SavedConversation image;
+         size_t read = 0;
+         const bool ok = session_file_read(f.string(), id, image, read, error, limits);
+         if (!keep) {
+-            std::error_code ec;
+-            std::filesystem::remove(f, ec);
++            // The file still counts during the read and if unlinking fails.
++            if (remove_payload(f)) {
++                std::lock_guard<std::mutex> lk(mu_);
++                budget_.drop(charge);
++            }
+         } else if (!ok) {
+             drop_serial(serial);   // (a file that does not read back is not tried again)
+         }
+@@ -472,7 +479,6 @@ private:
+             if (entries_[i].serial == serial) return i;
+         return SIZE_MAX;
+     }
+-    bool persistent_now() const { std::lock_guard<std::mutex> lk(mu_); return ns_.persistent(); }
+     static std::filesystem::path meta_path(std::filesystem::path f) { return f.replace_extension(".meta"); }
+     size_t lru_locked() const {
+         size_t b = 0;
+@@ -607,11 +613,18 @@ private:
+         while (budget_.over() && entries_.size() > 1) drop_locked(lru_locked());   // (the cap is now smaller than what was kept)
+         return entries_.size();
+     }
++    // Paths are entries inside our locked spill namespace. Old V3 entries can be nonempty directories.
++    static bool remove_payload(const std::filesystem::path& f) {
++        std::error_code ec;
++        std::filesystem::remove_all(f, ec);
++        if (ec) std::fprintf(stderr, "strata: could not remove SSD spill %s (%s); its space remains charged\n",
++                             f.string().c_str(), ec.message().c_str());
++        return !ec;
++    }
+     void drop_locked(size_t i) {
+         std::error_code ec;
+         std::filesystem::remove(meta_path(entries_.at(i).file), ec);
+-        std::filesystem::remove(entries_.at(i).file, ec);
+-        budget_.drop(entries_[i].bytes);
++        if (remove_payload(entries_[i].file)) budget_.drop(entries_[i].bytes);
+         entries_.erase(entries_.begin() + (std::ptrdiff_t) i);
+     }
+     static ConversationCheckpoint stub(const ConversationCheckpoint& c) {
+@@ -624,7 +637,7 @@ private:
+     SpillNamespace ns_;
+     SpillBudget budget_;
+     std::vector<Entry> entries_;
+-    uint64_t next_serial_ = 1, tick_ = 0;
++    uint64_t next_serial_ = 1, tick_ = 0, min_free_bytes_ = 0;
+ };
+ 
+ /// The best prefix a parked image gives `prompt`, by the RAM cache's rule (its live state or a checkpoint, same pictures, same
 diff --git a/engine/include/strata/core/dflash2.hpp b/engine/include/strata/core/dflash2.hpp
 index 92a8649140e1668cc81581173edd9a147406fdd2..85a14bc6c941a0af1888834e3905d31ef230a5d4 100644
 --- a/engine/include/strata/core/dflash2.hpp
@@ -817,6 +986,49 @@ index 531c77ccdc55b64af4f91ccec1ceed2d2b6cecd8..edc982dbe0f8aa4b8fbc89cf9b4113c9
      if (!v3_write_manifest(path, current, opt, error, st)) {
          v3_remove_segments(path, created); return false;
      }
+diff --git a/engine/src/core/conversation_spill_test.cpp b/engine/src/core/conversation_spill_test.cpp
+index dc43716bd840330cab2dcbd5d92f01ecfe076af9..b43f56d9044d248397257917c7cc3b301bff0521 100644
+--- a/engine/src/core/conversation_spill_test.cpp
++++ b/engine/src/core/conversation_spill_test.cpp
+@@ -236,6 +236,38 @@ int main() {
+     std::string err;
+     check(!SpillNamespace().open(root / "notes.txt" / "sub", err) && !err.empty(), "a root that cannot be a folder is refused with a reason");
+ 
++    // The test also runs with V3 enabled: long-lived archives keep generations, while spill entries rotate as files.
++    if (const char* v3 = std::getenv("STRATA_SESSION_V3"); v3 && *v3 == '1') {
++        const SessionFileIdentity id{71, 72};
++        const fs::path archive = root / "durable.bin";
++        SavedConversation img;
++        img.live.ids = {1, 2};
++        img.live.gdn.assign(1 << 20, 0x45);
++        size_t written = 0;
++        check(session_file_write(archive.string(), img, id, written, err) && fs::is_regular_file(archive / "manifest"),
++              "V3: the durable archive is still written as a directory");
++        ConversationSpill spill;
++        check(spill.open(root, 3 << 20, err), "V3: open temporary spill");
++        uint64_t serial = 0;
++        if (spill.put(img, id, err, &serial)) {
++            const auto old = spill.find(serial)->file;
++            check(fs::is_regular_file(old), "V3: new spill entry is a single file");
++            // Emulate a legacy V3 entry still tracked in the tier; consume it and check real disk removal.
++            fs::remove_all(old);
++            check(session_file_write(old.string(), img, id, written, err) && fs::is_directory(old),
++                  "V3: stage a legacy directory entry");
++            SavedConversation back;
++            check(spill.take_serial(serial, id, {}, back, err) && back.live.ids == img.live.ids &&
++                  !fs::exists(old) && spill.bytes() == 0, "V3: reading a legacy spill removes the actual directory");
++        } else check(false, "V3: write spill entry");
++        spill.close();
++        check(spill.open(root, 3 << 20, err, nullptr, nullptr, nullptr, UINT64_MAX),
++              "V3: open with an unavailable disk reserve");
++        check(!spill.put(img, id, err) && spill.size() == 0 && spill.bytes() == 0,
++              "V3: spill writes respect the current disk floor");
++        check(fs::is_regular_file(archive / "manifest"), "V3: spill cleanup leaves the durable archive intact");
++    }
++
+     // the entries: written as session files, the oldest go first, matched like the RAM cache, read back exactly
+     {
+         auto img = [](std::vector<int32_t> ids, uint8_t fill, std::vector<int32_t> ckpt = {}) {
 diff --git a/engine/src/core/conversation_state.cpp b/engine/src/core/conversation_state.cpp
 index b6eb3c76fae879281ab96301a5bb49d59f1c7f1e..32fd16641b6e9b1dc25fde27909e1b7cdf7fda06 100644
 --- a/engine/src/core/conversation_state.cpp
@@ -1280,7 +1492,7 @@ index 019a375ce2adf36fb2bb05e5622d9c26acb4ba57..0329add6572cef1e4c91017cfe4c8b8e
      for (int sufficient_after = 1; sufficient_after <= 4; ++sufficient_after) {
          std::vector<ConversationCheckpoint> chain{checkpoint(100), checkpoint(300), checkpoint(300)};
 diff --git a/engine/src/program/generate.cpp b/engine/src/program/generate.cpp
-index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb907a9d52a 100644
+index d78bd71ce69187dbdb777530a97045740dfa3331..7e09723c5f7c27126ecefff79345483c0e42b2b4 100644
 --- a/engine/src/program/generate.cpp
 +++ b/engine/src/program/generate.cpp
 @@ -13668,6 +13668,10 @@ int main(int argc, char** argv) {
@@ -1294,7 +1506,37 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
              if (!ver.gather_taps(df2.landing(), df2.device(), 0, rows, 0, df2.stream(), e)) return nullptr;
              return df2.landing();
          };
-@@ -18881,7 +18885,7 @@ int main(int argc, char** argv) {
+@@ -14106,13 +14110,18 @@ int main(int argc, char** argv) {
+             }
+             std::string why;
+             uint64_t cap = 0;
++            size_t cleaned_early = 0;
++            const uint64_t floor = (uint64_t) std::max<int64_t>(o.session_min_free_mib, 0) << 20;
+             if (root.empty()) {
+                 why = "no data folder (--pack is not under <data>/packs; --conversation-spill-dir sets one)";
+             } else {
+                 std::error_code ec;
+                 std::filesystem::create_directories(root, ec);
++                // A crashed engine may have filled this disk. Reap its unlocked temporary namespace
++                // before deciding whether there is room to open the tier.
++                if (!ec && !std::filesystem::is_symlink(root, ec))
++                    cleaned_early = strata::core::SpillNamespace::clean_dead(root);
+                 const std::filesystem::space_info sp = std::filesystem::space(root, ec);
+-                const uint64_t floor = (uint64_t) std::max<int64_t>(o.session_min_free_mib, 0) << 20;
+                 if (ec) why = "its disk cannot be read (" + ec.message() + ")";
+                 else if (o.conversation_spill_mib > 0) cap = std::min<uint64_t>((uint64_t) o.conversation_spill_mib << 20,
+                                                                                  sp.available > floor ? sp.available - floor : 0);
+@@ -14131,7 +14140,8 @@ int main(int argc, char** argv) {
+                                               "a folder of this process is used\n", e.c_str());
+                 } catch (...) {}
+             }
+-            if (cap > 0 && !spill.open(root, cap, why, &cleaned, persist_id ? &*persist_id : nullptr, &adopted)) cap = 0;
++            if (cap > 0 && !spill.open(root, cap, why, &cleaned, persist_id ? &*persist_id : nullptr, &adopted, floor)) cap = 0;
++            cleaned += cleaned_early;
+             if (cap > 0) {
+                 std::fprintf(stderr, "strata serve: conversation cache: SSD tier in %s, up to %llu MiB%s%s\n", spill.dir().string().c_str(),
+                              (unsigned long long) (cap >> 20),
+@@ -18881,7 +18891,7 @@ int main(int argc, char** argv) {
                          bool ok = strata::core::session_file_saveinc_peek(path, id, peek, perr);
                          size_t n_reuse = 0;
                          std::vector<strata::core::SessionSaveIncSlot> keep_plan;
@@ -1303,7 +1545,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
                          if (ok) {
                              if (peek.live_ids > live.size()) {
                                  ok = false;
-@@ -18907,7 +18911,7 @@ int main(int argc, char** argv) {
+@@ -18907,7 +18917,7 @@ int main(int argc, char** argv) {
                                                  break;
                                              }
                                      keep_plan.push_back({reuse, reuse < 0 ? (int32_t) fresh.size() : -1});
@@ -1312,7 +1554,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
                                      else ++n_reuse;
                                  }
                              }
-@@ -18915,8 +18919,9 @@ int main(int argc, char** argv) {
+@@ -18915,8 +18925,9 @@ int main(int argc, char** argv) {
                          // an empty keep plan is legitimate (a short conversation below the grid):
                          // the file then holds the live state and the K/V, no checkpoints
                          if (ok) {
@@ -1324,7 +1566,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
                              strata::core::SessionSaveLive sl;
                              {
                                  strata::core::ConversationStateSizes z;
-@@ -18930,12 +18935,15 @@ int main(int argc, char** argv) {
+@@ -18930,12 +18941,15 @@ int main(int argc, char** argv) {
                                  sl.state_bytes = state;
                                  sl.tokens = live.size();
                                  sl.images = live_imgs.size();
@@ -1345,7 +1587,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
                              const uint64_t floor = (uint64_t) o.conversation_cache_min_free_mib << 20;
                              std::string why;
                              // v2.4.6: evict-first here too - a declined saveinc falls to a full
-@@ -18954,19 +18962,27 @@ int main(int argc, char** argv) {
+@@ -18954,19 +18968,27 @@ int main(int argc, char** argv) {
                              const auto mem = strata::core::sample_host_memory();
                              const std::optional<uint64_t> avail = mem ? std::optional<uint64_t>(mem->available) : std::nullopt;
                                  if (strata::core::conversation_memory_admit(avail, need, floor)) {
@@ -1376,7 +1618,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
                                              strata::core::l2two::conversation_file_l2_writer_start();
                                              strata::core::SavedConversation job_meta;
                                              std::vector<strata::core::SessionKvSource> job_kv;
-@@ -19006,6 +19022,7 @@ int main(int argc, char** argv) {
+@@ -19006,6 +19028,7 @@ int main(int argc, char** argv) {
                                                  meta = std::move(meta2);
                                              }
                                          }
@@ -1384,7 +1626,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
                                          strata::core::SessionStatus st;
                                          size_t sbytes = 0;
                                          if (strata::core::session_file_saveinc(path, meta, sources, id, keep_plan, sbytes,
-@@ -19058,12 +19075,8 @@ int main(int argc, char** argv) {
+@@ -19058,12 +19081,8 @@ int main(int argc, char** argv) {
                      double capture_ms = 0;
                      try {
  
@@ -1399,7 +1641,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
                          strata::core::SessionSaveLive sl;
                          {
                              strata::core::ConversationStateSizes z;
-@@ -19083,7 +19096,7 @@ int main(int argc, char** argv) {
+@@ -19083,7 +19102,7 @@ int main(int argc, char** argv) {
                          pools_budget.shrink((size_t) -1);   // (the park pools' idle memory goes back before the RAM checks of a session save)
                          if (o.session_save_reclaim) {
                              const auto freed = strata::core::session_save_reclaim(
@@ -1408,7 +1650,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
                              if (freed.bytes || freed.checkpoints || freed.parked) {
                                  // A removed tail must not mark a later checkpoint at this length as a tail.
                                  if (tail_ckpt_len >= 0 && std::none_of(checks.begin(), checks.end(), [&](const auto& c) {
-@@ -19119,20 +19132,21 @@ int main(int argc, char** argv) {
+@@ -19119,20 +19138,21 @@ int main(int argc, char** argv) {
                                            need == UINT64_MAX ? "unknown" : std::to_string(need >> 20).c_str());
                              return ok;
                          };
@@ -1434,7 +1676,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
                              refuse(err, strata::core::SessionError::io);
                              continue;
                          }
-@@ -19141,6 +19155,7 @@ int main(int argc, char** argv) {
+@@ -19141,6 +19161,7 @@ int main(int argc, char** argv) {
                          wo.min_free_bytes = (uint64_t) o.session_min_free_mib << 20;
                          wo.progress = moving;
                          wo.phase = blocking;
@@ -1442,7 +1684,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
                          strata::core::SessionStatus st;
                          if (!strata::core::session_file_write(path, meta, sources, id, bytes, err, wo, &st)) {
                              refuse(err, st.error, st.published);
-@@ -22249,7 +22264,7 @@ int main(int argc, char** argv) {
+@@ -22249,7 +22270,7 @@ int main(int argc, char** argv) {
              std::vector<int32_t> drafts(DS, 0), window(WS), outv(WS);
              std::vector<float> dprob(DS, 0.0f);
              std::array<float, 8> dwin_s{};   // the probabilities the current window was chosen from (STRATA_SPEC_COST)
@@ -1451,7 +1693,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
              static std::FILE* const df2_trace = [] { const char* tf = std::getenv("STRATA_SPEC_TRACE"); return tf != nullptr && tf[0] != '\0' ? std::fopen(tf, "a") : nullptr; }();
              static const bool trace_nopick = std::getenv("STRATA_SPEC_TRACE_NOPICK") != nullptr;   // the lookup draft is logged but never taken
              std::array<int32_t, 8> tr_d{};
-@@ -23274,21 +23289,26 @@ int main(int argc, char** argv) {
+@@ -23274,21 +23295,26 @@ int main(int argc, char** argv) {
                  bool from_sfx = false;
                  int sfx_pad = 0;      // a learning stretch's lookup window longer than the proposal: the filler rows (DraftPolicy::Pick::pad)
                  int sfx_match = 0;
@@ -1481,7 +1723,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
                          for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
                      }
                  }
-@@ -23402,7 +23422,7 @@ int main(int argc, char** argv) {
+@@ -23402,7 +23428,7 @@ int main(int argc, char** argv) {
                  const int T_mtp = T;
                  T += chain_n;
                  const bool timed_round = !first_window;
@@ -1490,7 +1732,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
                  if (p + T > o.max_context) break;
                  window[0] = x;
                  for (int i = 1; i < T_mtp; ++i)
-@@ -23806,8 +23826,9 @@ int main(int argc, char** argv) {
+@@ -23806,8 +23832,9 @@ int main(int argc, char** argv) {
                      source_policy.defer_cost(std::max<int64_t>(p + T - 1, p + a + 1 + S_mtp), T,
                                               std::chrono::duration<double, std::milli>(Clock::now() - round0).count());
                  if (df2_trace != nullptr && timed_round) {
@@ -1502,7 +1744,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb9
                      for (int i = 0; i < 7; ++i) std::fprintf(df2_trace, " %.4f", (double) dwin_s[(size_t) i]);
                      std::fprintf(df2_trace, " |");
                      for (int i = 0; i < 7; ++i) std::fprintf(df2_trace, " %d", (int) tr_d[(size_t) i]);
-@@ -25656,7 +25677,7 @@ int main(int argc, char** argv) {
+@@ -25656,7 +25683,7 @@ int main(int argc, char** argv) {
                  const strata::spec::DraftPolicy::Pick pk = kd > 0 ? policy.choose(S_mtp, kd, md) : strata::spec::DraftPolicy::Pick{};
                  if (kd > 0 && pk.lookup) {
                      dfr_lookup = true; dfr_T = pk.t; dfr_match = md;
