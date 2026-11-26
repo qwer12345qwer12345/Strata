@@ -1,0 +1,516 @@
+diff --git a/engine/cmake/strata_gpu_engine.cmake b/engine/cmake/strata_gpu_engine.cmake
+index 1d77e66f12e5afe06e38d7035671c2e4350df81a..d177c794b2312582d6ebf61953141e14f1274df3 100644
+--- a/engine/cmake/strata_gpu_engine.cmake
++++ b/engine/cmake/strata_gpu_engine.cmake
+@@ -1403,6 +1403,12 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
+     add_test(NAME pinned_capture COMMAND pinned_capture)
+   endif()
+ 
++  if(STRATA_ENABLE_CUDA)
++    add_executable(dflash2_wide_test EXCLUDE_FROM_ALL src/core/dflash2_wide_test.cpp)
++    target_include_directories(dflash2_wide_test PRIVATE ${_strata_gpu_include_directories})
++    target_link_libraries(dflash2_wide_test PRIVATE strata_engine strata_kernels ${_strata_gpu_runtime_target})
++  endif()
++
+   # Tells tests/CMakeLists.txt to add the CUDA-dependent Catch2 target.  It cannot be declared there
+   # unconditionally: tests/ is added at the end of this file, but the flag has to be known before it runs.
+   if(STRATA_ENABLE_CUDA)
+diff --git a/engine/include/strata/core/dflash2.hpp b/engine/include/strata/core/dflash2.hpp
+index 92a8649140e1668cc81581173edd9a147406fdd2..e0f466d0b96a3736b5cc27ca8a7c2fbeb716344d 100644
+--- a/engine/include/strata/core/dflash2.hpp
++++ b/engine/include/strata/core/dflash2.hpp
+@@ -137,6 +137,18 @@ public:
+     /// selector's pick and its probability).  The taps pointer must be the same device buffer on every call (graphs are captured on it).
+     bool draft(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err);
+ 
++    /// Solo decode bridge for lookup windows of 9..16 rows. Prefix rows enter the
++    /// existing context ring; only the final row launches the unchanged eight-row block.
++    /// Synchronous: the caller owns the taps until return. Normal 1..8 calls are unchanged.
++#if defined(STRATA_GPU_METAL)
++    bool draft_extended(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err) {
++        return draft(taps_dev, n_new, pos0, anchor, drafts, probs, err);
++    }
++#else
++    bool draft_extended(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err);
++#endif
++    uint64_t wide_rounds = 0, wide_rows = 0;
++
+     /// draft() in two halves: draft_launch queues the round's graph and returns, draft_finish waits and reads the picks.  Several drafters (batch slots, each on its
+     /// own stream) can launch first and finish after, so their graphs run at the same time.
+     bool draft_launch(const float* taps_dev, int n_new, int64_t pos0, int32_t anchor, std::string& err);
+@@ -235,6 +247,7 @@ private:
+     int32_t *toptok_ = nullptr, *out_tok_ = nullptr;
+     uint32_t* topscratch_ = nullptr;
+     cudaGraphExec_t exec_[kRows + 1] = {};
++    cudaGraphExec_t wide_exec_ = nullptr;   ///< one-row graph bound to the existing landing buffer
+     const float* graph_taps_ = nullptr;
+     int ndraft_ = kDrafts;          ///< drafts a window can use (set_max_drafts)
+     int64_t have_ctx_ = 0;
+diff --git a/engine/src/core/dflash2.cpp b/engine/src/core/dflash2.cpp
+index 3652596e0f69e1c0d749d7d171093f3f1a0d89bc..021a49179cb27f8da5d673e38bf5634f57b46a29 100644
+--- a/engine/src/core/dflash2.cpp
++++ b/engine/src/core/dflash2.cpp
+@@ -45,6 +45,7 @@ Dflash2Drafter::~Dflash2Drafter() {
+     if (cs_) cudaStreamSynchronize(cs_);
+     for (cudaGraphExec_t& e : exec_)
+         if (e) cudaGraphExecDestroy(e);
++    if (wide_exec_) cudaGraphExecDestroy(wide_exec_);
+     auto fr = [](void* p) { if (p) cudaFree(p); };
+     if (h_logq_) cudaFreeHost(h_logq_);
+     if (h_logd_) cudaFreeHost(h_logd_);
+@@ -745,6 +746,7 @@ void Dflash2Drafter::set_max_drafts(int n) {
+     cudaDeviceSynchronize();
+     for (auto& e : exec_)
+         if (e) { cudaGraphExecDestroy(e); e = nullptr; }
++    if (wide_exec_) { cudaGraphExecDestroy(wide_exec_); wide_exec_ = nullptr; }
+     graph_taps_ = nullptr;
+     ndraft_ = n;
+ }
+@@ -1171,6 +1173,47 @@ bool Dflash2Drafter::draft(const float* taps, int n_new, int64_t pos0, int32_t a
+     return draft_launch(taps, n_new, pos0, anchor, err) && draft_finish(drafts, probs, err);
+ }
+ 
++bool Dflash2Drafter::draft_extended(const float* taps, int n_new, int64_t pos0, int32_t anchor, int32_t* drafts, float* probs, std::string& err) {
++    if (n_new >= 1 && n_new <= kRows) return draft(taps, n_new, pos0, anchor, drafts, probs, err);
++    if (n_new <= kRows || n_new > 16 ||
++        !bound_ || !taps || !landing_ || taps == landing_ || launched_ || (graph_taps_ && graph_taps_ != taps)) {
++        err = "dflash2: wide context requires stable verifier taps and 9..16 committed rows";
++        return false;
++    }
++    const OnDevice on_device(device_);
++    const auto t0 = Clock::now();
++    // Reuse the narrow context scratch. A 9..16-row lookup must not allocate the
++    // large prompt-context batch arena. Chunking also matches ring-log rebuild GEMMs.
++    const size_t row = taps_.size() * (size_t) N_;
++    for (int from = 0; from < n_new - 1; from += kRows) {
++        const int count = std::min(kRows, n_new - 1 - from);
++        if (!context(taps + (size_t) from * row, count, pos0 + from, err)) return false;
++    }
++    if (cudaMemcpyAsync(landing_, taps + (size_t) (n_new - 1) * row, row * sizeof(float), cudaMemcpyDeviceToDevice, cs_) != cudaSuccess) {
++        err = "dflash2: wide context landing copy failed";
++        return false;
++    }
++    const double prefix_ms = ms_since(t0);
++    // Keep all normal graphs bound to their original buffer. The synchronous bridge
++    // borrows slot 1 only while using its own graph, so subsequent narrow calls replay
++    // exactly the original graph. Restore on every return, including capture failures.
++    struct Restore {
++        cudaGraphExec_t &slot, &wide;
++        const float*& taps;
++        cudaGraphExec_t old;
++        const float* old_taps;
++        ~Restore() { wide = slot; slot = old; taps = old_taps; }
++    } restore{exec_[1], wide_exec_, graph_taps_, exec_[1], graph_taps_};
++    exec_[1] = wide_exec_;
++    graph_taps_ = landing_;
++    if (!draft(landing_, 1, pos0 + n_new - 1, anchor, drafts, probs, err)) return false;
++    ms_draft += prefix_ms;
++    ++wide_rounds;
++    wide_rows += n_new;
++    if (wide_rounds == 1) std::fprintf(stderr, "dflash2: wide context bridge active (%d committed rows, unchanged 8-row block)\n", n_new);
++    return true;
++}
++
+ bool Dflash2Drafter::draft_launch(const float* taps, int n_new, int64_t pos0, int32_t anchor, std::string& err) {
+     if (!bound_) { err = "dflash2: not bound"; return false; }
+     if (!context_wait(err)) return false;
+diff --git a/engine/src/core/dflash2_wide_test.cpp b/engine/src/core/dflash2_wide_test.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..018a7f35db8f26ebad9fac7cc2ec623079c8172d
+--- /dev/null
++++ b/engine/src/core/dflash2_wide_test.cpp
+@@ -0,0 +1,65 @@
++// Real Q4 drafter: wide bridge versus explicit context + unchanged one-row draft.
++#include "strata/core/dflash2.hpp"
++#include <cuda_runtime.h>
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <stdexcept>
++#include <vector>
++using strata::core::Dflash2Drafter;
++int main(int argc,char**argv) {
++ if(argc!=2){std::fprintf(stderr,"usage: dflash2_wide_test PACK\n");return 2;}
++ try {
++  auto ck=[](bool b,const std::string&s){if(!b)throw std::runtime_error(s);};
++  auto cu=[&](cudaError_t e){ck(e==cudaSuccess,cudaGetErrorString(e));};
++  constexpr int H=2560,T=12800,V=64;
++  float *tap,*last,*emb; uint8_t*head;
++  cu(cudaMalloc(&tap,16*T*4));cu(cudaMalloc(&last,8*T*4));cu(cudaMalloc(&emb,8*H*4));
++  std::vector<float> e(8*H);for(size_t i=0;i<e.size();++i)e[i]=std::sin(float(i)*.013f)*.25f;
++  cu(cudaMemcpy(emb,e.data(),e.size()*4,cudaMemcpyHostToDevice));
++  // Packed Q8_0 native head, nonuniform signed values and finite fp16 scales.
++  std::vector<uint8_t> hh(V*(H/32)*34);uint32_t rs=349;
++  for(size_t b=0;b<hh.size();b+=34){hh[b]=0x1f;hh[b+1]=0x21;for(int j=2;j<34;++j){rs=rs*1664525+1013904223;hh[b+j]=rs>>24;}}
++  cu(cudaMalloc(&head,hh.size()));cu(cudaMemcpy(head,hh.data(),hh.size(),cudaMemcpyHostToDevice));
++  std::vector<int32_t> vocab(V);for(int i=0;i<V;++i)vocab[i]=i+10;
++  auto embed=[&](const int32_t*,int n,float*out,cudaStream_t st){cu(cudaMemcpyAsync(out,emb,n*H*4,cudaMemcpyDeviceToDevice,st));};
++  Dflash2Drafter ref,wide;std::string err;
++  for(auto*d:{&ref,&wide}){ck(d->load(argv[1],0,err),err);ck(d->bind_raw(embed,head,8,V,vocab,err),err);d->set_max_drafts(5);}
++  ck(ref.prepare(last,err),err);ck(wide.prepare(tap,err),err);
++  const uint64_t initial=wide.vram_bytes();
++  int64_t pos=2040;
++  auto equal=[&](){std::vector<float>a,b;std::vector<int64_t>ta,tb;ck(ref.debug_ring(a,ta,err),err);ck(wide.debug_ring(b,tb,err),err);ck(a.size()==b.size()&&memcmp(a.data(),b.data(),a.size()*4)==0&&ta==tb,"ring or epoch tags differ");};
++  int32_t a[7],b[7];float pa[7],pb[7];
++  // Invalid calls must reject before modifying the context ring.
++  for(int invalid:{0,17,-1}) { ck(!wide.draft_extended(tap,invalid,pos,4,b,pb,err),"invalid width accepted"); }
++  equal();
++  for(int rows:{9,1,12,4,16,8,9,12,16}) {
++   std::vector<float> ht(rows*T);for(size_t i=0;i<ht.size();++i){rs=rs*1664525+1013904223;ht[i]=(int(rs>>16)-32768)/32768.f;}
++   cu(cudaMemcpy(tap,ht.data(),ht.size()*4,cudaMemcpyHostToDevice));
++   cu(cudaDeviceSynchronize()); // pageable H2D must complete before either nonblocking stream reads taps
++   if(rows>8){for(int from=0;from<rows-1;from+=8)ck(ref.context(tap+from*T,std::min(8,rows-1-from),pos+from,err),err);cu(cudaMemcpyAsync(last,tap+(rows-1)*T,T*4,cudaMemcpyDeviceToDevice,ref.stream()));ck(ref.draft(last,1,pos+rows-1,4,a,pa,err),err);}
++   else {cu(cudaMemcpyAsync(last,tap,rows*T*4,cudaMemcpyDeviceToDevice,ref.stream()));ck(ref.draft(last,rows,pos,4,a,pa,err),err);}
++   ck(wide.draft_extended(tap,rows,pos,4,b,pb,err),err);
++   bool same=memcmp(a,b,sizeof(a))==0&&memcmp(pa,pb,sizeof(pa))==0;
++   if(!same)for(int j=0;j<7;++j)std::fprintf(stderr,"rows=%d pick %d ref=%d %.9g wide=%d %.9g\n",rows,j,a[j],pa[j],b[j],pb[j]);
++   equal();ck(same,"draft tokens or probabilities differ");
++   std::vector<float> fn;ck(wide.debug_rows(fn,err),err);
++   uint64_t hash=1469598103934665603ull;
++   auto mix=[&](const void* data,size_t n){auto*p=static_cast<const unsigned char*>(data);for(size_t i=0;i<n;++i){hash^=p[i];hash*=1099511628211ull;}};
++   mix(b,sizeof(b));mix(pb,sizeof(pb));mix(fn.data(),fn.size()*sizeof(float));
++   std::printf("state rows=%d hash=%016llx\n",rows,(unsigned long long)hash);
++   std::vector<int32_t> ids(rows);for(int i=0;i<rows;++i)ids[i]=int(pos+i)%V;
++   ref.note_rows(ids.data(),rows,pos);wide.note_rows(ids.data(),rows,pos);
++   std::printf("rows=%d pos=%lld tokens/probabilities/ring/tags bitwise equal\n",rows,(long long)pos);pos+=rows;
++   // Changing spec invalidates both the normal and landing graph caches.
++   if(rows==16){ref.set_max_drafts(3);wide.set_max_drafts(3);ck(ref.prepare(last,err),err);ck(wide.prepare(tap,err),err);}
++  }
++  ck(wide.wide_rounds==6&&wide.wide_rows==74,"wide counters differ");
++  ck(initial==wide.vram_bytes(),"bridge allocated model or scratch VRAM");
++  std::printf("dflash2_wide_test: PASS (6 wide + 3 narrow, ring wrap, graph invalidation, no extra arena)\n");
++  // Drafters die before their bound buffers are released by CUDA process teardown.
++  return 0;
++ }catch(const std::exception&e){std::fprintf(stderr,"FAIL: %s\n",e.what());return 1;}
++}
+diff --git a/engine/src/program/generate.cpp b/engine/src/program/generate.cpp
+index d78bd71ce69187dbdb777530a97045740dfa3331..12bcdb0d6d069a57d7c60c9fb63f5409adada109 100644
+--- a/engine/src/program/generate.cpp
++++ b/engine/src/program/generate.cpp
+@@ -13668,6 +13668,10 @@ int main(int argc, char** argv) {
+         // stage's share landed on the drafter's card (Verifier::gather_taps; the drafter's stream waits on the copies)
+         auto df2_win_taps = [&](int rows, std::string& e) -> const float* {
+             if (n_stages <= 1) return ver.tap_dev();
++            if (rows > strata::core::Dflash2Drafter::kRows) {
++                e = "dflash2: layer split taps exceed the landing buffer";
++                return nullptr;
++            }
+             if (!ver.gather_taps(df2.landing(), df2.device(), 0, rows, 0, df2.stream(), e)) return nullptr;
+             return df2.landing();
+         };
+@@ -23244,7 +23248,7 @@ int main(int argc, char** argv) {
+                 int32_t dd[strata::core::Dflash2Drafter::kDrafts];
+                 float pp[strata::core::Dflash2Drafter::kDrafts];
+                 const float* tp = df2_win_taps(a_ + 1, err);
+-                if (tp == nullptr || !df2.draft(tp, a_ + 1, p, outv[(size_t) a_], dd, pp, err)) return false;
++                if (tp == nullptr || !df2.draft_extended(tp, a_ + 1, p, outv[(size_t) a_], dd, pp, err)) return false;
+                 for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
+                 if (ss.ple.ready() && ss.ple.table != nullptr) {   // the PLE rows of the next window's tokens, read ahead (as the MTP's draft does)
+                     int n_pf = 0;
+@@ -23282,13 +23286,15 @@ int main(int argc, char** argv) {
+                     const int kd = sfx.propose(S_look - 1, sbuf.data());
+                     const int md = sfx.last_match();
+                     const strata::spec::DraftPolicy::Pick pk = kd > 0 ? policy.choose(S_mtp, kd, md) : strata::spec::DraftPolicy::Pick{};
++                    const float* tp = df2_win_taps(dfr_n, err);
++                    if (tp == nullptr) { std::printf("ERR %s\n", err.c_str()); return 1; }
+                     if (kd > 0 && pk.lookup) {
+                         dfr_lookup = true; dfr_T = pk.t; dfr_match = md;
+-                        if (!df2.context(ver.tap_dev(), dfr_n, dfr_pos, err)) { std::printf("ERR %s\n", err.c_str()); return 1; }
++                        if (!df2.context(tp, dfr_n, dfr_pos, err)) { std::printf("ERR %s\n", err.c_str()); return 1; }
+                     } else {
+                         int32_t dd[strata::core::Dflash2Drafter::kDrafts];
+                         float pp[strata::core::Dflash2Drafter::kDrafts];
+-                        if (!df2.draft(ver.tap_dev(), dfr_n, dfr_pos, dfr_anchor, dd, pp, err)) { std::printf("ERR %s\n", err.c_str()); return 1; }
++                        if (!df2.draft_extended(tp, dfr_n, dfr_pos, dfr_anchor, dd, pp, err)) { std::printf("ERR %s\n", err.c_str()); return 1; }
+                         for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
+                     }
+                 }
+@@ -25613,7 +25619,7 @@ int main(int argc, char** argv) {
+                 if (wait_commit_first && !ver.wait_commit(err)) return false;
+                 int32_t dd[strata::core::Dflash2Drafter::kDrafts];
+                 float pp[strata::core::Dflash2Drafter::kDrafts];
+-                if (!df2.draft(ver.tap_dev(), a_ + 1, p, outv[(size_t) a_], dd, pp, err)) return false;
++                if (!df2.draft_extended(ver.tap_dev(), a_ + 1, p, outv[(size_t) a_], dd, pp, err)) return false;
+                 for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
+                 // what the MTP does while it drafts: the PLE rows of the tokens the next window will hold are read ahead
+                 // (the window's gather would otherwise wait for them: 1.8 ms a round on strix)
+@@ -25660,7 +25666,7 @@ int main(int argc, char** argv) {
+                 } else {
+                     int32_t dd[strata::core::Dflash2Drafter::kDrafts];
+                     float pp[strata::core::Dflash2Drafter::kDrafts];
+-                    if (!df2.draft(ver.tap_dev(), dfr_n, dfr_pos, dfr_anchor, dd, pp, err)) { std::fprintf(stderr, "strata generate: %s\n", err.c_str()); return 1; }
++                    if (!df2.draft_extended(ver.tap_dev(), dfr_n, dfr_pos, dfr_anchor, dd, pp, err)) { std::fprintf(stderr, "strata generate: %s\n", err.c_str()); return 1; }
+                     for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
+                 }
+             }
+diff --git a/terminal/l2/reference_controller.py b/terminal/l2/reference_controller.py
+index 6d585f2fa697e1683fa2a44bacd8be0579b2306c..1da4d4700410015fcad0e61afa38586cdd605171 100644
+--- a/terminal/l2/reference_controller.py
++++ b/terminal/l2/reference_controller.py
+@@ -78,8 +78,10 @@ def after_turn(body,response_ok):
+  # Append only along the same branch; a divergent branch gets its own archive.
+  if row and hs[:len(row['hashes'])]==row['hashes']:name=row['filename']
+  else:name=uuid.uuid4().hex+'.bin'
+- t=time.monotonic();status,result=engine_request('POST','/slots/0?action=saveinc',{'filename':name})
+- print(json.dumps({'l2':'saveinc','status':status,'ms':round((time.monotonic()-t)*1000,1),'incremental':result.get('incremental')}),flush=True)
++ t=time.monotonic();status,result=engine_request('POST','/slots/0?action=saveinc',{'filename':name,'wait_for_ram':False})
++ error=result.get('error')
++ print(json.dumps({'l2':'saveinc','status':status,'ms':round((time.monotonic()-t)*1000,1),
++                   'incremental':result.get('incremental'),'error_kind':error.get('kind') if isinstance(error,dict) else None}),flush=True)
+  if status!=200:return
+  idx[name]={'family':fp,'hashes':hs,'filename':name,'updated':time.time()}
+  # Saves are synchronous in managed_server, so deleting old archives cannot race a writer.
+diff --git a/terminal/l2/startup_ablation.py b/terminal/l2/startup_ablation.py
+index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..e74b59516519238d84ec6023618f47a45b7b6b2b 100644
+--- a/terminal/l2/startup_ablation.py
++++ b/terminal/l2/startup_ablation.py
+@@ -11,6 +11,7 @@ import sys
+ import tempfile
+ import threading
+ import time
++import urllib.error
+ import urllib.request
+ from pathlib import Path
+ 
+@@ -126,12 +127,38 @@ def attach_window_latency(trace, cases, result):
+         row['window_latency_ms_by_source_width'] = summary
+ 
+ 
+-def serve_trial(root, trial, folder, end, result, *, workloads=None):
++def probe_archive(opener, endpoint, timeout):
++    body = json.dumps({'filename': 'signal2-probe.bin', 'wait_for_ram': False}).encode()
++    request = urllib.request.Request(endpoint + '/slots/0?action=saveinc', data=body,
++                                     headers={'Content-Type': 'application/json'})
++    start = time.monotonic()
++    available = meminfo()['MemAvailable']
++    try:
++        with opener.open(request, timeout=timeout) as reply:
++            status, data = reply.status, json.load(reply)
++    except urllib.error.HTTPError as reply:
++        with reply:
++            status, data = reply.code, json.load(reply)
++    error = data.get('error', {})
++    if not isinstance(error, dict):
++        error = {}
++    return {'status': status, 'elapsed_ms': round((time.monotonic() - start) * 1000, 1),
++            'available_mib_before': available, 'bytes_written': data.get('n_written'),
++            'error_kind': error.get('kind'),
++            'save_required_mib': [int(value) for value in re.findall(
++                r'(\d+) MiB', error.get('message', ''))] if error.get('kind') == 'memory' else []}
++
++
++def serve_trial(root, trial, folder, end, result, *, workloads=None, archive_probe=False):
+     profile = folder / 'profile.json'
+     trace = folder / 'spec.trace'
+     finished_cases = []
+     if workloads:
+         trial['env']['STRATA_SPEC_TRACE'] = str(trace)
++    if archive_probe:
++        archive = folder / 'archive'
++        archive.mkdir()
++        trial['slot_save_path'] = str(archive)
+     profile.write_text(json.dumps(trial))
+     ready = folder / 'ready.json'
+     log = Path(trial['log'])
+@@ -246,6 +273,10 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
+                     # Do not discard other cases, or compare short decodes as long ones.
+             if result.get('limit_hit'):
+                 raise RuntimeError('trial reached its time or memory guard')
++            if archive_probe:
++                remaining = end - time.monotonic()
++                if remaining > 0:
++                    result['archive_save'] = probe_archive(opener, endpoint, min(remaining, 30))
+             if not workloads and (row['expert_file_reads'] != 0 or row['timings']['predicted_n'] < OUTPUT_TOKENS * 0.75):
+                 raise RuntimeError('timed output was too short or zero expert file reads could not be confirmed')
+             result['status'] = 'measured'
+@@ -253,6 +284,14 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
+             stop.set()
+             watcher.join(timeout=1)
+             stop_trial(proc)
++            if log.is_file():
++                text = log.read_text(errors='replace')
++                errors = re.findall(r'native ERR ([^\r\n]+)', text)
++                if errors:
++                    result['native_error'] = errors[-1][:512]
++                free = re.findall(r'capturing the \d+-token window \((\d+) MiB of VRAM free\)', text)
++                if free:
++                    result['min_pre_capture_vram_free_mib'] = min(map(int, free))
+             if workloads and trace.is_file():
+                 try:
+                     attach_window_latency(trace, finished_cases, result)
+diff --git a/terminal/l2/startup_patch_review.py b/terminal/l2/startup_patch_review.py
+index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..d911b94f334fa8f68a9f3035eebc9890cb27152a 100644
+--- a/terminal/l2/startup_patch_review.py
++++ b/terminal/l2/startup_patch_review.py
+@@ -5,6 +5,7 @@ import hashlib
+ import json
+ import os
+ import struct
++import subprocess
+ import tempfile
+ import time
+ import zlib
+@@ -22,12 +23,16 @@ def arm(name, env=None, args=None):
+ 
+ 
+ GROUPS = (
+-    ('upstream-ampere-q8', (
+-        arm('upstream-q80-single-row-off', {'STRATA_Q80_ROWS1': '0'}),
+-    )),
+     ('upstream-cache-adaptation', (
+         arm('upstream-mid-coverage-adaptation-off', {'STRATA_ADAPT_MID': '0'}),
+     )),
++    ('route-prior', (
++        arm('route-prior-025', {'STRATA_ROUTE_PRIOR': '0.25'}),
++        arm('route-prior-0', {'STRATA_ROUTE_PRIOR': '0'}),
++    )),
++    ('archive-memory', (
++        arm('archive-ram-headroom', args={'--max-context': '221184', '--ple-row-cache': '524288'}),
++    )),
+ )
+ 
+ 
+@@ -130,7 +135,9 @@ def run_group(root, cfg, directory, seed, references, report, group, variants, w
+                     if reference.get('root'):
+                         trial_root = Path(reference['root'])
+                         trial['cwd'] = str(trial_root)
+-                serve_trial(trial_root, trial, folder, time.monotonic() + arm_timeout, row, workloads=workloads)
++                archive_probe = bool(references.get('baseline-first')) and group in ('baseline-first', 'archive-memory')
++                serve_trial(trial_root, trial, folder, time.monotonic() + arm_timeout, row,
++                            workloads=workloads, archive_probe=archive_probe)
+                 text = row.get('decode') or row.get('post_vision_decode', {})
+                 cold, hot = row.get('cold_long'), row.get('hot_prefix')
+                 if 'image_cold' in row and 'image_cached' in row:
+@@ -171,12 +178,24 @@ def run_suite(root, cfg, directory, settings):
+         results.mkdir(exist_ok=True, mode=0o700)
+         baseline_args = cfg['args']
+         seed_path = Path(baseline_args[baseline_args.index('--expert-profile') + 1])
+-        engine_sha = digest_file(cfg['exe'])
++        production_sha = engine_sha = digest_file(cfg['exe'])
+         references = {}
+         requested = settings.get('groups') or None
+         groups = GROUPS if requested is None else tuple(group for group in GROUPS if group[0] in requested)
+         if requested is not None and len(groups) != len(requested):
+             raise ValueError('Unknown or duplicate Strata patch-review group')
++        manifest = directory / 'trial-engine.json'
++        if manifest.is_file():
++            candidate = json.loads(manifest.read_text())
++            if digest_file(candidate['exe']) != candidate['sha256']:
++                raise ValueError('Signal 2 trial engine fingerprint mismatch')
++            if not (Path(candidate['root']) / 'strata.py').is_file():
++                raise ValueError('Signal 2 trial server source is missing')
++            engine_sha = candidate['sha256']
++            for name in ('baseline-first', 'baseline-last', *(name for _, variants in groups for name, _, _ in variants)):
++                references[name] = candidate
++        else:
++            groups = tuple(group for group in groups if group[0] != 'archive-memory')
+         if not (cfg.get('vision') or {}).get('gpu'):
+             groups = tuple(g for g in groups if g[0] != 'vision-lease')
+         if settings.get('lean_candidate'):
+@@ -202,7 +221,7 @@ def run_suite(root, cfg, directory, settings):
+         series = settings.get('series', 1)
+         final_baseline = settings.get('final_baseline', True)
+         fingerprint = hashlib.sha256(json.dumps({
+-            'suite': report['suite'], 'engine': engine_sha,
++            'suite': report['suite'], 'engine': engine_sha, 'production_engine': production_sha,
+             'references': {name: item['sha256'] for name, item in references.items()}, 'groups': groups,
+             'include_vision': bool(settings.get('include_vision')),
+             'args': baseline_args, 'env': cfg['env'], 'series': series,
+@@ -225,11 +244,22 @@ def run_suite(root, cfg, directory, settings):
+             name == 'vision-lease' for name, _ in groups) else ()
+         # Run vision in the same place for its candidate and both baseline starts.
+         cpu_cases = WORKLOADS + CPU_PREFILL_CASES
+-        baseline_cases = cpu_cases + vision_suffix
+-        report.update(series=series, engine_sha256=engine_sha, batches=len(plan), arms=arms,
++        baseline_cases = WORKLOADS if manifest.is_file() else cpu_cases + vision_suffix
++        report.update(series=series, engine_sha256=engine_sha, production_engine_sha256=production_sha,
++                      batches=len(plan), arms=arms,
+                       arm_timeout_s=arm_timeout)
+         attempted = True
+         started = time.monotonic()
++        if manifest.is_file() and candidate.get('wide_test'):
++            check = subprocess.run([candidate['wide_test'], candidate['draft_pack']],
++                                   capture_output=True, text=True, timeout=45)
++            report['dflash2_wide_check'] = {
++                'exit_code': check.returncode,
++                'result': (check.stdout.strip().splitlines()[-1] if check.returncode == 0 and check.stdout.strip()
++                           else check.stderr.strip()[-512:]),
++            }
++            if check.returncode:
++                raise RuntimeError('The DFlash2 wide-window candidate failed its parity check')
+         print(f'Strata 开机补丁对照：本次串行跑完 {len(plan)} 组、{arms} 次引擎启动，再开放正式 API。', flush=True)
+         with tempfile.TemporaryDirectory(prefix='patch-review-seed-', dir=directory) as tmp:
+             seed = Path(tmp) / 'expert-profile.bin'
+diff --git a/terminal/serve/server.py b/terminal/serve/server.py
+index 63778d5d4908c0573f9511e9a7b471a76a8a8df4..76fa65b7f3a1f07eab554cd7d9f31288f636e95d 100644
+--- a/terminal/serve/server.py
++++ b/terminal/serve/server.py
+@@ -4718,7 +4718,7 @@ class Service:
+             return None
+         return restore
+ 
+-    def slot_action(self, slot: str, action: str, filename, rid: str = "") -> tuple[int, dict]:
++    def slot_action(self, slot: str, action: str, filename, rid: str = "", *, wait_for_ram: bool = True) -> tuple[int, dict]:
+         """llama-server's POST /slots/{id}?action=save|restore {"filename": ...}: the conversation the engine holds,
+         to or from a file in slot_save_path.  -> (HTTP status, body)."""
+         def error(code, message):
+@@ -4734,6 +4734,8 @@ class Service:
+             return error(400, "this server has one slot: 0")
+         if action not in ("save", "restore", "restorep", "restorepp", "saveinc", "verify", "probe"):
+             return error(400, "action must be save, restore, restorep, restorepp, saveinc, verify or probe")
++        if type(wait_for_ram) is not bool:
++            return error(400, "wait_for_ram must be a boolean")
+         pp_ids = getattr(self, '_restorepp_ids', [])
+         self.engine._restorepp_ids = pp_ids
+         why = slot_filename_problem(filename)
+@@ -4761,7 +4763,7 @@ class Service:
+                                        else "restoring a session", started=time.time(), first_token=None,
+                                        prompt_tokens=None, generated=None, max_tokens=None)
+                 try:
+-                    if action in ('save', 'saveinc') and getattr(self.engine, 'session_save_reclaim', False):
++                    if wait_for_ram and action in ('save', 'saveinc') and getattr(self.engine, 'session_save_reclaim', False):
+                         from serve.session_save_retry import session_file
+                         r = session_file(self, action, path, SessionRefused)
+                     else:
+@@ -8338,7 +8340,8 @@ def make_handler(svc: Service):
+                     query = parse_qs(self.path.partition("?")[2])
+                     try:
+                         code, body = svc.slot_action(path[len("/slots/"):], (query.get("action") or [""])[0],
+-                                                     req.get("filename"), rid=request_rid or "")
++                                                     req.get("filename"), rid=request_rid or "",
++                                                     wait_for_ram=req.get("wait_for_ram", True))
+                     except EngineDied as e:                  # EngineSilent included: the engine was ended
+                         code, body = 500, {"error": {"code": 500, "message": str(e) + "; the next request starts "
+                                                      "the engine again", "type": "server_error"}}
+diff --git a/terminal/serve/test_session_save_retry.py b/terminal/serve/test_session_save_retry.py
+index a2dd601cf73e0f99861d2f72fab4f105daf2b86b..d2f37adea6103ed561645fb0678fe22361e33a55 100644
+--- a/terminal/serve/test_session_save_retry.py
++++ b/terminal/serve/test_session_save_retry.py
+@@ -138,7 +138,7 @@ class Retry(unittest.TestCase):
+ 
+ class AdmissionProc(FakeProc):
+     def write(self,text):
+-        if not self.sent and text.startswith('SAVE '):
++        if not self.sent and text.startswith(('SAVE ', 'SAVEINC ')):
+             self.sent.append(text)
+             self.engine.lines.put('SERR memory 0 '+str(refused())+'\n')
+             return
+@@ -176,6 +176,16 @@ class HTTP(unittest.TestCase):
+         self.assertEqual(len(self.engine.proc.sent),1)
+         self.assertFalse(Path(self.directory.name,'off.bin').exists())
+ 
++    def test_automatic_save_refusal_does_not_wait_for_ram(self):
++        path = Path(self.directory.name, 'existing.bin')
++        path.write_bytes(b'previous archive')
++        with mock.patch.object(retry, 'available_mib', side_effect=AssertionError('automatic save must not poll')):
++            status, body = self.post('/slots/0?action=saveinc', {'filename': path.name, 'wait_for_ram': False})
++        self.assertEqual(status, 503, body)
++        self.assertEqual(body['error']['kind'], 'memory')
++        self.assertEqual(self.engine.proc.sent, [f'SAVEINC {path}\n'])
++        self.assertEqual(path.read_bytes(), b'previous archive')
++
+     def test_fifo_blocks_restore_while_save_waits_and_releases_afterwards(self):
+         waiting=threading.Event(); enough=threading.Event()
+         def available(): waiting.set(); return 1400 if enough.is_set() else 541
