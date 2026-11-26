@@ -27,10 +27,25 @@ The follow-up allows an automatic save to attempt native cache reclamation once 
 
 The tentative memory arm limits context to 221,184 tokens and halves the BF16 PLE row cache to 524,288 entries. The production 262,144-token configuration allocated 2.39 GiB of pinned host K/V beyond the 20,480 GPU-resident cells. Reducing the reserved range and halving the PLE row cache could recover about half a GiB. The benchmark records save return status, timing, RAM and bytes written on an isolated temporary archive. The production context and PLE settings are untouched.
 
-## Planned boot
+## Second headless run and production promotion
 
-Signal 2 runs one baseline at prior 0.5 and five variants. The variants test long-match draft deferral, prior 0.25 and 0, mid-coverage adaptation off and archive memory headroom. The baseline and the deferral variant get an identical 64-line rewrite prompt. Compare output length and hash, suffix draft acceptance, window latency by source and width, stream p99, expert reads and RAM pressure.
+The real Q4 pack passed draft-token, probability and K/V ring parity across every width from 9 to 16, plus narrow rounds, ring wrap, graph invalidation and context-only updates. In 24 warm pairs at width 16, draft p50 fell from 1.103 to 1.063 ms and p95 fell from 1.320 to 1.080 ms. These timings cover the drafter and its context update. They do not include target verification.
 
-The boot first compares real Q4-pack draft tokens, probabilities and ring state against the synchronous bridge. It covers widths 9–16, narrow calls between wide ones, ring wrap, graph invalidation and context-only updates. The check records 24 warm paired samples at width 16, with p50 and p95 draft latency for both implementations. The CUDA SM86 engine and check executable built. Eight startup and configuration tests passed, and a mock launch verified the six-start plan and trace parsing. Real GPU parity and speed remain pending because the desktop GPU is occupied.
+After the trials, the original production engine served a 93,471-token prompt. It exited twice after a 16-row verifier window with `dflash2: draft rows out of range`. The verifier reported 202 MiB free before capture and the kernel log had no GPU fault or OOM event. The gateway started a fresh engine on the next request each time. The same checksum that passed the Q4 check is now installed in the normal boot path with the 16-row limit and prior 0.5. The attempted benchmark fingerprint was carried forward because all six arms already ran on that checksum.
+
+| Arm | Min available RAM | Added swap | Long decode | Expert file reads | Status |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Baseline, prior 0.5 | 1,023 MiB | 0 MiB | 131.6 tok/s | 0 | Memory guard stopped the suite before the rewrite and archive probe |
+| Lookup skip 8 | 965 MiB | 157 MiB | 129.3 tok/s | 0 | Memory guard |
+| Mid-coverage adaptation off | 1,245 MiB | 13 MiB | 121.8 tok/s | 0 | Complete |
+| Prior 0.25 | 1,166 MiB | 4 MiB | 126.8 tok/s | 0 | Complete |
+| Prior 0 | 1,133 MiB | 3 MiB | 110.5 tok/s | 0 | Complete |
+| Context 221,184 and PLE row cache 524,288 | 1,726 MiB | 2 MiB | 130.9 tok/s | 0 | Complete |
+
+The harness stops below 1,024 MiB of available RAM or above 512 MiB of additional swap. The earlier engine exit and this harness stop are independent observations. The `lookup-skip=8` arm skipped three drafts and ran 22 deferred drafts on the long-code case. It skipped none and ran 98 deferred drafts in the rewrite. The baseline never reached the rewrite. Default lookup deferral stays off, and the measured prior 0.5 remains the production setting.
+
+The memory arm has evidence for both sustained decoding and a successful save. It wrote 571,223,919 bytes in 650.8 ms at 1,735 MiB available. The old 262,144-token profile reserves 2.39 GiB of pinned host KV in addition to 21.62 GiB of page-locked experts. The smaller context alone removes about 415 MiB of that KV reservation. The full arm raised observed minimum available RAM by 703 MiB. Its 29K prompt prefill rose from 11.14 to 11.33 seconds. The two changes were tested together, and larger prompts may have a different PLE cache hit rate.
+
+The production context stays at 262,144 tokens. Automatic saves use the bounded admission path that can return a typed RAM refusal promptly while keeping the previous archive. The verified 221,184-token profile is the option when reliable saving under pressure matters more than the extra 40,960 tokens. Keeping more RAM free by putting experts on SSD would change the zero-file-read result. The post-promotion production request remains to be checked after the next headless boot. The desktop GPU was occupied at installation.
 
 [Follow-up source patch](signal2-follow-up.patch) applies on top of the existing 0.2.22 production source.
