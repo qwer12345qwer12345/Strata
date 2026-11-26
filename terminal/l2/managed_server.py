@@ -17,6 +17,8 @@ def main():
  ready=Path(a.ready_file) if a.ready_file else None
  if ready:ready.unlink(missing_ok=True)
  root,cfg=runtime_config.select(Path(__file__).resolve().parents[1],cfg,output)
+ settings=cfg.get('startup_benchmark') or {}
+ output=Path(settings.get('output_dir',output))
  cfg.pop('startup_benchmark',None)
  archive = Path(cfg.get('slot_save_path') or Path.home()/'.local/share/strata/sessions-pr5500-0.1.65').expanduser().resolve()
  archive.mkdir(mode=0o700, parents=True, exist_ok=True)

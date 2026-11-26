@@ -30,7 +30,29 @@ def set_flags(args, overrides):
     return args
 
 
+def select_boot_model(cfg, cmdline):
+    cfg = copy.deepcopy(cfg)
+    boot = cfg.pop('boot_models')
+    selections = [arg.partition('=')[2] for arg in cmdline.split()
+                  if arg.startswith('strata.model=')]
+    if len(selections) > 1:
+        raise ValueError('Only one strata.model= boot selection is allowed')
+    model = selections[0] if selections else boot['default']
+    if model not in boot['profiles']:
+        raise ValueError(f'Unknown Strata boot model: {model}')
+    selected = copy.deepcopy(boot['profiles'][model])
+    overrides = selected.pop('argument_overrides', {})
+    cfg['args'] = set_options(cfg['args'], overrides)
+    cfg['user_args'] = set_options(cfg.get('user_args', []), overrides)
+    cfg.setdefault('env', {}).update(selected.pop('env', {}))
+    cfg.update(selected)
+    return cfg
+
+
 def select(root, cfg, directory):
+    if 'boot_models' in cfg:
+        cfg = select_boot_model(cfg, Path('/proc/cmdline').read_text())
+        return Path(cfg['cwd']), cfg
     path = directory / 'production-baseline.json'
     if not path.is_file():
         return root, copy.deepcopy(cfg)

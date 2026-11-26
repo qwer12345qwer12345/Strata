@@ -50,7 +50,6 @@ GROUPS = (
     )),
     ('adaptive-scheduling', (
         arm('nowait-off', {'STRATA_ADAPT_NOWAIT': '0'}),
-        arm('profile-pin-off', {'STRATA_CACHE_PIN_FRAC': '0'}),
     )),
     ('adaptive-overlap', (
         arm('lag-one', {'STRATA_ADAPT_LAG': '1'}),
@@ -147,7 +146,7 @@ def digest_file(path):
         return hashlib.file_digest(f, 'sha256').hexdigest()
 
 
-def run_group(root, cfg, directory, seed, reference, report, group, variants, workloads, arm_timeout):
+def run_group(root, cfg, directory, seed, references, report, group, variants, workloads, arm_timeout):
     batch = {'suite': report['suite'], 'group': group, 'status': 'incomplete', 'runs': [],
              'batch': len(report['groups']) + 1, 'batches': report['batches'],
              'pass_number': report['pass_number'], 'series': report['series'],
@@ -181,12 +180,17 @@ def run_group(root, cfg, directory, seed, reference, report, group, variants, wo
                     trial['vision']['cache_parent'] = str(folder/'vision')
                     if name == 'upstream-elastic-vision':
                         trial['vision'].update(expert_lease=False, elastic=True)
-                if name == 'lean-candidate':
+                trial_root = root
+                if name in references:
+                    reference = references[name]
                     trial['exe'] = reference['exe']
                     if digest_file(trial['exe']) != reference['sha256']:
-                        raise ValueError('lean candidate fingerprint mismatch')
+                        raise ValueError(f'{name} engine fingerprint mismatch')
                     row['engine_sha256'] = reference['sha256']
-                serve_trial(root, trial, folder, time.monotonic() + arm_timeout, row, workloads=workloads)
+                    if reference.get('root'):
+                        trial_root = Path(reference['root'])
+                        trial['cwd'] = str(trial_root)
+                serve_trial(trial_root, trial, folder, time.monotonic() + arm_timeout, row, workloads=workloads)
                 text = row.get('decode') or row.get('post_vision_decode', {})
                 cold, hot = row.get('cold_long'), row.get('hot_prefix')
                 if 'image_cold' in row and 'image_cached' in row:
@@ -228,17 +232,30 @@ def run_suite(root, cfg, directory, settings):
         baseline_args = cfg['args']
         seed_path = Path(baseline_args[baseline_args.index('--expert-profile') + 1])
         engine_sha = digest_file(cfg['exe'])
-        reference = settings.get('lean_candidate')
-        groups = GROUPS
+        references = {}
+        requested = settings.get('groups')
+        groups = GROUPS if requested is None else tuple(group for group in GROUPS if group[0] in requested)
+        if requested is not None and len(groups) != len(requested):
+            raise ValueError('Unknown or duplicate Strata patch-review group')
         if not (cfg.get('vision') or {}).get('gpu'):
             groups = tuple(g for g in groups if g[0] != 'vision-lease')
-        if reference:
+        if settings.get('lean_candidate'):
+            references['lean-candidate'] = settings['lean_candidate']
             groups = (('lean-production-bundle', (arm('lean-candidate', {
                 'STRATA_TQ_AMPERE_ROWS': '0', 'STRATA_TQ_AVXVNNI': '0',
                 'STRATA_K8V4_QK_IMMA': '0', 'STRATA_PLE_BF16_COMPACT': '0',
                 'STRATA_PLE_COPY_STREAM': '0', 'STRATA_DENSE_I8_AMPERE_SHAPES': '0',
                 'STRATA_DF2_WIDE_CONTEXT': '0', 'STRATA_PF_BATCH': '0',
             }, {'--lookup-max-t': '8', '--lookup-sizes': '2,3,4,5,6,7,8'}),)),) + groups
+        if settings.get('upstream_candidate'):
+            references['upstream-candidate'] = settings['upstream_candidate']
+            references['upstream-cublas-warm-off'] = settings['upstream_candidate']
+            references['upstream-reserve-384'] = settings['upstream_candidate']
+            groups = (('upstream-engine', (
+                arm('upstream-candidate'),
+                arm('upstream-cublas-warm-off', {'STRATA_PREFILL_WARM': '0'}),
+                arm('upstream-reserve-384', args={'--vram-reserve-mib': '384'}),
+            )),) + groups
         vision_cases = vision_workloads()
         passes = int(settings.get('passes', 1))
         if passes not in (1, 2):
@@ -247,11 +264,13 @@ def run_suite(root, cfg, directory, settings):
         if arm_timeout <= 0:
             raise ValueError('patch review needs a positive timeout per arm')
         series = settings.get('series', 1)
+        final_baseline = settings.get('final_baseline', True)
         fingerprint = hashlib.sha256(json.dumps({
             'suite': report['suite'], 'engine': engine_sha,
-            'reference': reference and reference['sha256'], 'groups': groups,
+            'references': {name: item['sha256'] for name, item in references.items()}, 'groups': groups,
             'args': baseline_args, 'env': cfg['env'], 'series': series,
-            'passes': passes, 'arm_timeout_s': arm_timeout, 'workloads': (WORKLOADS, CPU_PREFILL_CASES, vision_cases),
+            'passes': passes, 'final_baseline': final_baseline, 'arm_timeout_s': arm_timeout,
+            'workloads': (WORKLOADS, CPU_PREFILL_CASES, vision_cases),
         }, sort_keys=True).encode()).hexdigest()
         try:
             state = json.loads(progress.read_text())
@@ -264,7 +283,7 @@ def run_suite(root, cfg, directory, settings):
         plan = [(name, variants if pass_no == 1 else variants[::-1], pass_no)
                 for pass_no in range(1, passes + 1)
                 for name, variants in (groups if pass_no == 1 else groups[::-1])]
-        arms = 2 + sum(len(variants) for _, variants, _ in plan)
+        arms = 1 + int(final_baseline) + sum(len(variants) for _, variants, _ in plan)
         vision_suffix = vision_cases if any(name == 'vision-lease' for name, _ in groups) else ()
         # Run vision in the same place for its candidate and both baseline starts.
         cpu_cases = WORKLOADS + CPU_PREFILL_CASES
@@ -284,7 +303,7 @@ def run_suite(root, cfg, directory, settings):
                 report['pass_number'] = number
                 # Baselines include the matched extra vision and CPU-prefill cases.
                 timeout = arm_timeout + 80
-                batch = run_group(root, cfg, directory, seed, reference, report, label, (arm(label),),
+                batch = run_group(root, cfg, directory, seed, references, report, label, (arm(label),),
                                   baseline_cases, timeout)
                 name = f'{now}-{label}.json'
                 publish(results / name, batch)
@@ -301,14 +320,15 @@ def run_suite(root, cfg, directory, settings):
                 elif group in CPU_PREFILL_GROUPS:
                     workloads = cpu_cases
                     timeout += 30
-                batch = run_group(root, cfg, directory, seed, reference, report, group, variants, workloads, timeout)
+                batch = run_group(root, cfg, directory, seed, references, report, group, variants, workloads, timeout)
                 name = f"{now}-{batch['batch']:02d}-{group}.json"
                 publish(results / name, batch)
                 report['groups'].append({'group': group, 'pass_number': pass_no,
                                          'status': batch['status'], 'report': name})
                 report['elapsed_s'] = round(time.monotonic() - started, 1)
                 publish(latest, report)
-            baseline('baseline-last', passes)
+            if final_baseline:
+                baseline('baseline-last', passes)
         report['elapsed_s'] = round(time.monotonic() - started, 1)
         report['status'] = ('measured' if all(x['status'] == 'measured'
                                              for x in report['groups'] + report['baselines']) else 'incomplete')

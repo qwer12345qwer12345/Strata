@@ -42,3 +42,32 @@ Use wire first-content time to answer how long a user waits, prompt time to loca
 HC persistence and tail skip 7 were already excluded. BF16 pack upload, paired rows, AVX-VNNI, lookup width and batching, Dense short-window dispatch, and the trimmed build stay in the queue: their saved arms either show small first-content differences or mix different draft regimes. The 128.4 tok/s Dense result, for example, is a suffix-rich run and does not isolate Dense. No production setting was promoted or reverted.
 
 The next boot keeps only two production baselines and attempts all 31 remaining candidates in one sequence. The reports retain first content, prefill, prefix hits and streaming p95/p99, plus verification p50/p95/p99 with sample counts keyed by exact width and draft source.
+
+## Completed headless run
+
+The second run attempted all 18 groups and saved 33 arms including two baselines. Thirty completed. The 4,096 prompt chunk, upstream-only elastic vision and final baseline triggered the host memory guard. The final baseline reached 520 MiB of new swap and its long-code windows included stalls. Its 78.7 tok/s is not a clean second baseline, so the short-window comparisons below also use unaffected arms running in the same draft regime. The complete run was still on the original Gyro-S weights.
+
+| Comparison | Evidence | Decision on this host |
+| --- | --- | --- |
+| GPU expert rows and CPU dots | Paired to single changed the 3-row neural p95 from 33.67 to 33.10 ms. Disabling AVX-VNNI gave 33.48 ms. The three share the same suffix acceptance and 53.0% VRAM hit. | No standalone speed patch justified for the new release. |
+| Dense shape dispatch | On/off had 138.4/138.8 tok/s and suffix-16 p95 of 106.6/108.6 ms. Similar cold and hot first content. | Leave the extra table off. |
+| Q8 hyper-connections | Disabling the Q8 path raised the cold 3-row neural p95 from 33.4 to 34.5 ms and lowered long-decode VRAM hit from 53% to 51%. Both new GGUFs retain Q8_0 hyper-connection up matrices. | Keep the ordinary Q8 path and the upstream shared-memory read fix. Keep persistent reads off. |
+| Profile pinning and resident overlap | Disabling the 25% pin increased VRAM hits from 53.0% to 62.7% but raised the 3-row neural p95 from 33.7 to 56.9 ms. Its 137.1 tok/s had 1,252 accepted suffix tokens. The resident-overlap bundle lowered hits to 47.7%. | Keep the pin and resident Fetch 2. |
+| Prompt processing | Disabling GDN TC raised 29K-token cold first content from 11.37 to 11.66 s. CPU share at 3,072 raised sub-1K first content from 1.32 to 1.66 s and 1K–3K from 1.32 to 1.91 s. The 1,024 configuration also lost on these requests. | Keep GDN TC at NP=2 and CPU-share off. Keep fused TQ INT8 from the first run. |
+| BF16 table upload | Compact/off changed first content from 11.37 to 11.34 s. Disabling the separate copy stream gave 11.33 s with the same suffix regime and 53% hit. | Keep the existing lossless compact path on 0.1.65. Drop the independent copy stream override and omit the local BF16 GPU upload patch from the new release. |
+| Drafting | Lookup width 16 accepted 1,153 suffix tokens; width 8 accepted 19 on this request. The suffix-16 median was 102.3 ms per window. Spec 3 reduced cold streaming p99 from 38.4 to 33.2 ms while long-output throughput was 93.6 tok/s. | Keep neural spec 4. Compare lookup width on the new weights and retain a narrow check of NOWAIT. |
+
+The 0.1.69 candidate retains V2/V3 archives, the ChatML boundary and unpublished-repeat recovery, resident adaptive fetch, and the on-demand vision lease. It leaves out fork PRs 6, 7 and 9 and the additional expert-row and Dense dispatch patches. It uses the upstream wide-window implementation and Q8 shared-memory read correction. The port also fixes an L2 pin that could be lost when a longer snapshot superseded it.
+
+The single-card comparison holds the model, expert seed, PLE, resident KV window, draft and API workloads constant. Version 0.1.66 began waiting for cuBLAS warm-up before measuring the free VRAM available to experts. To distinguish that timing change from the operator's reserve, 0.1.69 has one arm with warm-up disabled at 448 MiB reserve and another with warm-up enabled at 384 MiB. The comparison records pre-cache free VRAM, expert slots, post-load free VRAM, first content, conditional verification latency, and expert reads. The older 226-slot difference alone cannot explain the hit-rate gap.
+
+The November 26 desktop startup probe used the original Gyro-S, a 32K context, a fixed resident KV setting and a 6 GiB pinned expert RAM budget on the same RTX 3080. It ran one 12-token Chat Completions request per start. Downloads shared the desktop, so these starts measure capacity and readiness rather than full-workload speed.
+
+| Engine and startup policy | VRAM free before expert-cache sizing | Expert slots | VRAM free at ready |
+| --- | ---: | ---: | ---: |
+| 0.1.65, warm-up on, reserve 448 MiB | 6.86 GiB | 5,934 | 369 MiB |
+| 0.1.69, warm-up on, reserve 448 MiB | 6.64 GiB | 5,708 | 619 MiB |
+| 0.1.69, warm-up off, reserve 448 MiB | 6.86 GiB | 5,930 | 433 MiB |
+| 0.1.69, warm-up on, reserve 384 MiB | 6.64 GiB | 5,772 | 555 MiB |
+
+Disabling the pre-load warm-up returned 222 of the 226 slots lost across versions. That identifies the cause of the slot-count change in this setup. The 64 MiB reserve adjustment returned 64 slots. Long-output expert hit rate and tail latency still need the same-model headless comparison.

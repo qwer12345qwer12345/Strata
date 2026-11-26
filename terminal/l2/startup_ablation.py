@@ -180,7 +180,10 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
                 raise RuntimeError('trial did not reach resident RAM + DFlash2 mode')
             result['resources'] = [line for line in startup.splitlines() if any(
                 marker in line for marker in ('expert cache auto:', 'resident RAM mode:', 'STRATA_ADAPT_FETCH=2:',
-                                              'Q8_0 persistent read residency checked', 'prompt chunk auto:'))]
+                                              'Q8_0 persistent read residency checked', 'prompt chunk auto:',
+                                              'warmed the BF16 and FP16 GEMM libraries',
+                                              'after the expert cache was written',
+                                              'MiB of VRAM free with everything loaded'))]
             endpoint = f'http://127.0.0.1:{port}'
             default_cases = (
                 ('warmup', 'Explain database transaction isolation in a short paragraph.', 40),

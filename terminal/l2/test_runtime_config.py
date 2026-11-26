@@ -54,4 +54,22 @@ class RuntimeConfiguration(unittest.TestCase):
    mine=user_args.capture(cfg)
    self.assertEqual(mine[mine.index('--spec')+1],'4')
    self.assertEqual(mine[mine.index('--lookup-max-t')+1],'16')
+ def test_grub_keeps_models_and_caches_independent(self):
+  profile = {'args': ['--ple-gguf', 'shared-bf16'], 'env': {'STRATA_ROUTE_PRIOR': '0.5'},
+             'boot_models': {'default': 'huihui', 'profiles': {
+              'huihui': {'model_name': 'huihui', 'slot_save_path': '/huihui/sessions',
+                         'argument_overrides': {'--native': 'huihui.gguf'}},
+              'signal2': {'model_name': 'signal2', 'slot_save_path': '/signal2/sessions',
+                          'argument_overrides': {'--native': 'signal2.gguf'}}}}}
+  self.assertEqual(runtime.select_boot_model(profile, '')['model_name'], 'huihui')
+  signal2 = runtime.select_boot_model(profile, 'systemd.unit=strata.target strata.model=signal2')
+  self.assertEqual(signal2['slot_save_path'], '/signal2/sessions')
+  self.assertEqual(signal2['args'], ['--ple-gguf', 'shared-bf16', '--native', 'signal2.gguf'])
+  self.assertEqual(signal2['user_args'], ['--native', 'signal2.gguf'])
+  self.assertEqual(signal2['env']['STRATA_ROUTE_PRIOR'], '0.5')
+  self.assertNotIn('model_name', profile)
+  with self.assertRaises(ValueError):
+   runtime.select_boot_model(profile, 'strata.model=wrong')
+  with self.assertRaises(ValueError):
+   runtime.select_boot_model(profile, 'strata.model=huihui strata.model=signal2')
 if __name__=='__main__':unittest.main()
