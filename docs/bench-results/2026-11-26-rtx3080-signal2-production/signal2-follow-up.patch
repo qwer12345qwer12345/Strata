@@ -15,6 +15,53 @@ index 1d77e66f12e5afe06e38d7035671c2e4350df81a..d177c794b2312582d6ebf61953141e14
    # Tells tests/CMakeLists.txt to add the CUDA-dependent Catch2 target.  It cannot be declared there
    # unconditionally: tests/ is added at the end of this file, but the flag has to be known before it runs.
    if(STRATA_ENABLE_CUDA)
+diff --git a/engine/include/strata/core/conversation_file.hpp b/engine/include/strata/core/conversation_file.hpp
+index becae8382ce14e69f43383c00c2f0c9a0227e40c..735e9aa0f9a10a581e9ebb69f386aebf6f99d3c9 100644
+--- a/engine/include/strata/core/conversation_file.hpp
++++ b/engine/include/strata/core/conversation_file.hpp
+@@ -14,6 +14,7 @@
+ #include <cstdint>
+ #include <functional>
+ #include <optional>
++#include <span>
+ #include <string>
+ #include <utility>
+ #include <vector>
+@@ -162,6 +163,9 @@ struct SessionWriteOptions {
+     SessionPhase phase;
+     // tests: return an errno value to make a step fail ("write", "file_flush", "rename", "dir_flush"), 0 to go on
+     std::function<int(const char* step)> fault;
++    // Synchronous writers may stream existing, immutable checkpoints by reference.
++    // The caller keeps them alive and joins any pending capture before the write.
++    std::span<const ConversationCheckpoint* const> checkpoint_refs;
+ };
+ 
+ // Writes a temporary file beside `path` (a unique hidden name, created exclusively: never an existing file or link;
+@@ -248,7 +252,7 @@ uint64_t session_save_peak_bytes(const ConversationCheckpoint* deepest, const Se
+ // and the live state are untouched and no file was opened.  Not a reservation.
+ // [giphoo] l2-exp v2.2: the keep-set choice alone (deepest + pinned + HEAD anchors + depth fill), no
+ // capture - the incremental save plans against this list before it copies anything.
+-std::vector<const ConversationCheckpoint*> session_pick_checkpoints(const std::vector<ConversationCheckpoint>& chain);
++std::vector<const ConversationCheckpoint*> session_pick_checkpoints(const std::vector<ConversationCheckpoint>& chain, bool full_save = false);
+ bool session_save_checkpoints(const std::vector<ConversationCheckpoint>& chain, const SessionSaveLive& live,
+                               const std::function<bool(uint64_t need_bytes, std::string& why)>& admit,
+                               std::vector<ConversationCheckpoint>& out, std::string& why);
+diff --git a/engine/include/strata/core/conversation_snapshot.hpp b/engine/include/strata/core/conversation_snapshot.hpp
+index c0835d4405788edd2f8b2acfd1e9b1d61e332c29..700e8c1848b3af5beed51dbd6b37fc675f2ac261 100644
+--- a/engine/include/strata/core/conversation_snapshot.hpp
++++ b/engine/include/strata/core/conversation_snapshot.hpp
+@@ -145,6 +145,11 @@ bool conversation_snapshot_sources(SavedConversation& meta, std::vector<SessionK
+ bool conversation_snapshot_sources(SavedConversation& meta, std::vector<SessionKvSource>& sources,
+                                    const ConversationView& view, const SessionState& session,
+                                    const ModelGeometry& g, const QsaState* draft, std::string& error);
++// Prepare synchronous write sources and validate borrowed checkpoints without copying them.
++bool conversation_snapshot_sources(SavedConversation& meta, std::vector<SessionKvSource>& sources,
++                                   const ConversationView& view, const SessionState& session,
++                                   const ModelGeometry& g, const QsaState* draft, std::string& error,
++                                   std::span<const ConversationCheckpoint* const> checkpoints);
+ bool conversation_snapshot_validate(const SavedConversation& image, const SessionState& session,
+                                     const ModelGeometry& g, const QsaState& draft, std::string& error);
+ /// #2409: true when a restore (or a copy) on CUDA device `device` from the calling thread creates no copy stream: this
 diff --git a/engine/include/strata/core/dflash2.hpp b/engine/include/strata/core/dflash2.hpp
 index 92a8649140e1668cc81581173edd9a147406fdd2..85a14bc6c941a0af1888834e3905d31ef230a5d4 100644
 --- a/engine/include/strata/core/dflash2.hpp
@@ -111,6 +158,734 @@ index 92a8649140e1668cc81581173edd9a147406fdd2..85a14bc6c941a0af1888834e3905d31e
      int64_t ring_hi_ = 0;           ///< one past the highest position written in this epoch
      bool ctx_pending_ = false;      ///< context_async() queued rows nobody has waited for yet
      int32_t epoch_ = 0;             ///< stamped into the ring tags: a new epoch makes every older slot invalid
+diff --git a/engine/include/strata/core/session_save_reclaim.hpp b/engine/include/strata/core/session_save_reclaim.hpp
+index da2e26c2fff6ce295019e672a90a3536c6a9e8bd..093d28577debae9ab59501e9780f3992aeb2f529 100644
+--- a/engine/include/strata/core/session_save_reclaim.hpp
++++ b/engine/include/strata/core/session_save_reclaim.hpp
+@@ -17,10 +17,10 @@ struct SessionSaveReclaimed {
+ template<class Probe>
+ SessionSaveReclaimed session_save_reclaim(std::vector<ConversationCheckpoint>& chain,
+                                         ConversationCache& cache, const SessionSaveLive& live,
+-                                        uint64_t floor, Probe available) {
++                                        uint64_t floor, Probe available, bool borrow_checkpoints = false) {
+     SessionSaveReclaimed out;
+     const auto* selected = session_deepest_checkpoint(chain);
+-    const uint64_t need = session_save_peak_bytes(selected, live);
++    const uint64_t need = session_save_peak_bytes(borrow_checkpoints ? nullptr : selected, live);
+     auto room = available();
+     auto done = [&] { return !room || need == UINT64_MAX || conversation_memory_admit(room, need, floor); };
+     if (done()) return out;
+diff --git a/engine/src/core/conversation_file.cpp b/engine/src/core/conversation_file.cpp
+index 8c2ea5014dc0dfb37f23eab0231b2759a40318b1..5c0dd3df31bd6660be50c522f1e0b02718419af5 100644
+--- a/engine/src/core/conversation_file.cpp
++++ b/engine/src/core/conversation_file.cpp
+@@ -693,12 +693,27 @@ template<class Sink> void put_checkpoint(Sink& o, const ConversationCheckpoint&
+     o.u64(c.used);
+ }
+ 
+-void put_payload(Out& o, const SavedConversation& s, const std::vector<SessionKvSource>* sources = nullptr) {
++struct WriteCheckpoints {
++    const std::vector<ConversationCheckpoint>& owned;
++    std::span<const ConversationCheckpoint* const> borrowed;
++
++    size_t size() const { return borrowed.empty() ? owned.size() : borrowed.size(); }
++    const ConversationCheckpoint& operator[](size_t i) const {
++        return borrowed.empty() ? owned[i] : *borrowed[i];
++    }
++    bool valid() const {
++        return borrowed.empty() ||
++               (owned.empty() && std::all_of(borrowed.begin(), borrowed.end(), [](auto* ptr) { return ptr != nullptr; }));
++    }
++};
++
++void put_payload(Out& o, const SavedConversation& s, const std::vector<SessionKvSource>* sources,
++                 const WriteCheckpoints& checkpoints) {
+     for (int64_t g : s.geometry) o.i64(g);
+     o.i64(s.layer_lo); o.i64(s.layer_hi); o.u64(s.cvec ? 1 : 0);
+     put_checkpoint(o, s.live);
+-    o.u64(s.checkpoints.size());
+-    for (const auto& c : s.checkpoints) put_checkpoint(o, c);
++    o.u64(checkpoints.size());
++    for (size_t i = 0; i < checkpoints.size(); ++i) put_checkpoint(o, checkpoints[i]);
+     if (sources) {
+         o.u64(sources->size());
+         for (const auto& k : *sources) {
+@@ -803,9 +818,10 @@ bool get_payload(In& in, SavedConversation& s) {
+     return true;
+ }
+ 
+-bool has_stage_parts(const SavedConversation& s) {
++bool has_stage_parts(const SavedConversation& s, const WriteCheckpoints& checkpoints) {
+     if (!s.live.stage_parts.empty()) return true;
+-    for (const auto& c : s.checkpoints) if (!c.stage_parts.empty()) return true;
++    for (size_t i = 0; i < checkpoints.size(); ++i)
++        if (!checkpoints[i].stage_parts.empty()) return true;
+     return false;
+ }
+ 
+@@ -1094,10 +1110,12 @@ bool write_impl(const std::string& path, const SavedConversation& image, const s
+                 SessionStatus& st) {
+     st = {};
+     st.error = SessionError::invalid;   // refusals before any disk access
+-    if (has_stage_parts(image)) { error = "session file: layer-split state cannot be saved"; return false; }
++    const WriteCheckpoints checkpoints{image.checkpoints, opt.checkpoint_refs};
++    if (!checkpoints.valid()) { error = "session file: invalid checkpoint sources"; return false; }
++    if (has_stage_parts(image, checkpoints)) { error = "session file: layer-split state cannot be saved"; return false; }
+     if (sources && !image.kv.empty()) { error = "session file: K/V given both in the image and as sources"; return false; }
+     Out sizing;
+-    put_payload(sizing, image, sources);
++    put_payload(sizing, image, sources, checkpoints);
+     if (sizing.overflow || sizing.n > UINT64_MAX - kHeader - kTrailer ||
+         sizing.n + kHeader + kTrailer > (uint64_t) std::numeric_limits<size_t>::max()) {
+         error = "session file: the state is too large for this build";
+@@ -1140,7 +1158,7 @@ bool write_impl(const std::string& path, const SavedConversation& image, const s
+     Out out;
+     out.f = &f;
+     out.hash = &hash;
+-    if (ok) put_payload(out, image, sources);
++    if (ok) put_payload(out, image, sources, checkpoints);
+     ok = ok && out.ok && out.n == payload;
+     if (ok) {
+         const uint64_t ph = hash.digest();
+@@ -1222,18 +1240,18 @@ uint64_t session_save_peak_bytes(const ConversationCheckpoint* deepest, const Se
+ 
+ // [giphoo] l2-exp v2.2: the keep-set choice alone (deepest + pinned + HEAD anchors + depth fill),
+ // no capture - the incremental save plans against this before it copies anything.
+-std::vector<const ConversationCheckpoint*> session_pick_checkpoints(const std::vector<ConversationCheckpoint>& chain) {
++std::vector<const ConversationCheckpoint*> session_pick_checkpoints(const std::vector<ConversationCheckpoint>& chain, bool full_save) {
+     const ConversationCheckpoint* deepest = session_deepest_checkpoint(chain);
+     const char* e = std::getenv("STRATA_SESSION_CHK");
+     const size_t keep = e && *e ? (size_t) std::max(0L, std::strtol(e, nullptr, 10)) : 1;
+     std::vector<const ConversationCheckpoint*> pick;
+-    if (!deepest || keep == 0) return pick;
++    if (!deepest || (keep == 0 && !full_save)) return pick;
+     auto add = [&](const ConversationCheckpoint* c) {
+         for (const auto* p2 : pick) if (p2 == c) return;
+         pick.push_back(c);
+     };
+     add(deepest);
+-    if (keep == 1) return pick;
++    if (keep <= 1) return pick;
+     const char* he = std::getenv("STRATA_SESSION_CHK_HEAD");
+     const size_t head_n = he && *he ? (size_t) std::max(0L, std::strtol(he, nullptr, 10)) : 3;
+     for (const auto& c : chain) if (c.pinned) add(&c);
+diff --git a/engine/src/core/conversation_file_l2.inc b/engine/src/core/conversation_file_l2.inc
+index eb593899fa3e3acae33374476a27ea647af2a071..af6d969aed3f0c482be85dc9426ff31cbab64324 100644
+--- a/engine/src/core/conversation_file_l2.inc
++++ b/engine/src/core/conversation_file_l2.inc
+@@ -222,7 +222,7 @@ public:
+     // 同档 pending 或预算满 → join 等追平 (上限 writer_join_ms).
+     bool submit(WriterJob&& job) {
+         const uint64_t budget = (uint64_t)(writer_budget_mib() << 20);
+-        if (job.bytes > budget) return false;
++        if (job.bytes > budget || !job.opt.checkpoint_refs.empty()) return false;
+         std::unique_lock<std::mutex> lk(mu_);
+         const auto deadline = std::chrono::steady_clock::now() +
+                               std::chrono::milliseconds(writer_join_ms());
+diff --git a/engine/src/core/conversation_file_test.cpp b/engine/src/core/conversation_file_test.cpp
+index c9f267e425efe33ea3a75c485d2c05d726312904..4c28d380e8873abaac3d210ca9b8ba6090bc0597 100644
+--- a/engine/src/core/conversation_file_test.cpp
++++ b/engine/src/core/conversation_file_test.cpp
+@@ -233,6 +233,17 @@ int main() {
+         check(session_file_read(v2p.string(), id, back, r2, error), "v2: read succeeds");
+         check(r2 == w2, "v2: read reports the file size");
+         check(same(back, original), "v2: round trip equals the original");
++        {
++            const std::vector<const ConversationCheckpoint*> refs{&original.checkpoints[0], &original.checkpoints[1]};
++            SavedConversation metadata = original;
++            metadata.checkpoints.clear();
++            SessionWriteOptions opt;
++            opt.checkpoint_refs = refs;
++            const fs::path borrowed = dir / "v2-borrowed.bin";
++            size_t n = 0;
++            check(session_file_write(borrowed.string(), metadata, id, n, error, opt) &&
++                  slurp(borrowed) == slurp(v2p), "v2: borrowed checkpoints serialize identically");
++        }
+         // determinism: the parsed image re-serializes to the same v2 bytes (v2.1 reorders fields,
+         // so the v1-writer byte identity of M1 no longer holds; same() plus this covers it)
+         const fs::path again = dir / "v2-again.bin";
+@@ -418,11 +429,14 @@ int main() {
+                     ConversationCheckpoint fresh_ck = grown2.live;
+                     SavedConversation gmr = grown2;
+                     gmr.kv.clear();
+-                    gmr.checkpoints = {fresh_ck};
++                    gmr.checkpoints.clear();
++                    const std::vector<const ConversationCheckpoint*> fresh_refs{&fresh_ck};
++                    SessionWriteOptions keep_opt;
++                    keep_opt.checkpoint_refs = fresh_refs;
+                     const std::vector<SessionSaveIncSlot> keep_rot{{1, -1}, {-1, 0}};
+                     // grown2 ? kv ?
+                     size_t wr3 = 0;
+-                    const bool w3 = session_file_saveinc(rp3.string(), gmr, kvs2, id, keep_rot, wr3, error);
++                    const bool w3 = session_file_saveinc(rp3.string(), gmr, kvs2, id, keep_rot, wr3, error, keep_opt);
+                     if (!w3) std::fprintf(stderr, "[repro] rotate write error: %s\n", error.c_str());
+                     check(w3, "rotate: the shifted-reuse extension writes");
+                     SavedConversation back3;
+@@ -832,6 +846,14 @@ int main() {
+         const fs::path p = dir / "streamed.bin";
+         check(session_file_write(p.string(), meta, sources, id, written, error), "streamed write succeeds");
+         check(slurp(p) == image, "streamed write equals the captured-image write");
++        const std::vector<const ConversationCheckpoint*> refs{&original.checkpoints[0], &original.checkpoints[1]};
++        SessionWriteOptions borrowed;
++        borrowed.checkpoint_refs = refs;
++        check(!session_file_write((dir / "ambiguous.bin").string(), meta, sources, id, written, error, borrowed),
++              "owned and borrowed checkpoint lists cannot be mixed");
++        meta.checkpoints.clear();
++        check(session_file_write(p.string(), meta, sources, id, written, error, borrowed) && slurp(p) == image,
++              "v1: borrowed checkpoints serialize identically");
+         // a failing source leaves no file
+         auto broken = sources;
+         broken[1].read = [](size_t, size_t, void*, size_t) { return false; };
+@@ -1504,6 +1526,29 @@ int main() {
+             size_t rv3 = 0;
+             check(session_file_read(v3.string(), id, v3back, rv3, error) && same(v3back, original),
+                   "v3: full round trip");
++            {
++                const std::vector<const ConversationCheckpoint*> refs{&original.checkpoints[0], &original.checkpoints[1]};
++                SavedConversation metadata = original;
++                metadata.checkpoints.clear();
++                metadata.kv.clear();
++                auto sources = kv_src(original);
++                size_t read_bytes = 0, expected_bytes = 0;
++                for (auto& source : sources) {
++                    for (auto size : source.sizes) expected_bytes += size;
++                    auto read = source.read;
++                    source.read = [read, &read_bytes](size_t part, size_t from, void* dst, size_t n) {
++                        read_bytes += n;
++                        return read(part, from, dst, n);
++                    };
++                }
++                SessionWriteOptions opt;
++                opt.checkpoint_refs = refs;
++                const auto borrowed = dir / "v3-borrowed";
++                check(session_file_write(borrowed.string(), metadata, sources, id, wv3, error, opt) &&
++                      session_file_read(borrowed.string(), id, v3back, rv3, error) && same(v3back, original),
++                      "v3: borrowed checkpoint and streamed K/V round trip");
++                check(read_bytes == expected_bytes, "v3: size calculations never read the K/V source");
++            }
+ 
+             {
+                 SavedConversation unsorted3 = original;
+@@ -1572,10 +1617,13 @@ int main() {
+             expected4.checkpoints = {original.checkpoints[1], grown4.live};
+             SavedConversation meta4 = grown4;
+             meta4.kv.clear();
+-            meta4.checkpoints = {grown4.live};
++            meta4.checkpoints.clear();
++            const std::vector<const ConversationCheckpoint*> fresh{&grown4.live};
++            SessionWriteOptions opt4;
++            opt4.checkpoint_refs = fresh;
+             const std::vector<SessionSaveIncSlot> keep4{{1, -1}, {-1, 0}};
+-            check(session_file_saveinc(v3.string(), meta4, kv_src(grown4), id, keep4, wi3, error),
+-                  "v3: second delta and checkpoint rotation");
++            check(session_file_saveinc(v3.string(), meta4, kv_src(grown4), id, keep4, wi3, error, opt4),
++                  "v3: second delta and rotation with a borrowed fresh checkpoint");
+             check(session_file_read(v3.string(), id, v3back, rv3, error) && same(v3back, expected4),
+                   "v3: rotated composite round trip");
+             auto count_prefix = [&](const char* prefix) {
+diff --git a/engine/src/core/conversation_file_v2.inc b/engine/src/core/conversation_file_v2.inc
+index 97d66141e52b8d664425b96a9138dc3a675d06b4..f6045c4a80c4e5df3895f6037dbac0ff87815e6c 100644
+--- a/engine/src/core/conversation_file_v2.inc
++++ b/engine/src/core/conversation_file_v2.inc
+@@ -233,7 +233,7 @@ private:
+ // ---- write side: every field streams through a block compressor, nothing is materialised -----
+ class V2Out {
+ public:
+-    V2Out(V2Io* io, uint64_t blk) : io_(io), blk_(blk) {}
++    V2Out(V2Io* io, uint64_t blk) : io_(io), blk_(blk), buf_(io ? (size_t) kV2BlkMax : 0) {}
+     bool ok() const { return ok_; }
+     bool read_failed() const { return read_failed_; }
+     uint64_t raw_total() const { return raw_n_; }
+@@ -276,14 +276,30 @@ public:
+         b.visit(from, n, [&](const uint8_t* q, size_t c, size_t) { sink(q, c); return ok_; });
+     }
+     void src_bytes(const SessionKvSource& s, size_t part, size_t from, size_t n) {
+-        if (!n) return;
+-        if (!s.read) { ok_ = false; read_failed_ = true; return; }
+-        std::vector<uint8_t> buf(std::min<size_t>(n, 1u << 20));
+-        for (size_t at = 0; at < n && ok_;) {
+-            const size_t c = std::min(buf.size(), n - at);
+-            if (!s.read(part, at + from, buf.data(), c)) { ok_ = false; read_failed_ = true; return; }
+-            sink(buf.data(), c);
+-            at += c;
++        if (!n || !ok_) return;
++        if (!s.read || part >= s.sizes.size() || from > s.sizes[part] || n > s.sizes[part] - from) {
++            ok_ = false;
++            read_failed_ = true;
++            return;
++        }
++        // The preflight already knows the extents. Read each K/V byte only
++        // during the actual write and directly into its output block.
++        if (!io_) {
++            raw_n_ = sat_add(raw_n_, n);
++            return;
++        }
++        while (n && ok_) {
++            if (buf_used_ == buf_.size()) flush_block();
++            if (!ok_) break;
++            const size_t count = std::min({n, buf_.size() - buf_used_, size_t(1) << 20});
++            if (!s.read(part, from, buf_.data() + buf_used_, count)) {
++                ok_ = false;
++                read_failed_ = true;
++                return;
++            }
++            buf_used_ += count;
++            from += count;
++            n -= count;
+         }
+     }
+     void finish() { flush_block(); }
+@@ -336,14 +352,15 @@ private:
+     size_t cur_seg_ = 0, buf_used_ = 0;
+     bool ok_ = true, read_failed_ = false;
+     SessionProgress progress_;
+-    std::vector<uint8_t> buf_ = std::vector<uint8_t>((size_t) kV2BlkMax);
++    std::vector<uint8_t> buf_;
+     std::vector<V2SegRec> segs_;
+     std::vector<V2BlockRec> blocks_;
+ };
+ 
+ // counts: every scalar first, so the reader can pre-gate everything before any payload byte
+ void v2_put_counts(V2Out& o, const SavedConversation& s, const std::vector<SessionKvSource>* sources,
+-                   size_t n_ck) {
++                   const WriteCheckpoints& checkpoints) {
++    const size_t n_ck = checkpoints.size();
+     for (int64_t g : s.geometry) o.i64(g);
+     o.i64(s.layer_lo); o.i64(s.layer_hi); o.u64(s.cvec ? 1 : 0);
+     o.u64(n_ck);
+@@ -358,7 +375,7 @@ void v2_put_counts(V2Out& o, const SavedConversation& s, const std::vector<Sessi
+         o.u64(c.block_pos.size() * v2_esz(c.block_pos));
+     };
+     ck(s.live);
+-    for (size_t i = 0; i < n_ck; ++i) ck(i < s.checkpoints.size() ? s.checkpoints[i] : ConversationCheckpoint{});
++    for (size_t i = 0; i < n_ck; ++i) ck(checkpoints[i]);
+     const size_t n_layers = sources ? sources->size() : s.kv.size();
+     o.u64(n_layers);
+     for (size_t l = 0; l < n_layers; ++l) {
+@@ -397,15 +414,13 @@ void v2_stream_state(V2Out& o, const ConversationCheckpoint& c, uint8_t kind, ui
+     o.bytes(c.block_pos.data(), c.block_pos.size() * v2_esz(c.block_pos));
+ }
+ 
+-void v2_put_stream(V2Out& o, const SavedConversation& s, const std::vector<SessionKvSource>* sources, size_t n_ck) {
++void v2_put_stream(V2Out& o, const SavedConversation& s, const std::vector<SessionKvSource>* sources,
++                   const WriteCheckpoints& checkpoints) {
+     o.open_segment(0);
+-    v2_put_counts(o, s, sources, n_ck);
++    v2_put_counts(o, s, sources, checkpoints);
+     v2_stream_state(o, s.live, 4, 0);
+-    for (size_t i = 0; i < n_ck; ++i) {
+-        const ConversationCheckpoint empty{};
+-        const ConversationCheckpoint& c = i < s.checkpoints.size() ? s.checkpoints[i] : empty;
+-        v2_stream_state(o, c, 5, (uint16_t) i);
+-    }
++    for (size_t i = 0; i < checkpoints.size(); ++i)
++        v2_stream_state(o, checkpoints[i], 5, (uint16_t) i);
+     if (sources) {
+         for (size_t l = 0; l < sources->size(); ++l) {
+             const auto& k = (*sources)[l];
+@@ -481,11 +496,13 @@ bool write_v2_impl(const std::string& path, const SavedConversation& image, cons
+                    SessionStatus& st) {
+     st = {};
+     st.error = SessionError::invalid;
+-    if (has_stage_parts(image)) { error = "session file: layer-split state cannot be saved"; return false; }
++    const WriteCheckpoints checkpoints{image.checkpoints, opt.checkpoint_refs};
++    if (!checkpoints.valid()) { error = "session file: invalid checkpoint sources"; return false; }
++    if (has_stage_parts(image, checkpoints)) { error = "session file: layer-split state cannot be saved"; return false; }
+     if (sources && !image.kv.empty()) { error = "session file: K/V given both in the image and as sources"; return false; }
+     const uint64_t blk = v2_block_target();
+     V2Out sizing(nullptr, blk);
+-    v2_put_stream(sizing, image, sources, image.checkpoints.size());
++    v2_put_stream(sizing, image, sources, checkpoints);
+     if (!sizing.ok() || sizing.raw_total() > (uint64_t) std::numeric_limits<size_t>::max() - (64ull << 20)) {
+         error = "session file: the state is too large for this build";
+         return false;
+@@ -520,7 +537,7 @@ bool write_v2_impl(const std::string& path, const SavedConversation& image, cons
+     v2_header_bytes(h, id, payload);
+     bool ok = io.write_all(h, kHeader);
+     if (ok) {
+-        v2_put_stream(out, image, sources, image.checkpoints.size());
++        v2_put_stream(out, image, sources, checkpoints);
+         ok = out.ok();
+     }
+     uint64_t file_total = 0;
+@@ -663,14 +680,13 @@ public:
+     };
+     V2SegReader(V2Io& f, const V2Dir& d, const V2SegRec& s, std::string& error, ReadMeter* meter = nullptr)
+         : f_(f), d_(d), s_(s), error_(error), depth_(v2_readahead_depth()), meter_(meter) {}
+-    V2SegReader(const V2SegReader&) = delete;              // futures do not copy; the vector moves
++    V2SegReader(const V2SegReader&) = delete;
+     V2SegReader& operator=(const V2SegReader&) = delete;
+-    V2SegReader(V2SegReader&&) = default;                  // references rebind, deque<future> moves
+     bool read(uint8_t* p, size_t n) {
+         while (n) {
+             if (at_ == have_ && !next_block()) return false;
+             const size_t c = std::min(n, have_ - at_);
+-            std::memcpy(p, cur_.data() + at_, c);
++            std::memcpy(p, cur_.data() + 12 + at_, c);
+             at_ += c;
+             p += c;
+             n -= c;
+@@ -723,24 +739,24 @@ private:
+             b.err = "session file: block header disagrees with the directory";
+             return b;
+         }
+-        b.data.resize(r->usize);
+         if (r->mode != 1) { b.err = "session file: compressed blocks are not supported in this build"; return b; }
+-        std::memcpy(b.data.data(), raw.data() + 12, r->csize);
+-        if (session_hash64(b.data.data(), b.data.size(), 0) != r->hash) {
++        if (session_hash64(raw.data() + 12, r->usize, 0) != r->hash) {
+             b.err = "session file: block checksum mismatch";
+             return b;
+         }
++        b.data = std::move(raw);
+         b.ok = true;
+         return b;
+     }
+     bool next_block() {
+         if (pos_ >= s_.idx.size()) { error_ = "session file: segment data ends early"; return false; }
++        std::vector<uint8_t>().swap(cur_);
+         if (depth_ <= 0) {
+             const V2BlockRec& r = d_.blocks[s_.idx[pos_]];
+             PreBlock b = fetch_io(&f_, &r, meter_);
+             if (!b.ok) { error_ = b.err; return false; }
+             cur_ = std::move(b.data);
+-            have_ = cur_.size();
++            have_ = cur_.size() - 12;
+             at_ = 0;
+             ++pos_;
+             return true;
+@@ -750,11 +766,15 @@ private:
+             uint64_t local_offset = r->offset;
+             const int fd = f_.block_fd(r->offset, local_offset);
+             if (fd < 0) {
+-                fut_.emplace_back(std::async(std::launch::async, [this, r] { return fetch_io(&f_, r, meter_); }));
++                fut_.emplace_back(std::async(std::launch::async, [file = &f_, r, meter = meter_] {
++                    return fetch_io(file, r, meter);
++                }));
+             } else {
+                 V2BlockRec local = *r;
+                 local.offset = local_offset;
+-                fut_.emplace_back(std::async(std::launch::async, [fd, local, this] { return fetch_fd(fd, &local, meter_); }));
++                fut_.emplace_back(std::async(std::launch::async, [fd, local, meter = meter_] {
++                    return fetch_fd(fd, &local, meter);
++                }));
+             }
+         }
+         if (fut_.empty()) { error_ = "session file: segment data ends early"; return false; }
+@@ -762,7 +782,7 @@ private:
+         fut_.pop_front();
+         if (!b.ok) { error_ = b.err; return false; }
+         cur_ = std::move(b.data);
+-        have_ = cur_.size();
++        have_ = cur_.size() - 12;
+         at_ = 0;
+         ++pos_;
+         return true;
+@@ -802,7 +822,7 @@ struct V2In {
+     bool fail(const std::string& m) { if (error.empty()) error = "session file: " + m; return false; }
+     bool raw(void* p, size_t c) {
+         if (c > left) return fail("payload ends early");
+-        if (c && !meta->read((uint8_t*) p, c)) return false;
++        if (c && (!reader || !reader->read((uint8_t*) p, c))) return false;
+         left -= c;
+         return true;
+     }
+@@ -820,18 +840,18 @@ struct V2In {
+             return fail("payload order disagrees with the directory");
+         if (s.raw_total > left) return fail("payload ends early");
+         ++next_seg;
+-        readers_.emplace_back(*file, *dir, s, error, meter);
+-        out = &readers_.back();
++        // A field is always consumed before taking the next one. Destroy
++        // its reader (and join prefetches) before allocating the next block.
++        reader.emplace(*file, *dir, s, error, meter);
++        out = &*reader;
+         return true;
+     }
+-    std::vector<V2SegReader> readers_;
+-    V2SegReader* meta = nullptr;
++    std::optional<V2SegReader> reader;
+ };
+ 
+ bool v2_get_counts(V2In& in, V2Counts& c) {
+     V2SegReader* m = nullptr;
+     if (!in.take_seg(0, 0, 0, m)) return false;
+-    in.meta = m;
+     for (auto& g : c.geometry) if (!in.i64(g)) return false;
+     uint64_t cv = 0;
+     if (!in.i64(c.layer_lo) || !in.i64(c.layer_hi) || !in.u64(cv)) return false;
+@@ -1009,9 +1029,10 @@ bool read_v2_loaded_common(V2Io& io, uint64_t size, const V2Dir& dir, uint64_t p
+                            const std::function<bool(uint64_t, std::string&)>* fits, SessionStatus& st) {
+     (void) id;
+     if (dir.payload_raw != payload) { st.error = SessionError::invalid; error = "session file: payload size disagrees with the directory"; return false; }
++    const uint64_t prefetch_bytes = (uint64_t) std::max(0, v2_readahead_depth() - 1) * (kV2BlkMax + 12);
+     if (fits) {
+-        // transients only: one decompressed block pair, the small vectors, a margin
+-        const uint64_t light = sat_add(sat_add(kV2BlkMax * 2, (uint64_t) 1 << 20), session_read_peak_bytes(0));
++        // Keep the transient safety margin and account for any opted-in read-ahead.
++        const uint64_t light = sat_add(sat_add(kV2BlkMax * 2, (uint64_t) 1 << 20), session_read_peak_bytes(prefetch_bytes));
+         if (limits.admit) {
+             std::string why;
+             if (!limits.admit(light, why)) {
+@@ -1022,7 +1043,7 @@ bool read_v2_loaded_common(V2Io& io, uint64_t size, const V2Dir& dir, uint64_t p
+         }
+     } else if (limits.admit) {
+         std::string why;
+-        if (!limits.admit(session_read_peak_bytes(payload), why)) {
++        if (!limits.admit(sat_add(session_read_peak_bytes(payload), prefetch_bytes), why)) {
+             st.error = SessionError::memory;
+             error = "session file: " + why;
+             return false;
+@@ -1373,7 +1394,9 @@ bool saveinc_impl(const std::string& path, const SavedConversation& meta, const
+     st = {};
+ 
+     st.error = SessionError::invalid;
+-    if (has_stage_parts(meta)) { error = "saveinc: layer-split state cannot be saved"; return false; }
++    const WriteCheckpoints checkpoints{meta.checkpoints, opt.checkpoint_refs};
++    if (!checkpoints.valid()) { error = "saveinc: invalid checkpoint sources"; return false; }
++    if (has_stage_parts(meta, checkpoints)) { error = "saveinc: layer-split state cannot be saved"; return false; }
+     if (!meta.kv.empty()) { error = "saveinc: meta carries K/V"; return false; }
+     V2RW f;
+     std::string why;
+@@ -1432,12 +1455,12 @@ bool saveinc_impl(const std::string& path, const SavedConversation& meta, const
+         }
+         if (fr) ++n_fresh;
+     }
+-    if (meta.checkpoints.size() != n_fresh) {
++    if (checkpoints.size() != n_fresh) {
+         error = "saveinc: meta.checkpoints must hold exactly the fresh keep slots";
+         return false;
+     }
+     for (const auto& slot : keep)
+-        if (slot.fresh >= 0 && (size_t) slot.fresh >= meta.checkpoints.size()) {
++        if (slot.fresh >= 0 && (size_t) slot.fresh >= checkpoints.size()) {
+             error = "saveinc: a fresh keep slot points outside meta.checkpoints";
+             return false;
+         }
+@@ -1497,7 +1520,7 @@ bool saveinc_impl(const std::string& path, const SavedConversation& meta, const
+             out.u64(k.ids); out.u64(k.imgs); out.u64(k.used);
+             out.u64(k.gdn); out.u64(k.ple); out.u64(k.tails); out.u64(k.dead); out.u64(k.block_pos);
+         } else {
+-            put_ck_counts(meta.checkpoints[(size_t) slot.fresh]);
++            put_ck_counts(checkpoints[(size_t) slot.fresh]);
+         }
+     }
+     out.u64(kv.size());
+@@ -1547,7 +1570,7 @@ bool saveinc_impl(const std::string& path, const SavedConversation& meta, const
+                 out.continue_segment(std::move(rs));
+             }
+         } else {
+-            const ConversationCheckpoint& c = meta.checkpoints[(size_t) slot.fresh];
++            const ConversationCheckpoint& c = checkpoints[(size_t) slot.fresh];
+             v2_stream_state(out, c, 5, (uint16_t) i);
+         }
+     }
+diff --git a/engine/src/core/conversation_file_v3.inc b/engine/src/core/conversation_file_v3.inc
+index 531c77ccdc55b64af4f91ccec1ceed2d2b6cecd8..edc982dbe0f8aa4b8fbc89cf9b4113c96e8a78b8 100644
+--- a/engine/src/core/conversation_file_v3.inc
++++ b/engine/src/core/conversation_file_v3.inc
+@@ -616,7 +616,9 @@ bool v3_full_write(const std::string& path, const SavedConversation& image,
+                    size_t& bytes, std::string& error, const SessionWriteOptions& opt, SessionStatus& st) {
+     st = {};
+     st.error = SessionError::invalid;
+-    if (has_stage_parts(image)) { error = "session v3: layer-split state cannot be saved"; return false; }
++    const WriteCheckpoints checkpoints{image.checkpoints, opt.checkpoint_refs};
++    if (!checkpoints.valid()) { error = "session v3: invalid checkpoint sources"; return false; }
++    if (has_stage_parts(image, checkpoints)) { error = "session v3: layer-split state cannot be saved"; return false; }
+     if (sources && !image.kv.empty()) { error = "session v3: K/V given both in image and sources"; return false; }
+     V3Manifest old;
+     const bool had_old = v3_is_archive(path) && v3_read_manifest(path, id, old, error);
+@@ -637,12 +639,11 @@ bool v3_full_write(const std::string& path, const SavedConversation& image,
+     uint64_t estimate = v3_emit_size(emit_base);
+     const V3Emit emit_counts = [&](V2Out& out) {
+         out.open_segment(0);
+-        v2_put_counts(out, image, sources, image.checkpoints.size());
++        v2_put_counts(out, image, sources, checkpoints);
+     };
+     estimate = sat_add(estimate, v3_emit_size(emit_counts));
+-    for (const auto& ck : image.checkpoints) {
+-        estimate = sat_add(estimate, v3_emit_size([&](V2Out& out) { v2_stream_state(out, ck, 5, 0); }));
+-    }
++    for (size_t i = 0; i < checkpoints.size(); ++i)
++        estimate = sat_add(estimate, v3_emit_size([&](V2Out& out) { v2_stream_state(out, checkpoints[i], 5, 0); }));
+     if (!v3_space_preflight(path, estimate, opt, error, st)) return false;
+     SessionWriteOptions part_opt = opt;
+     part_opt.min_free_bytes = 0;
+@@ -652,8 +653,8 @@ bool v3_full_write(const std::string& path, const SavedConversation& image,
+         v3_remove_segments(path, created); return false;
+     }
+     current.payload = part_payload;
+-    for (size_t i = 0; i < image.checkpoints.size(); ++i) {
+-        const auto& ck = image.checkpoints[i];
++    for (size_t i = 0; i < checkpoints.size(); ++i) {
++        const auto& ck = checkpoints[i];
+         const std::string name = "ckpt-" + v3_hex(v2_ids_hash(ck.ids)) + "-" + suffix + ".v2";
+         const V3Emit emit_ck = [&](V2Out& out) { v2_stream_state(out, ck, 5, 0); };
+         if (!v3_write_segment(path, name, id, emit_ck, part_opt, created, part_payload, file_bytes, error, st)) {
+@@ -710,7 +711,7 @@ bool v3_tail_needs_compaction(const V3Archive& archive, std::string& reason) {
+ }
+ 
+ uint64_t v3_merged_saveinc_payload(const V3Manifest& current, const V3Archive& old,
+-                                   const V3Archive& delta, const SavedConversation& meta,
++                                   const V3Archive& delta, const WriteCheckpoints& checkpoints,
+                                    const std::vector<SessionSaveIncSlot>& keep, uint64_t counts_payload) {
+     auto data_part = [&](const std::string& name) -> const V3Part* {
+         if (const V3Part* part = delta.find(name)) return part;
+@@ -742,7 +743,7 @@ uint64_t v3_merged_saveinc_payload(const V3Manifest& current, const V3Archive& o
+             const V3Part* part = old.find(current.checkpoints[i]);
+             if (part) payload = sat_add(payload, part->payload);
+         } else {
+-            const auto& ck = meta.checkpoints[(size_t) keep[i].fresh];
++            const auto& ck = checkpoints[(size_t) keep[i].fresh];
+             payload = sat_add(payload, v3_emit_size([&](V2Out& out) { v2_stream_state(out, ck, 5, 0); }));
+         }
+     }
+@@ -754,7 +755,9 @@ bool v3_saveinc(const std::string& path, const SavedConversation& meta, const st
+                 std::string& error, const SessionWriteOptions& opt, SessionStatus& st) {
+     st = {};
+     st.error = SessionError::invalid;
+-    if (has_stage_parts(meta)) { error = "saveinc: layer-split state cannot be saved"; return false; }
++    const WriteCheckpoints checkpoints{meta.checkpoints, opt.checkpoint_refs};
++    if (!checkpoints.valid()) { error = "saveinc: invalid checkpoint sources"; return false; }
++    if (has_stage_parts(meta, checkpoints)) { error = "saveinc: layer-split state cannot be saved"; return false; }
+     if (!meta.kv.empty()) { error = "saveinc: meta carries K/V"; return false; }
+     V3Archive archive;
+     if (!v3_load_archive(path, id, archive, error)) { error = "saveinc: " + error; return false; }
+@@ -784,12 +787,12 @@ bool v3_saveinc(const std::string& path, const SavedConversation& meta, const st
+         }
+         if (fresh) {
+             ++fresh_count;
+-            if ((size_t) slot.fresh >= meta.checkpoints.size()) {
++            if ((size_t) slot.fresh >= checkpoints.size()) {
+                 error = "saveinc: fresh checkpoint is outside meta"; return false;
+             }
+         }
+     }
+-    if (fresh_count != meta.checkpoints.size()) {
++    if (fresh_count != checkpoints.size()) {
+         error = "saveinc: meta.checkpoints must contain exactly the fresh keep slots"; return false;
+     }
+     if (kv.size() != old.layers.size()) { error = "saveinc: K/V layer count changed"; return false; }
+@@ -882,7 +885,7 @@ bool v3_saveinc(const std::string& path, const SavedConversation& meta, const st
+                 const auto& ck = old.cks[(size_t) slot.reuse + 1];
+                 out.u64(ck.ids); out.u64(ck.imgs); out.u64(ck.used); out.u64(ck.gdn);
+                 out.u64(ck.ple); out.u64(ck.tails); out.u64(ck.dead); out.u64(ck.block_pos);
+-            } else put_ck(meta.checkpoints[(size_t) slot.fresh]);
++            } else put_ck(checkpoints[(size_t) slot.fresh]);
+         }
+         out.u64(kv.size());
+         for (const auto& k : kv) {
+@@ -891,8 +894,8 @@ bool v3_saveinc(const std::string& path, const SavedConversation& meta, const st
+         }
+     };
+     uint64_t estimate = sat_add(v3_emit_size(emit_delta), v3_emit_size(emit_counts));
+-    for (const auto& ck : meta.checkpoints)
+-        estimate = sat_add(estimate, v3_emit_size([&](V2Out& out) { v2_stream_state(out, ck, 5, 0); }));
++    for (size_t i = 0; i < checkpoints.size(); ++i)
++        estimate = sat_add(estimate, v3_emit_size([&](V2Out& out) { v2_stream_state(out, checkpoints[i], 5, 0); }));
+     if (!v3_space_preflight(path, estimate, opt, error, st)) return false;
+     SessionWriteOptions part_opt = opt;
+     part_opt.min_free_bytes = 0;
+@@ -907,9 +910,9 @@ bool v3_saveinc(const std::string& path, const SavedConversation& meta, const st
+         if (!part) { error = "saveinc: old data segment disappeared"; v3_remove_segments(path, created); return false; }
+         current.payload = sat_add(current.payload, part->payload);
+     }
+-    std::vector<std::string> fresh_names(meta.checkpoints.size());
+-    for (size_t i = 0; i < meta.checkpoints.size(); ++i) {
+-        const auto& ck = meta.checkpoints[i];
++    std::vector<std::string> fresh_names(checkpoints.size());
++    for (size_t i = 0; i < checkpoints.size(); ++i) {
++        const auto& ck = checkpoints[i];
+         fresh_names[i] = "ckpt-" + v3_hex(v2_ids_hash(ck.ids)) + "-" + suffix + ".v2";
+         const V3Emit emit_ck = [&](V2Out& out) { v2_stream_state(out, ck, 5, 0); };
+         if (!v3_write_segment(path, fresh_names[i], id, emit_ck, part_opt, created, part_payload, file_bytes, error, st)) {
+@@ -924,7 +927,7 @@ bool v3_saveinc(const std::string& path, const SavedConversation& meta, const st
+             if (!part) { error = "saveinc: old checkpoint disappeared"; v3_remove_segments(path, created); return false; }
+             current.payload = sat_add(current.payload, part->payload);
+         } else {
+-            const auto& ck = meta.checkpoints[(size_t) slot.fresh];
++            const auto& ck = checkpoints[(size_t) slot.fresh];
+             current.checkpoints.push_back(fresh_names[(size_t) slot.fresh]);
+             current.payload = sat_add(current.payload, v3_emit_size([&](V2Out& out) { v2_stream_state(out, ck, 5, 0); }));
+         }
+@@ -937,7 +940,7 @@ bool v3_saveinc(const std::string& path, const SavedConversation& meta, const st
+     if (!v3_add_part(delta_view, path, delta, id, delta_vbase, error)) {
+         v3_remove_segments(path, created); return false;
+     }
+-    current.payload = v3_merged_saveinc_payload(current, archive, delta_view, meta, keep, part_payload);
++    current.payload = v3_merged_saveinc_payload(current, archive, delta_view, checkpoints, keep, part_payload);
+     if (!v3_write_manifest(path, current, opt, error, st)) {
+         v3_remove_segments(path, created); return false;
+     }
+diff --git a/engine/src/core/conversation_state.cpp b/engine/src/core/conversation_state.cpp
+index b6eb3c76fae879281ab96301a5bb49d59f1c7f1e..32fd16641b6e9b1dc25fde27909e1b7cdf7fda06 100644
+--- a/engine/src/core/conversation_state.cpp
++++ b/engine/src/core/conversation_state.cpp
+@@ -80,13 +80,19 @@ bool checkpoint_targets(const SessionState& ss, const ModelGeometry& g, size_t t
+ }
+ 
+ bool view_validate(const ConversationView& view, const SessionState& ss,
+-                   const ModelGeometry& g, std::string& error, bool tolerant_ckpts = false) {
++                   const ModelGeometry& g, std::string& error, bool tolerant_ckpts = false,
++                   std::span<const ConversationCheckpoint* const> checkpoints = {}) {
+     ConversationStateSizes z;
+     if (!checkpoint_targets(ss, g, view.ids.size(), z, error)) return false;
+     if (view.ids.empty() || !image_keys(view.images, view.ids.size()) ||
+         std::any_of(view.ids.begin(), view.ids.end(), [](int32_t id) { return id < 0; }))
+         return fail(error, "invalid live token/image metadata");
+-    for (const auto& c : view.checkpoints) {
++    if (!checkpoints.empty() &&
++        (!view.checkpoints.empty() || std::any_of(checkpoints.begin(), checkpoints.end(), [](auto* c) { return c == nullptr; })))
++        return fail(error, "invalid checkpoint sources");
++    const size_t count = checkpoints.empty() ? view.checkpoints.size() : checkpoints.size();
++    for (size_t i = 0; i < count; ++i) {
++        const auto& c = checkpoints.empty() ? view.checkpoints[i] : *checkpoints[i];
+         // (1-token ): restore checkpoint live BPE 1 token
+         // Should not reject the whole snapshot restore
+         const bool prefix_ok = c.ids.size() <= view.ids.size() &&
+@@ -99,7 +105,8 @@ bool view_validate(const ConversationView& view, const SessionState& ss,
+         if (!conversation_checkpoint_validate(c, ss, g, error)) return false;
+         size_t image = 0;
+         for (const auto& key : view.images) {
+-            if ((uint64_t) key.start >= c.ids.size()) break;            if (image >= c.imgs.size() || !(c.imgs[image++] == key))
++            if ((uint64_t) key.start >= c.ids.size()) break;
++            if (image >= c.imgs.size() || !(c.imgs[image++] == key))
+                 return fail(error, "checkpoint image identity differs");
+         }
+         if (image != c.imgs.size()) return fail(error, "checkpoint image prefix differs");
+@@ -707,13 +714,16 @@ bool conversation_snapshot_save(SavedConversation& image, const ConversationView
+ 
+ bool conversation_snapshot_sources(SavedConversation& meta, std::vector<SessionKvSource>& sources,
+                                    const ConversationView& view, const SessionState& ss, const ModelGeometry& g,
+-                                   const QsaState* draft, std::string& error) {
+-    if (!view_validate(view, ss, g, error) || !sync(error)) return false;
++                                   const QsaState* draft, std::string& error,
++                                   std::span<const ConversationCheckpoint* const> checkpoints) {
++    if (!view_validate(view, ss, g, error, false, checkpoints) || !sync(error)) return false;
+     SavedConversation captured;
+     captured.geometry = geometry_key(g);
+     captured.layer_lo = ss.layer_lo; captured.layer_hi = ss.layer_hi;
+     captured.live.ids = view.ids; captured.live.imgs = view.images;
+-    captured.cvec = view.cvec; captured.checkpoints = conversation_detail::copy_checkpoints_beating(view.checkpoints);
++    captured.cvec = view.cvec;
++    captured.checkpoints = conversation_detail::copy_checkpoints_beating(view.checkpoints);
++    for (const auto* checkpoint : checkpoints) conversation_checkpoint_join(checkpoint->gdn.data());
+     if (!conversation_checkpoint_save(captured.live, ss, g, error)) return false;
+     // STRATA_CKPT_ASYNC: the caller writes `meta` to the session file at once, so the running state's copy lands first
+     conversation_checkpoint_join(captured.live.gdn.data());
+@@ -728,6 +738,12 @@ bool conversation_snapshot_sources(SavedConversation& meta, std::vector<SessionK
+     return true;
+ }
+ 
++bool conversation_snapshot_sources(SavedConversation& meta, std::vector<SessionKvSource>& sources,
++                                   const ConversationView& view, const SessionState& ss, const ModelGeometry& g,
++                                   const QsaState* draft, std::string& error) {
++    return conversation_snapshot_sources(meta, sources, view, ss, g, draft, error, {});
++}
++
+ bool conversation_snapshot_sources(SavedConversation& meta, std::vector<SessionKvSource>& sources,
+                                    const ConversationView& view, const SessionState& ss, const ModelGeometry& g,
+                                    const QsaState& draft, std::string& error) {
 diff --git a/engine/src/core/dflash2.cpp b/engine/src/core/dflash2.cpp
 index 3652596e0f69e1c0d749d7d171093f3f1a0d89bc..3da1c6d9586209500ae59903289c0e1967197356 100644
 --- a/engine/src/core/dflash2.cpp
@@ -481,8 +1256,31 @@ index 0000000000000000000000000000000000000000..9e3b179aa1a5a14ff5ca23cf8afb8309
 +  return 0;
 + }catch(const std::exception&e){std::fprintf(stderr,"FAIL: %s\n",e.what());return 1;}
 +}
+diff --git a/engine/src/core/session_save_reclaim_test.cpp b/engine/src/core/session_save_reclaim_test.cpp
+index 019a375ce2adf36fb2bb05e5622d9c26acb4ba57..0329add6572cef1e4c91017cfe4c8b8e05a616ef 100644
+--- a/engine/src/core/session_save_reclaim_test.cpp
++++ b/engine/src/core/session_save_reclaim_test.cpp
+@@ -80,6 +80,18 @@ int main() {
+         check(!r.bytes && !r.parked && !r.checkpoints && cache.bytes() == bytes, "no eviction without known pressure");
+         check(chain.size() == 2 && same(chain[0], before[0]) && same(chain[1], before[1]), "unchanged order/content");
+     }
++    {
++        std::vector<ConversationCheckpoint> chain{checkpoint(100), checkpoint(300)};
++        ConversationCache cache(1u << 20, 10);
++        park(cache, 10);
++        const auto* data = chain.back().gdn.data();
++        const auto need = session_save_peak_bytes(nullptr, live);
++        auto freed = session_save_reclaim(chain, cache, live, floor, [&] {
++            return std::optional<uint64_t>(floor + need);
++        }, true);
++        check(!freed.bytes && cache.size() == 1 && chain.size() == 2 && chain.back().gdn.data() == data,
++              "borrowed checkpoints fit at the exact streaming reserve without eviction");
++    }
+     // Admit after any individual step; never clear the whole cache when one release suffices.
+     for (int sufficient_after = 1; sufficient_after <= 4; ++sufficient_after) {
+         std::vector<ConversationCheckpoint> chain{checkpoint(100), checkpoint(300), checkpoint(300)};
 diff --git a/engine/src/program/generate.cpp b/engine/src/program/generate.cpp
-index d78bd71ce69187dbdb777530a97045740dfa3331..7974e61e745177f85c3e33b0e647e1e8a30527f4 100644
+index d78bd71ce69187dbdb777530a97045740dfa3331..ef97e16ce2a1793e76eb923ab8ad1cb907a9d52a 100644
 --- a/engine/src/program/generate.cpp
 +++ b/engine/src/program/generate.cpp
 @@ -13668,6 +13668,10 @@ int main(int argc, char** argv) {
@@ -496,7 +1294,155 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..7974e61e745177f85c3e33b0e647e1e8
              if (!ver.gather_taps(df2.landing(), df2.device(), 0, rows, 0, df2.stream(), e)) return nullptr;
              return df2.landing();
          };
-@@ -22249,7 +22253,7 @@ int main(int argc, char** argv) {
+@@ -18881,7 +18885,7 @@ int main(int argc, char** argv) {
+                         bool ok = strata::core::session_file_saveinc_peek(path, id, peek, perr);
+                         size_t n_reuse = 0;
+                         std::vector<strata::core::SessionSaveIncSlot> keep_plan;
+-                        std::vector<ConvCheckpoint> fresh;
++                        std::vector<const ConvCheckpoint*> fresh;
+                         if (ok) {
+                             if (peek.live_ids > live.size()) {
+                                 ok = false;
+@@ -18907,7 +18911,7 @@ int main(int argc, char** argv) {
+                                                 break;
+                                             }
+                                     keep_plan.push_back({reuse, reuse < 0 ? (int32_t) fresh.size() : -1});
+-                                    if (reuse < 0) fresh.push_back(*c);
++                                    if (reuse < 0) fresh.push_back(c);
+                                     else ++n_reuse;
+                                 }
+                             }
+@@ -18915,8 +18919,9 @@ int main(int argc, char** argv) {
+                         // an empty keep plan is legitimate (a short conversation below the grid):
+                         // the file then holds the live state and the K/V, no checkpoints
+                         if (ok) {
+-                            // RAM PREFLIGHT: the live capture plus the FRESH checkpoint copies only -
+-                            // the reused checkpoints never leave the file (this is the whole point).
++                            // The synchronous writer borrows checkpoints while the session is held.
++                            // Only a writer job that outlives the session lock needs owned copies.
++                            const bool async_writer = strata::core::l2two::conversation_file_l2_writer_enabled();
+                             strata::core::SessionSaveLive sl;
+                             {
+                                 strata::core::ConversationStateSizes z;
+@@ -18930,12 +18935,15 @@ int main(int argc, char** argv) {
+                                 sl.state_bytes = state;
+                                 sl.tokens = live.size();
+                                 sl.images = live_imgs.size();
+-                                sl.kv_layers = (uint64_t) std::max<int64_t>(ss.qsa_alloc, 0) + 1;
++                                sl.kv_layers = (uint64_t) std::max<int64_t>(ss.qsa_alloc, 0) + (session_draft ? 1 : 0);
++                            }
++                            uint64_t need = strata::core::session_save_peak_bytes(nullptr, sl);
++                            if (async_writer) {
++                                for (const auto* checkpoint : fresh) {
++                                    const uint64_t bytes = checkpoint->bytes();
++                                    need = bytes <= (UINT64_MAX - need) / 2 ? need + 2 * bytes : UINT64_MAX;
++                                }
+                             }
+-                            uint64_t fresh_bytes = 0;
+-                            for (const auto& c : fresh) fresh_bytes += c.bytes();
+-                            const uint64_t need =
+-                                strata::core::session_save_peak_bytes(nullptr, sl) + 2 * fresh_bytes;
+                             const uint64_t floor = (uint64_t) o.conversation_cache_min_free_mib << 20;
+                             std::string why;
+                             // v2.4.6: evict-first here too - a declined saveinc falls to a full
+@@ -18954,19 +18962,27 @@ int main(int argc, char** argv) {
+                             const auto mem = strata::core::sample_host_memory();
+                             const std::optional<uint64_t> avail = mem ? std::optional<uint64_t>(mem->available) : std::nullopt;
+                                 if (strata::core::conversation_memory_admit(avail, need, floor)) {
+-                                    const strata::core::ConversationView view{live, live_imgs, fresh, cvec_cached};
++                                    std::vector<ConvCheckpoint> owned;
++                                    std::span<const ConvCheckpoint* const> borrowed;
++                                    if (async_writer) {
++                                        owned.reserve(fresh.size());
++                                        for (const auto* checkpoint : fresh) owned.push_back(*checkpoint);
++                                    } else {
++                                        borrowed = fresh;
++                                    }
++                                    const strata::core::ConversationView view{live, live_imgs, owned, cvec_cached};
+                                     strata::core::SavedConversation meta;
+                                     std::vector<strata::core::SessionKvSource> sources;
+                                     const double cap_t0 = ms();   // async-probe: capture/append split
+                                     blocking("capture", sl.state_bytes == UINT64_MAX ? 0 : sl.state_bytes);
+                                     if (strata::core::conversation_snapshot_sources(meta, sources, view, ss, g,
+-                                                                                    use_mtp ? &mtp.kv_state() : nullptr, err)) {
++                                                                                    session_draft, err, borrowed)) {
+                                         const double cap_ms = ms() - cap_t0;   // capture (RAM snapshot) done
+                                         strata::core::SessionWriteOptions wo;
+                                         wo.min_free_bytes = (uint64_t) o.session_min_free_mib << 20;
+                                         wo.progress = moving;
+                                         wo.phase = blocking;
+-                                        if (strata::core::l2two::conversation_file_l2_writer_enabled()) {
++                                        if (async_writer) {
+                                             strata::core::l2two::conversation_file_l2_writer_start();
+                                             strata::core::SavedConversation job_meta;
+                                             std::vector<strata::core::SessionKvSource> job_kv;
+@@ -19006,6 +19022,7 @@ int main(int argc, char** argv) {
+                                                 meta = std::move(meta2);
+                                             }
+                                         }
++                                        wo.checkpoint_refs = borrowed;
+                                         strata::core::SessionStatus st;
+                                         size_t sbytes = 0;
+                                         if (strata::core::session_file_saveinc(path, meta, sources, id, keep_plan, sbytes,
+@@ -19058,12 +19075,8 @@ int main(int argc, char** argv) {
+                     double capture_ms = 0;
+                     try {
+ 
+-                        // RAM PREFLIGHT for the save (not a reservation), BEFORE anything is copied: the deepest
+-                        // checkpoint is chosen by reference, and the copies it will take (the list below and the one
+-                        // in `meta`), the copied live running state with its tokens and images, the K/V source
+-                        // directory and the 16 MiB write buffer are asked for above the parking floor.  Only the
+-                        // deepest checkpoint goes to disk (the next turn's resume point); the K/V is streamed from
+-                        // the authoritative pools straight into the file, without a full host capture.
++                        // The session lock keeps the checkpoints and K/V stable during the write.
++                        // Admission accounts for the live state capture, source directory and writer buffer.
+                         strata::core::SessionSaveLive sl;
+                         {
+                             strata::core::ConversationStateSizes z;
+@@ -19083,7 +19096,7 @@ int main(int argc, char** argv) {
+                         pools_budget.shrink((size_t) -1);   // (the park pools' idle memory goes back before the RAM checks of a session save)
+                         if (o.session_save_reclaim) {
+                             const auto freed = strata::core::session_save_reclaim(
+-                                checks, conversations, sl, floor, strata::core::available_host_bytes);
++                                checks, conversations, sl, floor, strata::core::available_host_bytes, true);
+                             if (freed.bytes || freed.checkpoints || freed.parked) {
+                                 // A removed tail must not mark a later checkpoint at this length as a tail.
+                                 if (tail_ckpt_len >= 0 && std::none_of(checks.begin(), checks.end(), [&](const auto& c) {
+@@ -19119,20 +19132,21 @@ int main(int argc, char** argv) {
+                                           need == UINT64_MAX ? "unknown" : std::to_string(need >> 20).c_str());
+                             return ok;
+                         };
+-                        std::vector<ConvCheckpoint> disk_checks;
++                        const auto disk_checks = strata::core::session_pick_checkpoints(checks, true);
+                         std::string why;
+-                        if (!strata::core::session_save_checkpoints(checks, sl, admit, disk_checks, why)) {
++                        if (!admit(strata::core::session_save_peak_bytes(nullptr, sl), why)) {
+                             refuse(why, strata::core::SessionError::memory);
+                             continue;
+                         }
+                         kept = disk_checks.size();
+-                        const strata::core::ConversationView view{live, live_imgs, disk_checks, cvec_cached};
++                        const std::vector<ConvCheckpoint> owned;
++                        const strata::core::ConversationView view{live, live_imgs, owned, cvec_cached};
+                         strata::core::SavedConversation meta;
+                         std::vector<strata::core::SessionKvSource> sources;
+                         // the live running state comes off the device in one synchronous copy
+                         blocking("capture", sl.state_bytes == UINT64_MAX ? 0 : sl.state_bytes);
+                         if (!strata::core::conversation_snapshot_sources(meta, sources, view, ss, g, session_draft,
+-                                                                         err)) {
++                                                                         err, disk_checks)) {
+                             refuse(err, strata::core::SessionError::io);
+                             continue;
+                         }
+@@ -19141,6 +19155,7 @@ int main(int argc, char** argv) {
+                         wo.min_free_bytes = (uint64_t) o.session_min_free_mib << 20;
+                         wo.progress = moving;
+                         wo.phase = blocking;
++                        wo.checkpoint_refs = disk_checks;
+                         strata::core::SessionStatus st;
+                         if (!strata::core::session_file_write(path, meta, sources, id, bytes, err, wo, &st)) {
+                             refuse(err, st.error, st.published);
+@@ -22249,7 +22264,7 @@ int main(int argc, char** argv) {
              std::vector<int32_t> drafts(DS, 0), window(WS), outv(WS);
              std::vector<float> dprob(DS, 0.0f);
              std::array<float, 8> dwin_s{};   // the probabilities the current window was chosen from (STRATA_SPEC_COST)
@@ -505,7 +1451,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..7974e61e745177f85c3e33b0e647e1e8
              static std::FILE* const df2_trace = [] { const char* tf = std::getenv("STRATA_SPEC_TRACE"); return tf != nullptr && tf[0] != '\0' ? std::fopen(tf, "a") : nullptr; }();
              static const bool trace_nopick = std::getenv("STRATA_SPEC_TRACE_NOPICK") != nullptr;   // the lookup draft is logged but never taken
              std::array<int32_t, 8> tr_d{};
-@@ -23274,21 +23278,26 @@ int main(int argc, char** argv) {
+@@ -23274,21 +23289,26 @@ int main(int argc, char** argv) {
                  bool from_sfx = false;
                  int sfx_pad = 0;      // a learning stretch's lookup window longer than the proposal: the filler rows (DraftPolicy::Pick::pad)
                  int sfx_match = 0;
@@ -535,7 +1481,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..7974e61e745177f85c3e33b0e647e1e8
                          for (size_t i = 0; i < drafts.size() && i < (size_t) strata::core::Dflash2Drafter::kDrafts; ++i) { drafts[i] = dd[i]; dprob[i] = pp[i]; }
                      }
                  }
-@@ -23402,7 +23411,7 @@ int main(int argc, char** argv) {
+@@ -23402,7 +23422,7 @@ int main(int argc, char** argv) {
                  const int T_mtp = T;
                  T += chain_n;
                  const bool timed_round = !first_window;
@@ -544,7 +1490,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..7974e61e745177f85c3e33b0e647e1e8
                  if (p + T > o.max_context) break;
                  window[0] = x;
                  for (int i = 1; i < T_mtp; ++i)
-@@ -23806,8 +23815,9 @@ int main(int argc, char** argv) {
+@@ -23806,8 +23826,9 @@ int main(int argc, char** argv) {
                      source_policy.defer_cost(std::max<int64_t>(p + T - 1, p + a + 1 + S_mtp), T,
                                               std::chrono::duration<double, std::milli>(Clock::now() - round0).count());
                  if (df2_trace != nullptr && timed_round) {
@@ -556,7 +1502,7 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..7974e61e745177f85c3e33b0e647e1e8
                      for (int i = 0; i < 7; ++i) std::fprintf(df2_trace, " %.4f", (double) dwin_s[(size_t) i]);
                      std::fprintf(df2_trace, " |");
                      for (int i = 0; i < 7; ++i) std::fprintf(df2_trace, " %d", (int) tr_d[(size_t) i]);
-@@ -25656,7 +25666,7 @@ int main(int argc, char** argv) {
+@@ -25656,7 +25677,7 @@ int main(int argc, char** argv) {
                  const strata::spec::DraftPolicy::Pick pk = kd > 0 ? policy.choose(S_mtp, kd, md) : strata::spec::DraftPolicy::Pick{};
                  if (kd > 0 && pk.lookup) {
                      dfr_lookup = true; dfr_T = pk.t; dfr_match = md;
@@ -693,7 +1639,7 @@ index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..41011b238058d9c32fd71f395e53c66b
                  try:
                      attach_window_latency(trace, finished_cases, result)
 diff --git a/terminal/l2/startup_patch_review.py b/terminal/l2/startup_patch_review.py
-index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..959dc6ec5dd704eaea14eedd6b1bba6956793c25 100644
+index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28ffacfabb 100644
 --- a/terminal/l2/startup_patch_review.py
 +++ b/terminal/l2/startup_patch_review.py
 @@ -5,6 +5,7 @@ import hashlib
@@ -741,7 +1687,26 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..959dc6ec5dd704eaea14eedd6b1bba69
  CPU_PREFILL_GROUPS = {'prompt-cpu-and-batch', 'prompt-cpu-share-variants'}
  CPU_PREFILL_CASES = tuple(
      (name, '\\n'.join(RECORDS.splitlines()[start:start + count])
-@@ -130,7 +146,9 @@ def run_group(root, cfg, directory, seed, references, report, group, variants, w
+@@ -112,8 +128,7 @@ def run_group(root, cfg, directory, seed, references, report, group, variants, w
+                 trial['env'].update(environment)
+                 trial['env']['STRATA_PREFILL_TIMING'] = '1'
+                 # Never let a trial use or clean the production spill directory.
+-                storage = {**arguments, '--conversation-spill-dir': str(folder/'spill'),
+-                           '--conversation-spill-mib': '0'}
++                storage = {**arguments, '--conversation-spill-dir': str(folder/'spill')}
+                 for k in ('args', 'user_args'):
+                     trial[k] = set_options(trial[k], storage)
+                 if trial.get('vision'):
+@@ -121,7 +136,7 @@ def run_group(root, cfg, directory, seed, references, report, group, variants, w
+                     if name == 'upstream-elastic-vision':
+                         trial['vision'].update(expert_lease=False, elastic=True)
+                 trial_root = root
+-                if name in references:
++                if name in ('lean-candidate', 'upstream-candidate') and name in references:
+                     reference = references[name]
+                     trial['exe'] = reference['exe']
+                     if digest_file(trial['exe']) != reference['sha256']:
+@@ -130,7 +145,9 @@ def run_group(root, cfg, directory, seed, references, report, group, variants, w
                      if reference.get('root'):
                          trial_root = Path(reference['root'])
                          trial['cwd'] = str(trial_root)
@@ -752,7 +1717,7 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..959dc6ec5dd704eaea14eedd6b1bba69
                  text = row.get('decode') or row.get('post_vision_decode', {})
                  cold, hot = row.get('cold_long'), row.get('hot_prefix')
                  if 'image_cold' in row and 'image_cached' in row:
-@@ -171,12 +189,27 @@ def run_suite(root, cfg, directory, settings):
+@@ -171,12 +188,26 @@ def run_suite(root, cfg, directory, settings):
          results.mkdir(exist_ok=True, mode=0o700)
          baseline_args = cfg['args']
          seed_path = Path(baseline_args[baseline_args.index('--expert-profile') + 1])
@@ -766,22 +1731,21 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..959dc6ec5dd704eaea14eedd6b1bba69
 +        manifest = directory / 'trial-engine.json'
 +        candidate = {}
 +        if manifest.is_file():
-+            candidate = json.loads(manifest.read_text())
-+            if digest_file(candidate['exe']) != candidate['sha256']:
-+                raise ValueError('Signal 2 trial engine fingerprint mismatch')
-+            if not (Path(candidate['root']) / 'strata.py').is_file():
-+                raise ValueError('Signal 2 trial server source is missing')
-+            engine_sha = candidate['sha256']
-+            for name in ('baseline-first', 'baseline-last', *(name for _, variants in groups for name, _, _ in variants)):
-+                references[name] = candidate
-+        else:
++            probe = json.loads(manifest.read_text())
++            if probe['sha256'] == production_sha:
++                candidate = probe
++                # Retain the fingerprint of completed runs. The ordinary arms
++                # always use the engine and server resolved for production.
++                for name in ('baseline-first', 'baseline-last', *(name for _, variants in groups for name, _, _ in variants)):
++                    references[name] = candidate
++        if not candidate:
 +            groups = tuple(group for group in groups if group[0] != 'archive-memory')
 +        if not candidate.get('df2_lookup_skip_trial'):
 +            groups = tuple(group for group in groups if group[0] != 'dflash2-lookup')
          if not (cfg.get('vision') or {}).get('gpu'):
              groups = tuple(g for g in groups if g[0] != 'vision-lease')
          if settings.get('lean_candidate'):
-@@ -201,13 +234,14 @@ def run_suite(root, cfg, directory, settings):
+@@ -201,13 +232,14 @@ def run_suite(root, cfg, directory, settings):
              raise ValueError('patch review needs a positive timeout per arm')
          series = settings.get('series', 1)
          final_baseline = settings.get('final_baseline', True)
@@ -798,19 +1762,19 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..959dc6ec5dd704eaea14eedd6b1bba69
          }, sort_keys=True).encode()).hexdigest()
          try:
              state = json.loads(progress.read_text())
-@@ -225,11 +259,25 @@ def run_suite(root, cfg, directory, settings):
+@@ -225,11 +257,25 @@ def run_suite(root, cfg, directory, settings):
              name == 'vision-lease' for name, _ in groups) else ()
          # Run vision in the same place for its candidate and both baseline starts.
          cpu_cases = WORKLOADS + CPU_PREFILL_CASES
 -        baseline_cases = cpu_cases + vision_suffix
 -        report.update(series=series, engine_sha256=engine_sha, batches=len(plan), arms=arms,
-+        baseline_cases = df2_cases if manifest.is_file() else cpu_cases + vision_suffix
++        baseline_cases = df2_cases if candidate else cpu_cases + vision_suffix
 +        report.update(series=series, engine_sha256=engine_sha, production_engine_sha256=production_sha,
 +                      batches=len(plan), arms=arms,
                        arm_timeout_s=arm_timeout)
          attempted = True
          started = time.monotonic()
-+        if manifest.is_file() and candidate.get('wide_test'):
++        if candidate.get('wide_test'):
 +            check = subprocess.run([candidate['wide_test'], candidate['draft_pack']],
 +                                   capture_output=True, text=True, timeout=45,
 +                                   env={**os.environ, **cfg['env']})
@@ -826,7 +1790,7 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..959dc6ec5dd704eaea14eedd6b1bba69
          print(f'Strata 开机补丁对照：本次串行跑完 {len(plan)} 组、{arms} 次引擎启动，再开放正式 API。', flush=True)
          with tempfile.TemporaryDirectory(prefix='patch-review-seed-', dir=directory) as tmp:
              seed = Path(tmp) / 'expert-profile.bin'
-@@ -252,7 +300,10 @@ def run_suite(root, cfg, directory, settings):
+@@ -252,7 +298,10 @@ def run_suite(root, cfg, directory, settings):
                  report['pass_number'] = pass_no
                  workloads = WORKLOADS
                  timeout = arm_timeout

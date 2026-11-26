@@ -48,4 +48,16 @@ The memory arm has evidence for both sustained decoding and a successful save. I
 
 The production context stays at 262,144 tokens. Automatic saves use the bounded admission path that can return a typed RAM refusal promptly while keeping the previous archive. The verified 221,184-token profile is the option when reliable saving under pressure matters more than the extra 40,960 tokens. Keeping more RAM free by putting experts on SSD would change the zero-file-read result. The post-promotion production request remains to be checked after the next headless boot. The desktop GPU was occupied at installation.
 
+## Bounded archive memory at 256K context
+
+The old full-save admission estimated 355–357 MiB of additional host RAM. It counted two copies of the selected checkpoint and one capture of live state. The checkpoint was about 113 MiB in the observed failing saves. Incremental planning also made its first fresh-checkpoint copy before RAM admission.
+
+The synchronous writer now borrows validated checkpoints for the duration of the session lock. Full and incremental archives stream those fields without cloning them. The admission estimate retains the live-state capture, the K/V source directory and the write buffer. The two eliminated copies account for about 225 MiB at the measured geometry. Roughly 130 MiB remains in the write-side estimate. These are buffer-accounting estimates. Host high-water marks and save latency at 256K still need a model run.
+
+V2/V3 size passes now sum K/V extents without reading the underlying bytes. The actual write reads them directly into the output block. V3 had two size passes before a full segment write, so the change removes two reads of the same K/V. Streaming readers keep one field reader alive at a time and hash each block in its original read buffer. Optional read-ahead buffers are included in the full-read RAM estimate. The disk layout and checksum rules stay compatible with existing archives.
+
+The archive file tests passed 375 checks with serial reading and 375 with read-ahead depth four. They compare V1/V2 write bytes, test V2/V3 checkpoint rotation and restore, and assert that a V3 full write reads exactly the K/V payload once. The memory tests passed 121 reclaim checks and 45 admission checks. The startup framework passed eight tests and a dry run proving that ordinary comparisons use the resolved production executable, server source and cache capacity.
+
+A full headless validation needs a save and a subsequent disk restore after reaching the 262,144-token capacity. Record the archive bytes, peak available RAM, native capture and write times, and reread tokens, with zero expert file reads and the same resolved profile. The running profile and its RAM floor stay at the previous production settings until that validation. The write budget and the remaining reserve for the OS are independent quantities.
+
 [Follow-up source patch](signal2-follow-up.patch) applies on top of the existing 0.2.22 production source.
