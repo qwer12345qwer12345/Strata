@@ -249,12 +249,8 @@ def run_suite(root, cfg, directory, settings):
             }, {'--lookup-max-t': '8', '--lookup-sizes': '2,3,4,5,6,7,8'}),)),) + groups
         if settings.get('upstream_candidate'):
             references['upstream-candidate'] = settings['upstream_candidate']
-            references['upstream-cublas-warm-off'] = settings['upstream_candidate']
-            references['upstream-reserve-384'] = settings['upstream_candidate']
             groups = (('upstream-engine', (
-                arm('upstream-candidate'),
-                arm('upstream-cublas-warm-off', {'STRATA_PREFILL_WARM': '0'}),
-                arm('upstream-reserve-384', args={'--vram-reserve-mib': '384'}),
+                arm('upstream-candidate', {'STRATA_PREFILL_WARM': '1'}, {'--vram-reserve-mib': '192'}),
             )),) + groups
         vision_cases = vision_workloads()
         passes = int(settings.get('passes', 1))

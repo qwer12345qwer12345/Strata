@@ -59,7 +59,7 @@ The second run attempted all 18 groups and saved 33 arms including two baselines
 
 The 0.1.69 candidate retains V2/V3 archives, the ChatML boundary and unpublished-repeat recovery, resident adaptive fetch, and the on-demand vision lease. It leaves out fork PRs 6, 7 and 9 and the additional expert-row and Dense dispatch patches. It uses the upstream wide-window implementation and Q8 shared-memory read correction. The port also fixes an L2 pin that could be lost when a longer snapshot superseded it.
 
-The single-card comparison holds the model, expert seed, PLE, resident KV window, draft and API workloads constant. Version 0.1.66 began waiting for cuBLAS warm-up before measuring the free VRAM available to experts. To distinguish that timing change from the operator's reserve, 0.1.69 has one arm with warm-up disabled at 448 MiB reserve and another with warm-up enabled at 384 MiB. The comparison records pre-cache free VRAM, expert slots, post-load free VRAM, first content, conditional verification latency, and expert reads. The older 226-slot difference alone cannot explain the hit-rate gap.
+The single-card comparison holds the model, expert seed, PLE, resident KV window, draft and API workloads constant. Version 0.1.66 began waiting for cuBLAS warm-up before measuring the free VRAM available to experts. The desktop probe below isolated warm-up and reserve separately. The remaining headless comparison keeps warm-up enabled and tests the 192 MiB reserve once. The comparison records pre-cache free VRAM, expert slots, post-load free VRAM, first content, conditional verification latency, and expert reads. The older 226-slot difference alone cannot explain the hit-rate gap.
 
 The November 26 desktop startup probe used the original Gyro-S, a 32K context, a fixed resident KV setting and a 6 GiB pinned expert RAM budget on the same RTX 3080. It ran one 12-token Chat Completions request per start. Downloads shared the desktop, so these starts measure capacity and readiness rather than full-workload speed.
 
@@ -69,6 +69,7 @@ The November 26 desktop startup probe used the original Gyro-S, a 32K context, a
 | 0.1.69, warm-up on, reserve 448 MiB | 6.64 GiB | 5,708 | 619 MiB |
 | 0.1.69, warm-up off, reserve 448 MiB | 6.86 GiB | 5,930 | 433 MiB |
 | 0.1.69, warm-up on, reserve 384 MiB | 6.64 GiB | 5,772 | 555 MiB |
+| 0.1.69, warm-up on, reserve 192 MiB | 6.64 GiB | 5,964 | 363 MiB |
 
 Disabling the pre-load warm-up returned 222 of the 226 slots lost across versions. That identifies the cause of the slot-count change in this setup. The 64 MiB reserve adjustment returned 64 slots. Long-output expert hit rate and tail latency still need the same-model headless comparison.
 
