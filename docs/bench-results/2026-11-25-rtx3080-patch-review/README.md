@@ -71,3 +71,5 @@ The November 26 desktop startup probe used the original Gyro-S, a 32K context, a
 | 0.1.69, warm-up on, reserve 384 MiB | 6.64 GiB | 5,772 | 555 MiB |
 
 Disabling the pre-load warm-up returned 222 of the 226 slots lost across versions. That identifies the cause of the slot-count change in this setup. The 64 MiB reserve adjustment returned 64 slots. Long-output expert hit rate and tail latency still need the same-model headless comparison.
+
+[Source patch for Strata v0.2.22](strata-0.2.22-gyro.patch). Apply it at upstream commit `b28ca95e` with `git apply --index` and build CUDA for SM86 with `STRATA_WINDOW_MAX_T=16`. No models, executables or host boot configuration are included. The patched build passed its conversation file, L2 pin and vision lease CTests, plus 48 mocked Python protocol and recovery tests. The desktop capacity probe used that build.

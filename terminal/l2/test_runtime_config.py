@@ -64,8 +64,10 @@ class RuntimeConfiguration(unittest.TestCase):
   self.assertEqual(runtime.select_boot_model(profile, '')['model_name'], 'huihui')
   signal2 = runtime.select_boot_model(profile, 'systemd.unit=strata.target strata.model=signal2')
   self.assertEqual(signal2['slot_save_path'], '/signal2/sessions')
-  self.assertEqual(signal2['args'], ['--ple-gguf', 'shared-bf16', '--native', 'signal2.gguf'])
-  self.assertEqual(signal2['user_args'], ['--native', 'signal2.gguf'])
+  self.assertEqual(signal2['args'], ['--ple-gguf', 'shared-bf16', '--native', 'signal2.gguf',
+                                    '--conversation-spill-dir', '/signal2/sessions/.spill'])
+  self.assertEqual(signal2['user_args'], ['--native', 'signal2.gguf',
+                                         '--conversation-spill-dir', '/signal2/sessions/.spill'])
   self.assertEqual(signal2['env']['STRATA_ROUTE_PRIOR'], '0.5')
   self.assertNotIn('model_name', profile)
   with self.assertRaises(ValueError):

@@ -42,6 +42,8 @@ def select_boot_model(cfg, cmdline):
         raise ValueError(f'Unknown Strata boot model: {model}')
     selected = copy.deepcopy(boot['profiles'][model])
     overrides = selected.pop('argument_overrides', {})
+    if selected.get('slot_save_path'):
+        overrides.setdefault('--conversation-spill-dir', str(Path(selected['slot_save_path']) / '.spill'))
     cfg['args'] = set_options(cfg['args'], overrides)
     cfg['user_args'] = set_options(cfg.get('user_args', []), overrides)
     cfg.setdefault('env', {}).update(selected.pop('env', {}))
