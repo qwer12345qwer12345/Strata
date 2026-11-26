@@ -1770,8 +1770,46 @@ index 6d585f2fa697e1683fa2a44bacd8be0579b2306c..1da4d4700410015fcad0e61afa38586c
   if status!=200:return
   idx[name]={'family':fp,'hashes':hs,'filename':name,'updated':time.time()}
   # Saves are synchronous in managed_server, so deleting old archives cannot race a writer.
+diff --git a/terminal/l2/runtime_config.py b/terminal/l2/runtime_config.py
+index b0768fd7ed0bc90ebc724fa85dcb3749f5dc5a67..6ee7f9934bbd86cc017162b37cae6c18e92ac9b7 100644
+--- a/terminal/l2/runtime_config.py
++++ b/terminal/l2/runtime_config.py
+@@ -2,6 +2,8 @@
+ import copy
+ import hashlib
+ import json
++import math
++import os
+ from pathlib import Path
+ 
+ DAILY = dict(spec=4, shapes=2, lookup=16, tc=0, dense=1, skip=8, rows=2, nowait=1, tail=7, emb=1, gdn_np=2, upmix=0, gdn_tiles=1, gdn_fuse=1, prefill_cap=8192, cpu_nt=0, cpu_max=0, lag=2, overlap=0)
+@@ -51,9 +53,24 @@ def select_boot_model(cfg, cmdline):
+     return cfg
+ 
+ 
++def apply_headless_settings(cfg):
++    config_home = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
++    path = config_home / 'strata' / 'headless.json'
++    try:
++        settings = json.loads(path.read_text())
++    except FileNotFoundError:
++        return
++    if 'route_prior' in settings:
++        prior = float(settings['route_prior'])
++        if not math.isfinite(prior) or prior < 0:
++            raise ValueError(f'Invalid route_prior in {path}')
++        cfg.setdefault('env', {})['STRATA_ROUTE_PRIOR'] = str(prior)
++
++
+ def select(root, cfg, directory):
+     if 'boot_models' in cfg:
+         cfg = select_boot_model(cfg, Path('/proc/cmdline').read_text())
++        apply_headless_settings(cfg)
+         return Path(cfg['cwd']), cfg
+     path = directory / 'production-baseline.json'
+     if not path.is_file():
 diff --git a/terminal/l2/startup_ablation.py b/terminal/l2/startup_ablation.py
-index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..41011b238058d9c32fd71f395e53c66be97d96e1 100644
+index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..9dedeea8c69557b757928d5cd9504aea225388d6 100644
 --- a/terminal/l2/startup_ablation.py
 +++ b/terminal/l2/startup_ablation.py
 @@ -11,6 +11,7 @@ import sys
@@ -1854,10 +1892,24 @@ index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..41011b238058d9c32fd71f395e53c66b
      profile.write_text(json.dumps(trial))
      ready = folder / 'ready.json'
      log = Path(trial['log'])
-@@ -246,6 +280,10 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
+@@ -156,8 +190,9 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
+                 memory['min_available_mib'] = min(memory['min_available_mib'], sample['MemAvailable'])
+                 memory['max_new_swap_mib'] = max(memory['max_new_swap_mib'],
+                                                  sample['SwapTotal'] - sample['SwapFree'] - initial_swap)
+-                if time.monotonic() >= end or memory['min_available_mib'] < 1024 or memory['max_new_swap_mib'] > 512:
+-                    result['limit_hit'] = 'time' if time.monotonic() >= end else 'memory'
++                # Record RAM and swap for interpreting the latency; only time limits stop a trial.
++                if time.monotonic() >= end:
++                    result['limit_hit'] = 'time'
+                     proc.send_signal(signal.SIGINT)
+                     return
+ 
+@@ -245,7 +280,11 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
+                     # A natural stop still yields a valid first-content and prefix measurement.
                      # Do not discard other cases, or compare short decodes as long ones.
              if result.get('limit_hit'):
-                 raise RuntimeError('trial reached its time or memory guard')
+-                raise RuntimeError('trial reached its time or memory guard')
++                raise TimeoutError('trial exceeded its time budget')
 +            if archive_probe:
 +                remaining = end - time.monotonic()
 +                if remaining > 0:
@@ -1865,7 +1917,7 @@ index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..41011b238058d9c32fd71f395e53c66b
              if not workloads and (row['expert_file_reads'] != 0 or row['timings']['predicted_n'] < OUTPUT_TOKENS * 0.75):
                  raise RuntimeError('timed output was too short or zero expert file reads could not be confirmed')
              result['status'] = 'measured'
-@@ -253,6 +291,14 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
+@@ -253,6 +292,14 @@ def serve_trial(root, trial, folder, end, result, *, workloads=None):
              stop.set()
              watcher.join(timeout=1)
              stop_trial(proc)
@@ -1880,8 +1932,17 @@ index 6ce03268a73df7fdde1a0d38e4e9a13b83b5cd53..41011b238058d9c32fd71f395e53c66b
              if workloads and trace.is_file():
                  try:
                      attach_window_latency(trace, finished_cases, result)
+@@ -320,7 +367,7 @@ def run_at_boot(root, cfg, directory, settings, scratch_parent):
+                 except Exception as exc:
+                     result['error'] = str(exc)
+                     print(f'Strata PR 消融 {label}：{exc}', flush=True)
+-                    if name == 'baseline' or result.get('limit_hit') == 'memory':
++                    if name == 'baseline':
+                         break
+         if len(report['runs']) == 1 + len(SWITCHES) and all(r['status'] == 'measured' for r in report['runs']):
+             report['status'] = 'measured'
 diff --git a/terminal/l2/startup_patch_review.py b/terminal/l2/startup_patch_review.py
-index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28ffacfabb 100644
+index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..be54f7800c70b5e1c6a6588ebefda40fecc7a84d 100644
 --- a/terminal/l2/startup_patch_review.py
 +++ b/terminal/l2/startup_patch_review.py
 @@ -5,6 +5,7 @@ import hashlib
@@ -1892,7 +1953,7 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28
  import tempfile
  import time
  import zlib
-@@ -22,12 +23,19 @@ def arm(name, env=None, args=None):
+@@ -22,12 +23,20 @@ def arm(name, env=None, args=None):
  
  
  GROUPS = (
@@ -1905,6 +1966,7 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28
          arm('upstream-mid-coverage-adaptation-off', {'STRATA_ADAPT_MID': '0'}),
      )),
 +    ('route-prior', (
++        arm('route-prior-05', {'STRATA_ROUTE_PRIOR': '0.5'}),
 +        arm('route-prior-025', {'STRATA_ROUTE_PRIOR': '0.25'}),
 +        arm('route-prior-0', {'STRATA_ROUTE_PRIOR': '0'}),
 +    )),
@@ -1914,7 +1976,7 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28
  )
  
  
-@@ -47,6 +55,14 @@ COLD = ('cold_long', [{'role': 'system', 'content': LONG_SYSTEM},
+@@ -47,6 +56,14 @@ COLD = ('cold_long', [{'role': 'system', 'content': LONG_SYSTEM},
  HOT = ('hot_prefix', [{'role': 'system', 'content': LONG_SYSTEM},
                         {'role': 'user', 'content': 'Write 40 detailed test plans for aborted transactions. Keep going.'}], 384)
  WORKLOADS = (WARMUP, DECODE, COLD, HOT)
@@ -1929,7 +1991,7 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28
  CPU_PREFILL_GROUPS = {'prompt-cpu-and-batch', 'prompt-cpu-share-variants'}
  CPU_PREFILL_CASES = tuple(
      (name, '\\n'.join(RECORDS.splitlines()[start:start + count])
-@@ -112,8 +128,7 @@ def run_group(root, cfg, directory, seed, references, report, group, variants, w
+@@ -112,8 +129,7 @@ def run_group(root, cfg, directory, seed, references, report, group, variants, w
                  trial['env'].update(environment)
                  trial['env']['STRATA_PREFILL_TIMING'] = '1'
                  # Never let a trial use or clean the production spill directory.
@@ -1939,7 +2001,7 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28
                  for k in ('args', 'user_args'):
                      trial[k] = set_options(trial[k], storage)
                  if trial.get('vision'):
-@@ -121,7 +136,7 @@ def run_group(root, cfg, directory, seed, references, report, group, variants, w
+@@ -121,7 +137,7 @@ def run_group(root, cfg, directory, seed, references, report, group, variants, w
                      if name == 'upstream-elastic-vision':
                          trial['vision'].update(expert_lease=False, elastic=True)
                  trial_root = root
@@ -1948,7 +2010,7 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28
                      reference = references[name]
                      trial['exe'] = reference['exe']
                      if digest_file(trial['exe']) != reference['sha256']:
-@@ -130,7 +145,9 @@ def run_group(root, cfg, directory, seed, references, report, group, variants, w
+@@ -130,7 +146,9 @@ def run_group(root, cfg, directory, seed, references, report, group, variants, w
                      if reference.get('root'):
                          trial_root = Path(reference['root'])
                          trial['cwd'] = str(trial_root)
@@ -1959,7 +2021,15 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28
                  text = row.get('decode') or row.get('post_vision_decode', {})
                  cold, hot = row.get('cold_long'), row.get('hot_prefix')
                  if 'image_cold' in row and 'image_cached' in row:
-@@ -171,12 +188,26 @@ def run_suite(root, cfg, directory, settings):
+@@ -164,19 +182,40 @@ def run_suite(root, cfg, directory, settings):
+     progress = directory / 'startup-patch-review-progress.json'
+     latest = directory / 'startup-patch-review-latest.json'
+     results = directory / 'startup-patch-review'
+-    report = {'suite': 'startup-patch-review-v4', 'status': 'running', 'groups': [], 'baselines': []}
++    report = {'suite': 'startup-patch-review-v5', 'status': 'running', 'groups': [], 'baselines': []}
+     attempted = False
+     try:
+         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
          results.mkdir(exist_ok=True, mode=0o700)
          baseline_args = cfg['args']
          seed_path = Path(baseline_args[baseline_args.index('--expert-profile') + 1])
@@ -1970,6 +2040,13 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28
          groups = GROUPS if requested is None else tuple(group for group in GROUPS if group[0] in requested)
          if requested is not None and len(groups) != len(requested):
              raise ValueError('Unknown or duplicate Strata patch-review group')
++        # The baseline already covers the production prior.
++        prior = cfg['env'].get('STRATA_ROUTE_PRIOR', '0')
++        groups = tuple(
++            (name, tuple(arm for arm in variants if arm[1]['STRATA_ROUTE_PRIOR'] != prior)
++             if name == 'route-prior' else variants)
++            for name, variants in groups
++        )
 +        manifest = directory / 'trial-engine.json'
 +        candidate = {}
 +        if manifest.is_file():
@@ -1987,7 +2064,7 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28
          if not (cfg.get('vision') or {}).get('gpu'):
              groups = tuple(g for g in groups if g[0] != 'vision-lease')
          if settings.get('lean_candidate'):
-@@ -201,13 +232,14 @@ def run_suite(root, cfg, directory, settings):
+@@ -201,13 +240,14 @@ def run_suite(root, cfg, directory, settings):
              raise ValueError('patch review needs a positive timeout per arm')
          series = settings.get('series', 1)
          final_baseline = settings.get('final_baseline', True)
@@ -2004,14 +2081,15 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28
          }, sort_keys=True).encode()).hexdigest()
          try:
              state = json.loads(progress.read_text())
-@@ -225,11 +257,25 @@ def run_suite(root, cfg, directory, settings):
+@@ -225,11 +265,26 @@ def run_suite(root, cfg, directory, settings):
              name == 'vision-lease' for name, _ in groups) else ()
          # Run vision in the same place for its candidate and both baseline starts.
          cpu_cases = WORKLOADS + CPU_PREFILL_CASES
 -        baseline_cases = cpu_cases + vision_suffix
 -        report.update(series=series, engine_sha256=engine_sha, batches=len(plan), arms=arms,
 +        baseline_cases = df2_cases if candidate else cpu_cases + vision_suffix
-+        report.update(series=series, engine_sha256=engine_sha, production_engine_sha256=production_sha,
++        report.update(series=series, route_prior=prior, memory_policy='observe-only',
++                      engine_sha256=engine_sha, production_engine_sha256=production_sha,
 +                      batches=len(plan), arms=arms,
                        arm_timeout_s=arm_timeout)
          attempted = True
@@ -2032,7 +2110,7 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28
          print(f'Strata 开机补丁对照：本次串行跑完 {len(plan)} 组、{arms} 次引擎启动，再开放正式 API。', flush=True)
          with tempfile.TemporaryDirectory(prefix='patch-review-seed-', dir=directory) as tmp:
              seed = Path(tmp) / 'expert-profile.bin'
-@@ -252,7 +298,10 @@ def run_suite(root, cfg, directory, settings):
+@@ -252,7 +307,10 @@ def run_suite(root, cfg, directory, settings):
                  report['pass_number'] = pass_no
                  workloads = WORKLOADS
                  timeout = arm_timeout
@@ -2044,6 +2122,92 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..479d66c03dd59035ef52bce50e8eab28
                      workloads = baseline_cases
                      timeout += 80
                  elif group in CPU_PREFILL_GROUPS:
+diff --git a/terminal/l2/test_runtime_config.py b/terminal/l2/test_runtime_config.py
+index 6324efd859023e3a5e5cdebabbe2fe2219dd0ac1..62c9b9f2aa069bf9a6340fc4c7f3d886a2b0f51a 100644
+--- a/terminal/l2/test_runtime_config.py
++++ b/terminal/l2/test_runtime_config.py
+@@ -3,6 +3,7 @@ import copy
+ import hashlib
+ import io
+ import json
++import os
+ from pathlib import Path
+ import tempfile
+ import unittest
+@@ -74,4 +75,19 @@ class RuntimeConfiguration(unittest.TestCase):
+    runtime.select_boot_model(profile, 'strata.model=wrong')
+   with self.assertRaises(ValueError):
+    runtime.select_boot_model(profile, 'strata.model=huihui strata.model=signal2')
++ def test_headless_prior_overrides_the_shared_boot_profile(self):
++  with tempfile.TemporaryDirectory() as t, patch.dict(os.environ, {'XDG_CONFIG_HOME': t}):
++   root = Path(t)
++   (root/'strata').mkdir()
++   (root/'strata/headless.json').write_text('{"route_prior": 0.25}')
++   profile = {'args': [], 'env': {'STRATA_ROUTE_PRIOR': '0.5'}, 'cwd': str(root),
++              'boot_models': {'default': 'signal2', 'profiles': {'signal2': {}, 'huihui': {}}}}
++   for model in ('signal2', 'huihui'):
++    with patch.object(Path, 'read_text', autospec=True, side_effect=self.boot_cmdline(model)):
++     _, selected = runtime.select(root, profile, root)
++     self.assertEqual(selected['env']['STRATA_ROUTE_PRIOR'], '0.25')
++   self.assertEqual(profile['env']['STRATA_ROUTE_PRIOR'], '0.5')
++ def boot_cmdline(self, model):
++  read_text = Path.read_text
++  return lambda path: f'systemd.unit=strata.target strata.model={model}' if path == Path('/proc/cmdline') else read_text(path)
+ if __name__=='__main__':unittest.main()
+diff --git a/terminal/l2/test_startup_ablation.py b/terminal/l2/test_startup_ablation.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..40f9555fad4cab7023c95f9bc404845aa9f4cfc9
+--- /dev/null
++++ b/terminal/l2/test_startup_ablation.py
+@@ -0,0 +1,48 @@
++import json
++import tempfile
++import time
++import unittest
++from pathlib import Path
++from unittest.mock import Mock, patch
++
++from l2 import startup_ablation
++
++
++class StartupAblation(unittest.TestCase):
++    def test_low_ram_and_new_swap_do_not_stop_a_trial(self):
++        with tempfile.TemporaryDirectory() as t:
++            folder = Path(t)
++            engine_log = folder / 'engine.log'
++            proc = Mock(pid=1234)
++            (folder / 'ready.json').write_text(json.dumps({
++                'pid': proc.pid, 'api_state': 'ready', 'model_state': 'ready',
++                'bound_host': '127.0.0.1', 'bound_port': 8123,
++            }))
++            engine_log.write_text('resident RAM mode: page-locked\nDFlash2 drafter on\n')
++            result = {}
++            mem_before = dict(MemAvailable=1536, SwapTotal=2048, SwapFree=2048)
++            mem_during = dict(MemAvailable=256, SwapTotal=2048, SwapFree=1024)
++
++            def fake_case(*args, **kwargs):
++                deadline = time.monotonic() + 3
++                while result['memory']['max_new_swap_mib'] == 0 and time.monotonic() < deadline:
++                    time.sleep(0.02)
++                with engine_log.open('a') as f:
++                    f.write('0 blob reads from the file\nsuffix drafts: 0 windows, 0 of 0 drafts accepted\n')
++                return {'timings': {'predicted_n': 64}}
++
++            with patch.object(startup_ablation.subprocess, 'Popen', return_value=proc), \
++                    patch.object(startup_ablation, 'stop_trial'), \
++                    patch.object(startup_ablation, 'run_case', side_effect=fake_case), \
++                    patch.object(startup_ablation, 'meminfo', side_effect=lambda: (
++                        mem_during if 'memory' in result else mem_before)):
++                startup_ablation.serve_trial(folder, {'env': {}, 'log': str(engine_log)}, folder,
++                                             time.monotonic() + 5, result,
++                                             workloads=(('decode', 'prompt', 64),))
++            self.assertEqual(result['status'], 'measured')
++            self.assertEqual(result['memory'], {'min_available_mib': 256, 'max_new_swap_mib': 1024})
++            proc.send_signal.assert_not_called()
++
++
++if __name__ == '__main__':
++    unittest.main()
 diff --git a/terminal/serve/server.py b/terminal/serve/server.py
 index 63778d5d4908c0573f9511e9a7b471a76a8a8df4..76fa65b7f3a1f07eab554cd7d9f31288f636e95d 100644
 --- a/terminal/serve/server.py

@@ -70,4 +70,10 @@ Temporary spill now uses a single file (V2 when enabled); formal L2 archives ret
 
 Six cache tests passed, including spill operation with V3 enabled, legacy directory removal, disk reserve refusal, and preservation of a durable archive. V2/V3 read-ahead passed 375 checks. A Btrfs allocation smoke test passed and an injected ENOSPC verified that the anonymous fallback retained the written bytes. The SM86 build is installed at the headless boot path. Prior remains 0.5 and the context ceiling remains 262,144 tokens. The desktop session was left running; headless 256K save and restore validation is pending.
 
+## Production prior and the next headless run
+
+The production and headless baseline now use route prior 0.25 for both boot profiles. The host setting lives in `$XDG_CONFIG_HOME/strata/headless.json` (or `~/.config/strata/headless.json`) as `{"route_prior": 0.25}`, applied after GRUB selects its model profile and before either the tests or the server start. The prior comparison still tests 0 and 0.5 once each; the 0.25 case is the baseline.
+
+The benchmark records minimum available RAM and maximum added swap without interrupting any arm at a memory threshold. The time limits and native session admission rules stay the same. In a simulated trial at 256 MiB available and 1 GiB added swap, the timed request still completed and both figures reached the report. This verifies the harness policy. Any new throughput, headroom or quality claim still needs the next actual headless run.
+
 [Follow-up source patch](signal2-follow-up.patch) applies on top of the existing 0.2.22 production source.
