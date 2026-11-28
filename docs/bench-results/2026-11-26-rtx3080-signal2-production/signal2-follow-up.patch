@@ -1754,9 +1754,18 @@ index d78bd71ce69187dbdb777530a97045740dfa3331..7e09723c5f7c27126ecefff79345483c
                      int32_t dd[strata::core::Dflash2Drafter::kDrafts];
                      float pp[strata::core::Dflash2Drafter::kDrafts];
 diff --git a/terminal/l2/reference_controller.py b/terminal/l2/reference_controller.py
-index 6d585f2fa697e1683fa2a44bacd8be0579b2306c..1da4d4700410015fcad0e61afa38586cdd605171 100644
+index 6d585f2fa697e1683fa2a44bacd8be0579b2306c..409ecf1326417e06b07103f859fe8c9f1836b613 100644
 --- a/terminal/l2/reference_controller.py
 +++ b/terminal/l2/reference_controller.py
+@@ -11,7 +11,7 @@ LISTEN_PORT=int(os.environ.get('STRATA_CONTROLLER_PORT','8095'))
+ SESSION_DIR=os.environ.get('STRATA_SESSION_DIR','./sessions')
+ INDEX_FILE=os.path.join(SESSION_DIR,'index.json')
+ CACHE_BUDGET=int(os.environ.get('STRATA_L2_DISK_BUDGET_MIB','32768'))*1024**2
+-MAX_ARCHIVES=16
++MAX_ARCHIVES=32
+ state={'current_family':None,'current_chain':None,'current_file':None,'dirty':False}
+ state_lock=threading.RLock()
+ request_lock=threading.Lock()
 @@ -78,8 +78,10 @@ def after_turn(body,response_ok):
   # Append only along the same branch; a divergent branch gets its own archive.
   if row and hs[:len(row['hashes'])]==row['hashes']:name=row['filename']

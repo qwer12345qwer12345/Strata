@@ -92,4 +92,10 @@ The gateway's 0.25 production run lasted about 34.5 hours on a single native eng
 
 As of November 28 both GRUB profiles and the headless baseline use prior 0.5 (`{"route_prior": 0.5}`). The next prior comparison uses 0.25 and 0 as alternatives to the baseline. RAM and swap remain observations only for the benchmark.
 
+## Durable archive retention
+
+The Signal 2 archive index held 16 distinct conversations totaling 8.63 GiB, below its 32 GiB limit. The retention limit is now 32 entries, with the 32 GiB byte budget unchanged. A temporary test wrote 33 independent archives and confirmed the oldest was removed and the most recent 32 remained.
+
+In the same production run the gateway accepted 4,758 of 5,030 save requests. The other 272 returned a RAM refusal, rather than a storage refusal. Native logs with an exact RAM reading show a typical save estimate of 129–130 MiB added to the shared 1,536 MiB conversation-cache floor. This patch changes retention only; save, restore and parking admission are unchanged.
+
 [Follow-up source patch](signal2-follow-up.patch) applies on top of the existing 0.2.22 production source.
