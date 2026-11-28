@@ -98,4 +98,10 @@ The Signal 2 archive index held 16 distinct conversations totaling 8.63 GiB, bel
 
 In the same production run the gateway accepted 4,758 of 5,030 save requests. The other 272 returned a RAM refusal, rather than a storage refusal. Native logs with an exact RAM reading show a typical save estimate of 129–130 MiB added to the shared 1,536 MiB conversation-cache floor. This patch changes retention only; save, restore and parking admission are unchanged.
 
+## Shared headless RAM floor
+
+This host now uses `"conversation_min_free_mib": 1280` in its headless settings, overriding the shared 1,536 MiB conversation floor on both GRUB profiles and in their benchmarks. It applies to the native paths that already use this floor, including saves and restores. File-backed conversation parking already caps its effective floor at 512 MiB, so that path retains its existing 512 MiB value. The context, pinned expert configuration and native estimates of per-operation demand are unchanged. Ten configuration and benchmark tests passed. The new RAM floor still needs a headless save and restore run.
+
+The current async L2 writer remains off. It deep-copies K/V deltas before the queue applies its budget; its present budget and same-archive checks also stop counting an executing job as soon as it leaves the queue. The gateway updates its archive index on a successful HTTP response even when that response acknowledges an enqueue, before the manifest is committed. A bounded async design must size and reserve the snapshot before allocating it, keep work charged through commit, serialize writes to the same archive, and advance the index only after a successful manifest commit. It can use synchronous streaming for snapshots larger than the async budget.
+
 [Follow-up source patch](signal2-follow-up.patch) applies on top of the existing 0.2.22 production source.

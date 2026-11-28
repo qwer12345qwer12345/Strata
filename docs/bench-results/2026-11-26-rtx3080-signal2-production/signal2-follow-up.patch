@@ -1780,7 +1780,7 @@ index 6d585f2fa697e1683fa2a44bacd8be0579b2306c..409ecf1326417e06b07103f859fe8c9f
   idx[name]={'family':fp,'hashes':hs,'filename':name,'updated':time.time()}
   # Saves are synchronous in managed_server, so deleting old archives cannot race a writer.
 diff --git a/terminal/l2/runtime_config.py b/terminal/l2/runtime_config.py
-index b0768fd7ed0bc90ebc724fa85dcb3749f5dc5a67..6ee7f9934bbd86cc017162b37cae6c18e92ac9b7 100644
+index b0768fd7ed0bc90ebc724fa85dcb3749f5dc5a67..bd7fa7a23a56c359272d1e9359ee2beea7784a1b 100644
 --- a/terminal/l2/runtime_config.py
 +++ b/terminal/l2/runtime_config.py
 @@ -2,6 +2,8 @@
@@ -1792,7 +1792,7 @@ index b0768fd7ed0bc90ebc724fa85dcb3749f5dc5a67..6ee7f9934bbd86cc017162b37cae6c18
  from pathlib import Path
  
  DAILY = dict(spec=4, shapes=2, lookup=16, tc=0, dense=1, skip=8, rows=2, nowait=1, tail=7, emb=1, gdn_np=2, upmix=0, gdn_tiles=1, gdn_fuse=1, prefill_cap=8192, cpu_nt=0, cpu_max=0, lag=2, overlap=0)
-@@ -51,9 +53,24 @@ def select_boot_model(cfg, cmdline):
+@@ -51,9 +53,31 @@ def select_boot_model(cfg, cmdline):
      return cfg
  
  
@@ -1808,6 +1808,13 @@ index b0768fd7ed0bc90ebc724fa85dcb3749f5dc5a67..6ee7f9934bbd86cc017162b37cae6c18
 +        if not math.isfinite(prior) or prior < 0:
 +            raise ValueError(f'Invalid route_prior in {path}')
 +        cfg.setdefault('env', {})['STRATA_ROUTE_PRIOR'] = str(prior)
++    if 'conversation_min_free_mib' in settings:
++        floor = settings['conversation_min_free_mib']
++        if type(floor) is not int or floor < 0:
++            raise ValueError(f'Invalid conversation_min_free_mib in {path}')
++        # This native option is shared by save, restore and conversation parking.
++        for key in ('args', 'user_args'):
++            cfg[key] = set_options(cfg.get(key, []), {'--conversation-cache-min-free-mib': floor})
 +
 +
  def select(root, cfg, directory):
@@ -2132,7 +2139,7 @@ index 720e4851a2c05fdbcfaae1c04e012eaffccc88e4..be54f7800c70b5e1c6a6588ebefda40f
                      timeout += 80
                  elif group in CPU_PREFILL_GROUPS:
 diff --git a/terminal/l2/test_runtime_config.py b/terminal/l2/test_runtime_config.py
-index 6324efd859023e3a5e5cdebabbe2fe2219dd0ac1..62c9b9f2aa069bf9a6340fc4c7f3d886a2b0f51a 100644
+index 6324efd859023e3a5e5cdebabbe2fe2219dd0ac1..8a78cd0a41667af12e41ebab7bbac59afde4114e 100644
 --- a/terminal/l2/test_runtime_config.py
 +++ b/terminal/l2/test_runtime_config.py
 @@ -3,6 +3,7 @@ import copy
@@ -2143,22 +2150,26 @@ index 6324efd859023e3a5e5cdebabbe2fe2219dd0ac1..62c9b9f2aa069bf9a6340fc4c7f3d886
  from pathlib import Path
  import tempfile
  import unittest
-@@ -74,4 +75,19 @@ class RuntimeConfiguration(unittest.TestCase):
+@@ -74,4 +75,23 @@ class RuntimeConfiguration(unittest.TestCase):
     runtime.select_boot_model(profile, 'strata.model=wrong')
    with self.assertRaises(ValueError):
     runtime.select_boot_model(profile, 'strata.model=huihui strata.model=signal2')
-+ def test_headless_prior_overrides_the_shared_boot_profile(self):
++ def test_headless_settings_override_the_shared_boot_profile(self):
 +  with tempfile.TemporaryDirectory() as t, patch.dict(os.environ, {'XDG_CONFIG_HOME': t}):
 +   root = Path(t)
 +   (root/'strata').mkdir()
-+   (root/'strata/headless.json').write_text('{"route_prior": 0.25}')
-+   profile = {'args': [], 'env': {'STRATA_ROUTE_PRIOR': '0.5'}, 'cwd': str(root),
++   (root/'strata/headless.json').write_text('{"route_prior": 0.25, "conversation_min_free_mib": 1280}')
++   args = ['--conversation-cache-min-free-mib', '1536']
++   profile = {'args': args.copy(), 'user_args': args.copy(), 'env': {'STRATA_ROUTE_PRIOR': '0.5'}, 'cwd': str(root),
 +              'boot_models': {'default': 'signal2', 'profiles': {'signal2': {}, 'huihui': {}}}}
 +   for model in ('signal2', 'huihui'):
 +    with patch.object(Path, 'read_text', autospec=True, side_effect=self.boot_cmdline(model)):
 +     _, selected = runtime.select(root, profile, root)
 +     self.assertEqual(selected['env']['STRATA_ROUTE_PRIOR'], '0.25')
++     for key in ('args', 'user_args'):
++      self.assertEqual(selected[key], ['--conversation-cache-min-free-mib', '1280'])
 +   self.assertEqual(profile['env']['STRATA_ROUTE_PRIOR'], '0.5')
++   self.assertEqual(profile['args'], args)
 + def boot_cmdline(self, model):
 +  read_text = Path.read_text
 +  return lambda path: f'systemd.unit=strata.target strata.model={model}' if path == Path('/proc/cmdline') else read_text(path)
