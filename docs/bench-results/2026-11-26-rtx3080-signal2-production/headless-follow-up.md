@@ -70,10 +70,26 @@ Temporary spill now uses a single file (V2 when enabled); formal L2 archives ret
 
 Six cache tests passed, including spill operation with V3 enabled, legacy directory removal, disk reserve refusal, and preservation of a durable archive. V2/V3 read-ahead passed 375 checks. A Btrfs allocation smoke test passed and an injected ENOSPC verified that the anonymous fallback retained the written bytes. The SM86 build is installed at the headless boot path. Prior remains 0.5 and the context ceiling remains 262,144 tokens. The desktop session was left running; headless 256K save and restore validation is pending.
 
-## Production prior and the next headless run
+## Prior comparison setup
 
-The production and headless baseline now use route prior 0.25 for both boot profiles. The host setting lives in `$XDG_CONFIG_HOME/strata/headless.json` (or `~/.config/strata/headless.json`) as `{"route_prior": 0.25}`, applied after GRUB selects its model profile and before either the tests or the server start. The prior comparison still tests 0 and 0.5 once each; the 0.25 case is the baseline.
+For the November 27 run, production and the headless baseline used route prior 0.25. The host setting lives in `$XDG_CONFIG_HOME/strata/headless.json` (or `~/.config/strata/headless.json`) and takes effect after GRUB selects a model profile, before either the tests or the server start.
 
-The benchmark records minimum available RAM and maximum added swap without interrupting any arm at a memory threshold. The time limits and native session admission rules stay the same. In a simulated trial at 256 MiB available and 1 GiB added swap, the timed request still completed and both figures reached the report. This verifies the harness policy. Any new throughput, headroom or quality claim still needs the next actual headless run.
+The benchmark records minimum available RAM and maximum added swap without interrupting any arm at a memory threshold. The time limits and native session admission rules stay the same. In a simulated trial at 256 MiB available and 1 GiB added swap, the timed request still completed and both figures reached the report. This verified the harness policy before the actual headless run.
+
+## November 27 headless results and November 28 configuration
+
+The baseline and three trial arms finished on the same SM86 engine and frozen expert profile. The 0.25 baseline logged 610 MiB minimum available RAM and 1,317 MiB of added swap and still completed. The 0.5 trial observed 1,131 MiB and 24 MiB respectively. The overall memory measurements came from separate sequential starts and do not establish that changing the router frees RAM.
+
+| Route prior | Code decode, 1,536 tokens | 29K cold decode, 768 tokens | 29K warm prefix decode | Code VRAM expert hit rate |
+| --- | ---: | ---: | ---: | ---: |
+| 0.25 (baseline) | 123.3 tok/s | 77.4 tok/s | 142.9 tok/s (384 tokens) | 89.5% |
+| 0.5 | 127.8 tok/s | 86.2 tok/s | 108.8 tok/s (384 tokens) | 92.4% |
+| 0 | 112.9 tok/s | 79.0 tok/s | Not comparable (49 tokens) | 84.8% |
+
+All three arms reported zero expert file reads. At 0.5 the code verification window fell from 24.97 to 21.51 ms and its CPU expert component fell from 6.62 to 4.35 ms. Cold prefill was effectively flat (11.17 vs 11.18 s). The warm prefix window also became faster (27.15 to 22.63 ms), but committed fewer tokens (3.88 to 2.46 per window); the generated stream and draft acceptance differed. One trial per setting does not establish that the warm prefix regression persists across prompts or that either setting improves task quality. The 0.25 arm with mid-coverage adaptation disabled fell to 113.6 tok/s on code and ended the warm test after only 44 tokens.
+
+The gateway's 0.25 production run lasted about 34.5 hours on a single native engine. Logs contain no repeat of the previous disk-full, SIGBUS or DFlash2 row-limit errors. The longest observed save committed 261,300 tokens and wrote 3.20 GB in 1.81 s. A separate 214,654-token archive was restored from disk. Neither is evidence of a near-256K restart-and-restore test. RAM admission still sometimes declined saves; those refusals did not kill the engine.
+
+As of November 28 both GRUB profiles and the headless baseline use prior 0.5 (`{"route_prior": 0.5}`). The next prior comparison uses 0.25 and 0 as alternatives to the baseline. RAM and swap remain observations only for the benchmark.
 
 [Follow-up source patch](signal2-follow-up.patch) applies on top of the existing 0.2.22 production source.
