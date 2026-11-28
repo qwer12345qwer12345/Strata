@@ -104,4 +104,12 @@ This host now uses `"conversation_min_free_mib": 1280` in its headless settings,
 
 The current async L2 writer remains off. It deep-copies K/V deltas before the queue applies its budget; its present budget and same-archive checks also stop counting an executing job as soon as it leaves the queue. The gateway updates its archive index on a successful HTTP response even when that response acknowledges an enqueue, before the manifest is committed. A bounded async design must size and reserve the snapshot before allocating it, keep work charged through commit, serialize writes to the same archive, and advance the index only after a successful manifest commit. It can use synchronous streaming for snapshots larger than the async budget.
 
+## Concurrent save trial
+
+The headless host now uses `"conversation_min_free_mib": 512` and `"l2_writer_budget_mib": 384` in its local settings. Both are configurable. Setting the writer budget to zero selects the synchronous path. The new engine can copy an existing V3 archive's small increment before releasing inference, then write it while the next turn runs. It sizes the live state, new checkpoints and K/V parts before copying them, includes the writer workspace in the estimate, checks current available memory, and holds one job's charge through commit. Full saves, compaction, and increments that exceed the available budget stay synchronous. A foreground turn finishing during an outstanding commit leaves that job as the only snapshot in flight.
+
+The gateway skips preloading a file still being updated and records the new conversation prefix only on a successful completion from that native child. A refused or lost write leaves the previous confirmed index entry. Clean shutdown attempts to collect the outstanding completion before stopping the engine.
+
+Six native cache tests and 38 Python tests passed (the focused 26 were rerun after the protocol cleanup). The V3 test covers the budget before copying, an executing job paused before commit, and a verified round trip. The gateway test covers success, write failure and child replacement. The SM86 engine is installed on the local boot path. Headless model throughput, RAM under overlapping write, and near-256K restart-and-restore validation remain pending.
+
 [Follow-up source patch](signal2-follow-up.patch) applies on top of the existing 0.2.22 production source.
